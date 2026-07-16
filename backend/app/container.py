@@ -79,8 +79,15 @@ class ApplicationContainer:
                     ),
                 )
             )
+            runtime_map: dict[RuntimeName | str, AgentRuntime] = {
+                "manual": manual_runtime
+            }
+            if resolved_settings.runtime == "agents_sdk":
+                runtime_map["agents_sdk"] = _create_agents_sdk_runtime(
+                    resolved_settings
+                )
             resolved_runtimes: Mapping[RuntimeName | str, AgentRuntime] = (
-                MappingProxyType({"manual": manual_runtime})
+                MappingProxyType(runtime_map)
             )
         else:
             resolved_runtimes = MappingProxyType(dict(runtimes))
@@ -111,3 +118,45 @@ class ApplicationContainer:
                 else StaticTokenAuthenticator.from_environment()
             ),
         )
+
+
+def _create_agents_sdk_runtime(settings: Settings) -> AgentRuntime:
+    """Assemble the opt-in SDK adapter without creating a network request."""
+
+    from backend.app.agent.sdk_runtime import (
+        OpenAIAgentsRuntime,
+        build_sdk_tools,
+        create_openai_learning_agent,
+        create_openai_model_factory,
+    )
+    from backend.app.tools.builtin import create_default_registry
+
+    if (
+        settings.runtime != "agents_sdk"
+        or settings.model_provider != "openai"
+        or not settings.online_provider_enabled
+        or settings.trace_include_sensitive
+        or settings.openai_api_key is None
+        or settings.openai_model is None
+    ):
+        raise ValueError("agents_sdk runtime requires complete OpenAI settings")
+
+    def create_agent(_request, run_context):
+        return create_openai_learning_agent(
+            tools=build_sdk_tools(
+                create_default_registry(),
+                run_context=run_context,
+            )
+        )
+
+    return OpenAIAgentsRuntime(
+        agent_factory=create_agent,
+        model_factory=create_openai_model_factory(
+            api_key=settings.openai_api_key.get_secret_value(),
+            model=settings.openai_model,
+            timeout_ms=settings.budget.model_timeout_ms,
+        ),
+        provider=settings.model_provider,
+        model=settings.openai_model,
+        budget=settings.budget,
+    )

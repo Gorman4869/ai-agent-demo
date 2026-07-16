@@ -17,6 +17,7 @@ from backend.app.stores import (
     RunNotFoundError,
     StoreUnavailableError,
 )
+from backend.app.tools import ToolExecutionContext
 
 
 NOW = datetime(2026, 7, 16, 5, 0, tzinfo=UTC)
@@ -417,6 +418,31 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(RunNotFoundError):
             await coordinator.execute(run.id, owner_id="other-owner")
+
+    async def test_tool_identity_must_match_the_durable_run_owner(self) -> None:
+        run = await self._create_run()
+        runtime = StaticRuntime(
+            RuntimeResult(status=RunStatus.COMPLETED, answer="must-not-run")
+        )
+        coordinator = self._coordinator(runtime)
+
+        with self.assertRaisesRegex(ValueError, "must match the run owner"):
+            await coordinator.execute(
+                run.id,
+                owner_id=run.owner_id,
+                execution_context=ToolExecutionContext(
+                    principal_id="different-principal"
+                ),
+            )
+
+        self.assertEqual(0, runtime.calls)
+        self.assertEqual(
+            (),
+            await self.event_store.list_for_run(
+                run.id,
+                owner_id=run.owner_id,
+            ),
+        )
 
     async def _create_run(self, *, runtime: str = "manual") -> RunRecord:
         run = _new_run(runtime=runtime)

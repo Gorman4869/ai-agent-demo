@@ -19,7 +19,7 @@ class FrameworkRuntimeTest(unittest.TestCase):
     def test_openai_agent_can_be_constructed_without_api_call(self) -> None:
         agent = create_openai_learning_agent()
         self.assertEqual("Learning Assistant", agent.name)
-        self.assertEqual(1, len(agent.tools))
+        self.assertEqual(0, len(agent.tools))
 
     def test_mcp_tool_function_uses_local_knowledge(self) -> None:
         self.assertIn("统一协议", lookup_concept("MCP"))

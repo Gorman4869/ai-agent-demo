@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from backend.app.agent import ManualRuntime
+from backend.app.agent.sdk_runtime import OpenAIAgentsRuntime
 from backend.app.container import ApplicationContainer
 from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.knowledge import InMemoryKnowledgeBase
@@ -52,6 +53,7 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIsInstance(container.run_store, InMemoryRunStore)
         self.assertIsInstance(container.event_store, InMemoryEventStore)
         self.assertIsInstance(container.runtimes["manual"], ManualRuntime)
+        self.assertNotIn("agents_sdk", container.runtimes)
         self.assertIsInstance(container.run_coordinator, RunCoordinator)
         self.assertIsInstance(container.knowledge_base, InMemoryKnowledgeBase)
         self.assertIsInstance(container.memory, ConversationMemory)
@@ -153,9 +155,30 @@ class ApplicationContainerTest(unittest.TestCase):
             }
         )
 
-        container = ApplicationContainer.create(settings=settings)
+        with (
+            patch(
+                "backend.app.agent.sdk_runtime.openai.AsyncOpenAI"
+            ) as openai_client,
+            patch.object(
+                socket,
+                "create_connection",
+                side_effect=AssertionError("container attempted network access"),
+            ),
+            patch.object(
+                socket.socket,
+                "connect",
+                side_effect=AssertionError("container attempted network access"),
+            ),
+        ):
+            container = ApplicationContainer.create(settings=settings)
 
+        openai_client.assert_not_called()
         self.assertNotIn(secret, repr(container))
+        self.assertIsInstance(
+            container.runtimes["agents_sdk"],
+            OpenAIAgentsRuntime,
+        )
+        self.assertIsInstance(container.runtimes["manual"], ManualRuntime)
 
     def test_container_cannot_be_mixed_with_legacy_overrides(self) -> None:
         container = ApplicationContainer.create(

@@ -180,6 +180,13 @@ class RunCoordinator:
         owner_id: str,
         execution_context: ToolExecutionContext | None = None,
     ) -> RunRecord:
+        if (
+            execution_context is not None
+            and execution_context.principal_id != owner_id
+        ):
+            raise ValueError(
+                "execution context principal must match the run owner"
+            )
         key = (owner_id, run_id)
         async with self._active_lock:
             active = self._active.get(key)
