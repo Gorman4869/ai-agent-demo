@@ -5,9 +5,11 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from backend.app.container import ApplicationContainer
 from backend.app.knowledge import Document, InMemoryKnowledgeBase
 from backend.app.main import _wait_for_cancelled_run, create_app
 from backend.app.security import Principal, StaticTokenAuthenticator
+from backend.app.settings import Settings
 from backend.app.tools import InMemoryApprovalStore
 
 
@@ -62,6 +64,48 @@ class ApiTest(unittest.TestCase):
 
         fetched = self.client.get(f"/api/runs/{body['id']}", headers=headers)
         self.assertEqual(body, fetched.json())
+
+    def test_legacy_run_api_shape_is_unchanged_and_does_not_dual_write(self) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({}),
+            authenticator=StaticTokenAuthenticator(),
+        )
+        client = TestClient(create_app(container=container))
+        session = client.post("/api/sessions").json()
+        headers = self._session_auth(session)
+
+        created = client.post(
+            f"/api/sessions/{session['id']}/runs",
+            json={"message": "hello"},
+            headers=headers,
+        )
+        body = created.json()
+        fetched = client.get(f"/api/runs/{body['id']}", headers=headers)
+
+        self.assertEqual(200, created.status_code)
+        self.assertEqual(
+            {"id", "session_id", "status", "answer", "event_types", "error"},
+            set(body),
+        )
+        self.assertEqual(body, fetched.json())
+        self.assertEqual(
+            (),
+            asyncio.run(
+                container.run_store.list_for_session(
+                    session["id"],
+                    owner_id=f"anonymous:{session['id']}",
+                )
+            ),
+        )
+        self.assertEqual(
+            (),
+            asyncio.run(
+                container.event_store.list_for_run(
+                    body["id"],
+                    owner_id=f"anonymous:{session['id']}",
+                )
+            ),
+        )
 
     def test_unknown_session_returns_404(self) -> None:
         response = self.client.post(

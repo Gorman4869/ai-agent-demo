@@ -21,6 +21,10 @@ from backend.app.stores.base import (
     InvalidRunTransitionError,
     RunConflictError,
     RunNotFoundError,
+    StartCommit,
+    StartCommitResult,
+    TerminalCommit,
+    TerminalCommitResult,
 )
 
 
@@ -134,8 +138,9 @@ class InMemoryEventStore:
 
     The Store never waits on model, tool, network, or subscriber work while its
     lock is held. Append uses the fixed Run-lock then Event-lock order so a
-    terminal transition cannot race past its final status check. Atomic Run
-    transition plus terminal-event commit still belongs to a unit of work.
+    terminal transition cannot race past its final status check. Start and
+    terminal lifecycle commits update Run and Event under the same lock pair;
+    a database adapter must provide the equivalent transaction.
     """
 
     def __init__(
@@ -163,6 +168,10 @@ class InMemoryEventStore:
     ) -> AppendEventResult:
         if event_type in {"heartbeat", "run.heartbeat"}:
             raise ValueError("heartbeat events are transport-only")
+        if event_type == "run.started":
+            raise ValueError("run.started requires commit_start")
+        if event_type in {"run.completed", "run.failed", "run.cancelled"}:
+            raise ValueError("terminal lifecycle events require commit_terminal")
 
         candidate = StoredRunEvent(
             id=event_id,
@@ -212,6 +221,144 @@ class InMemoryEventStore:
                 self._next_sequence[run_id] = sequence + 1
                 return AppendEventResult(event=stored.snapshot(), created=True)
 
+    async def commit_start(self, command: StartCommit) -> StartCommitResult:
+        candidate = StoredRunEvent(
+            id=command.event_id,
+            run_id=command.run_id,
+            sequence=1,
+            type=command.event_type,
+            data=dict(command.event_data),
+            step=0,
+            created_at=self._clock(),
+        )
+        event_key = (command.run_id, command.event_id)
+        async with self._run_store._lock:
+            current = self._run_store._get_owned_unlocked(
+                command.run_id,
+                owner_id=command.owner_id,
+            )
+            if current is None:
+                raise RunNotFoundError()
+            async with self._lock:
+                existing = self._event_ids.get(event_key)
+                if existing is not None:
+                    if not _start_replay_matches(
+                        command,
+                        current=current,
+                        existing=existing,
+                        candidate=candidate,
+                    ):
+                        raise EventConflictError()
+                    return StartCommitResult(
+                        record=current,
+                        event=existing.snapshot(),
+                        created=False,
+                    )
+                if current.version != command.expected_version:
+                    raise ConcurrentWriteError()
+                try:
+                    updated = current.transition_to(
+                        RunStatus.RUNNING,
+                        at=candidate.created_at,
+                    )
+                except InvalidRunTransition:
+                    raise InvalidRunTransitionError() from None
+
+                sequence = self._next_sequence.get(command.run_id, 1)
+                stored = StoredRunEvent(
+                    id=candidate.id,
+                    run_id=candidate.run_id,
+                    sequence=sequence,
+                    type=candidate.type,
+                    data=candidate.data,
+                    step=candidate.step,
+                    created_at=candidate.created_at,
+                )
+                self._before_start_publish()
+                self._run_store._runs[command.run_id] = updated
+                self._events.setdefault(command.run_id, []).append(stored)
+                self._event_ids[event_key] = stored
+                self._next_sequence[command.run_id] = sequence + 1
+                return StartCommitResult(
+                    record=updated,
+                    event=stored.snapshot(),
+                    created=True,
+                )
+
+    async def commit_terminal(
+        self,
+        command: TerminalCommit,
+    ) -> TerminalCommitResult:
+        """Atomically apply terminal CAS and append its lifecycle event.
+
+        The fixed Run-lock then Event-lock ordering matches ``append``. No
+        awaited subscriber or adapter work occurs while either lock is held.
+        """
+        candidate = StoredRunEvent(
+            id=command.event_id,
+            run_id=command.run_id,
+            sequence=1,
+            type=command.event_type,
+            data=dict(command.event_data),
+            step=command.step,
+            created_at=self._clock(),
+        )
+        event_key = (command.run_id, command.event_id)
+        async with self._run_store._lock:
+            current = self._run_store._get_owned_unlocked(
+                command.run_id,
+                owner_id=command.owner_id,
+            )
+            if current is None:
+                raise RunNotFoundError()
+            async with self._lock:
+                existing = self._event_ids.get(event_key)
+                if existing is not None:
+                    if not _terminal_replay_matches(
+                        command,
+                        current=current,
+                        existing=existing,
+                        candidate=candidate,
+                    ):
+                        raise EventConflictError()
+                    return TerminalCommitResult(
+                        record=current,
+                        event=existing.snapshot(),
+                        created=False,
+                    )
+                if current.version != command.expected_version:
+                    raise ConcurrentWriteError()
+                try:
+                    updated = current.transition_to(
+                        command.target_status,
+                        at=candidate.created_at,
+                        answer=command.answer,
+                        failure=command.failure,
+                    )
+                except InvalidRunTransition:
+                    raise InvalidRunTransitionError() from None
+
+                sequence = self._next_sequence.get(command.run_id, 1)
+                stored = StoredRunEvent(
+                    id=candidate.id,
+                    run_id=candidate.run_id,
+                    sequence=sequence,
+                    type=candidate.type,
+                    data=candidate.data,
+                    step=candidate.step,
+                    created_at=candidate.created_at,
+                )
+                self._before_terminal_publish()
+                self._run_store._runs[command.run_id] = updated
+                self._events.setdefault(command.run_id, []).append(stored)
+                self._event_ids[event_key] = stored
+                self._next_sequence[command.run_id] = sequence + 1
+                return TerminalCommitResult(
+                    record=updated,
+                    event=stored.snapshot(),
+                    created=True,
+                )
+
     async def list_for_run(
         self,
         run_id: str,
@@ -248,3 +395,44 @@ class InMemoryEventStore:
                     limit,
                 )
             )
+
+    def _before_terminal_publish(self) -> None:
+        """Fault-injection seam called before any terminal mutation."""
+
+    def _before_start_publish(self) -> None:
+        """Fault-injection seam called before any start mutation."""
+
+
+def _start_replay_matches(
+    command: StartCommit,
+    *,
+    current: RunRecord,
+    existing: StoredRunEvent,
+    candidate: StoredRunEvent,
+) -> bool:
+    return (
+        existing.type == candidate.type
+        and existing.step == candidate.step
+        and existing.data == candidate.data
+        and current.status is not RunStatus.QUEUED
+        and current.version >= command.expected_version + 1
+        and current.started_at is not None
+    )
+
+
+def _terminal_replay_matches(
+    command: TerminalCommit,
+    *,
+    current: RunRecord,
+    existing: StoredRunEvent,
+    candidate: StoredRunEvent,
+) -> bool:
+    return (
+        existing.type == candidate.type
+        and existing.step == candidate.step
+        and existing.data == candidate.data
+        and current.status is command.target_status
+        and current.version == command.expected_version + 1
+        and current.answer == command.answer
+        and current.failure == command.failure
+    )

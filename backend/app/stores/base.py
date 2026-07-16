@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from backend.app.domain.run import (
@@ -61,6 +61,116 @@ class AppendEventResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class StartCommit:
+    """One retryable command for starting a Run with its first event."""
+
+    run_id: str
+    owner_id: str
+    expected_version: int
+    event_id: str
+    event_data: Mapping[str, object] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.run_id, "run_id"),
+            (self.owner_id, "owner_id"),
+            (self.event_id, "event_id"),
+        ):
+            _require_command_identifier(value, label)
+        _require_expected_version(self.expected_version)
+        if not isinstance(self.event_data, Mapping):
+            raise ValueError("start event data must be a mapping")
+        object.__setattr__(self, "event_data", dict(self.event_data))
+
+    @property
+    def event_type(self) -> str:
+        return "run.started"
+
+
+@dataclass(frozen=True)
+class StartCommitResult:
+    record: RunRecord
+    event: StoredRunEvent
+    created: bool
+
+
+class RunStartCommitter(Protocol):
+    async def commit_start(self, command: StartCommit) -> StartCommitResult:
+        """Commit queued-to-running state and run.started as one operation."""
+        ...
+
+
+@dataclass(frozen=True)
+class TerminalCommit:
+    """One retryable command for atomically settling a durable Run."""
+
+    run_id: str
+    owner_id: str
+    expected_version: int
+    target_status: RunStatus
+    event_id: str
+    event_data: Mapping[str, object] = field(repr=False)
+    step: int = 0
+    answer: str | None = field(default=None, repr=False)
+    failure: RunFailure | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.run_id, "run_id"),
+            (self.owner_id, "owner_id"),
+            (self.event_id, "event_id"),
+        ):
+            _require_command_identifier(value, label)
+        _require_expected_version(self.expected_version)
+        try:
+            target_status = RunStatus(self.target_status)
+        except (TypeError, ValueError):
+            raise ValueError("terminal target status is not supported") from None
+        if not target_status.is_terminal:
+            raise ValueError("terminal commit requires a terminal target status")
+        if (
+            not isinstance(self.step, int)
+            or isinstance(self.step, bool)
+            or self.step < 0
+        ):
+            raise ValueError("terminal event step must be a non-negative integer")
+        if not isinstance(self.event_data, Mapping):
+            raise ValueError("terminal event data must be a mapping")
+        if target_status is RunStatus.COMPLETED:
+            if not isinstance(self.answer, str) or not self.answer.strip():
+                raise ValueError("completed terminal commit requires an answer")
+            if self.failure is not None:
+                raise ValueError("completed terminal commit cannot contain a failure")
+        else:
+            if self.answer is not None:
+                raise ValueError("failed terminal commit cannot contain an answer")
+            if not isinstance(self.failure, RunFailure):
+                raise ValueError("failed terminal commit requires a failure")
+        object.__setattr__(self, "target_status", target_status)
+        object.__setattr__(self, "event_data", dict(self.event_data))
+
+    @property
+    def event_type(self) -> str:
+        return f"run.{self.target_status.value}"
+
+
+@dataclass(frozen=True)
+class TerminalCommitResult:
+    record: RunRecord
+    event: StoredRunEvent
+    created: bool
+
+
+class TerminalRunCommitter(Protocol):
+    async def commit_terminal(
+        self,
+        command: TerminalCommit,
+    ) -> TerminalCommitResult:
+        """Commit terminal state and its matching event as one operation."""
+        ...
+
+
 class RunStore(Protocol):
     """Async Run persistence contract shared by memory and database adapters.
 
@@ -106,13 +216,15 @@ class RunStore(Protocol):
         ...
 
 
-class EventStore(Protocol):
+class EventStore(RunStartCommitter, TerminalRunCommitter, Protocol):
     """Append-only event contract; sequence and time belong to the Store.
 
     An Event ID replay with identical content returns the original event.
     Changed content uses ``EventConflictError``. Missing and non-owned Runs use
     ``RunNotFoundError``. A new event after a terminal Run uses
-    ``InvalidRunTransitionError``; replay of an already stored event is valid.
+    ``InvalidRunTransitionError``; replay of an already stored progress event
+    is valid. Owned lifecycle events use ``commit_start`` or
+    ``commit_terminal`` instead of ordinary append.
     """
 
     async def append(
@@ -136,3 +248,22 @@ class EventStore(Protocol):
         limit: int = 200,
     ) -> tuple[StoredRunEvent, ...]:
         ...
+
+
+def _require_command_identifier(value: object, label: str) -> None:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > 200
+    ):
+        raise ValueError(f"{label} has an invalid format")
+
+
+def _require_expected_version(value: object) -> None:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < 0
+    ):
+        raise ValueError("expected_version must be a non-negative integer")

@@ -9,13 +9,14 @@ from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
+from backend.app.agent import ManualRuntime
 from backend.app.container import ApplicationContainer
-from backend.app.domain.run import RunRecord
+from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.knowledge import InMemoryKnowledgeBase
 from backend.app.main import create_app
 from backend.app.memory import ConversationMemory
 from backend.app.security import StaticTokenAuthenticator
-from backend.app.services import InMemoryRunService
+from backend.app.services import InMemoryRunService, RunCoordinator
 from backend.app.settings import Settings
 from backend.app.settings import SettingsError
 from backend.app.stores import InMemoryEventStore, InMemoryRunStore
@@ -50,6 +51,8 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIsInstance(container.run_service, InMemoryRunService)
         self.assertIsInstance(container.run_store, InMemoryRunStore)
         self.assertIsInstance(container.event_store, InMemoryEventStore)
+        self.assertIsInstance(container.runtimes["manual"], ManualRuntime)
+        self.assertIsInstance(container.run_coordinator, RunCoordinator)
         self.assertIsInstance(container.knowledge_base, InMemoryKnowledgeBase)
         self.assertIsInstance(container.memory, ConversationMemory)
         self.assertIsInstance(container.authenticator, StaticTokenAuthenticator)
@@ -62,12 +65,14 @@ class ApplicationContainerTest(unittest.TestCase):
         knowledge_base = InMemoryKnowledgeBase()
         memory = ConversationMemory()
         authenticator = StaticTokenAuthenticator()
+        runtime = Mock()
 
         container = ApplicationContainer.create(
             settings=settings,
             run_service=run_service,
             run_store=run_store,
             event_store=event_store,
+            runtimes={"manual": runtime},
             knowledge_base=knowledge_base,
             memory=memory,
             authenticator=authenticator,
@@ -77,6 +82,7 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIs(run_service, container.run_service)
         self.assertIs(run_store, container.run_store)
         self.assertIs(event_store, container.event_store)
+        self.assertIs(runtime, container.runtimes["manual"])
         self.assertIs(knowledge_base, container.knowledge_base)
         self.assertIs(memory, container.memory)
         self.assertIs(authenticator, container.authenticator)
@@ -223,12 +229,46 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
             event_id="container-event",
             run_id=run.id,
             owner_id=run.owner_id,
-            event_type="run.started",
+            event_type="model.started",
             data={},
         )
 
         self.assertTrue(appended.created)
         self.assertEqual(1, appended.event.sequence)
+
+    async def test_default_coordinator_uses_the_container_store_pair_offline(
+        self,
+    ) -> None:
+        now = datetime(2026, 7, 16, 4, 0, tzinfo=UTC)
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        run = RunRecord.create(
+            run_id="coordinator-run",
+            session_id="coordinator-session",
+            owner_id="coordinator-owner",
+            runtime="manual",
+            input_text="hello",
+            idempotency_key="coordinator-key",
+            created_at=now,
+        )
+        await container.run_store.create(run)
+
+        completed = await container.run_coordinator.execute(
+            run.id,
+            owner_id=run.owner_id,
+        )
+        events = await container.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual("Mock Agent 收到：hello", completed.answer)
+        self.assertEqual(
+            ["run.started", "run.completed"],
+            [event.type for event in events],
+        )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from backend.app.domain.run import RunRecord, RunStatus
+from backend.app.domain.run import RunFailure, RunRecord, RunStatus
 from backend.app.stores import (
     ConcurrentWriteError,
     EventConflictError,
@@ -16,6 +16,11 @@ from backend.app.stores import (
     RunConflictError,
     RunNotFoundError,
     RunStore,
+    StartCommit,
+    StartCommitResult,
+    StoreUnavailableError,
+    TerminalCommit,
+    TerminalCommitResult,
 )
 
 
@@ -272,6 +277,244 @@ class RunStoreContract:
             sum(isinstance(result, ConcurrentWriteError) for result in results),
         )
 
+    async def test_start_commit_writes_running_state_and_event_together(
+        self,
+    ) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        command = StartCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=run.version,
+            event_id="lifecycle-started",
+            event_data={"status": "running", "runtime": "manual"},
+        )
+
+        first = await self.event_store.commit_start(command)
+        replay = await self.event_store.commit_start(command)
+        stored = await self.run_store.get(run.id, owner_id=run.owner_id)
+        events = await self.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertIsInstance(first, StartCommitResult)
+        self.assertTrue(first.created)
+        self.assertFalse(replay.created)
+        self.assertEqual(RunStatus.RUNNING, stored.status)
+        self.assertEqual(["run.started"], [event.type for event in events])
+        self.assertEqual(first.record, replay.record)
+        self.assertEqual(first.event, replay.event)
+
+    async def test_terminal_commit_writes_run_and_matching_event_together(
+        self,
+    ) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        running = await self.run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=0,
+            target_status=RunStatus.RUNNING,
+        )
+
+        result = await self.event_store.commit_terminal(
+            TerminalCommit(
+                run_id=run.id,
+                owner_id=run.owner_id,
+                expected_version=running.version,
+                target_status=RunStatus.COMPLETED,
+                event_id="terminal-completed",
+                event_data={"status": "completed"},
+                answer="done",
+            )
+        )
+        stored_run = await self.run_store.get(run.id, owner_id=run.owner_id)
+        events = await self.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertIsInstance(result, TerminalCommitResult)
+        self.assertTrue(result.created)
+        self.assertEqual(RunStatus.COMPLETED, stored_run.status)
+        self.assertEqual("done", stored_run.answer)
+        self.assertEqual(["run.completed"], [event.type for event in events])
+        self.assertEqual(result.record, stored_run)
+        self.assertEqual(result.event, events[-1])
+
+    async def test_terminal_commit_exact_replay_is_idempotent(self) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        running = await self.run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=0,
+            target_status=RunStatus.RUNNING,
+        )
+        command = TerminalCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=running.version,
+            target_status=RunStatus.FAILED,
+            event_id="terminal-failed",
+            event_data={"status": "failed", "failure_code": "runtime_failed"},
+            failure=RunFailure(
+                code="runtime_failed",
+                category="runtime",
+                public_message="Runtime failed",
+            ),
+        )
+
+        first = await self.event_store.commit_terminal(command)
+        replay = await self.event_store.commit_terminal(command)
+        events = await self.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertTrue(first.created)
+        self.assertFalse(replay.created)
+        self.assertEqual(first.record, replay.record)
+        self.assertEqual(first.event, replay.event)
+        self.assertEqual(1, len(events))
+
+    async def test_concurrent_exact_terminal_replay_creates_one_event(self) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        running = await self.run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=0,
+            target_status=RunStatus.RUNNING,
+        )
+        command = TerminalCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=running.version,
+            target_status=RunStatus.COMPLETED,
+            event_id="terminal-concurrent-replay",
+            event_data={"status": "completed"},
+            answer="done",
+        )
+
+        first, second = await asyncio.gather(
+            self.event_store.commit_terminal(command),
+            self.event_store.commit_terminal(command),
+        )
+        events = await self.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertEqual([False, True], sorted([first.created, second.created]))
+        self.assertEqual(first.record, second.record)
+        self.assertEqual(first.event, second.event)
+        self.assertEqual(1, len(events))
+
+    async def test_terminal_event_id_reuse_with_changed_outcome_conflicts(
+        self,
+    ) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        running = await self.run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=0,
+            target_status=RunStatus.RUNNING,
+        )
+        original = TerminalCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=running.version,
+            target_status=RunStatus.COMPLETED,
+            event_id="terminal-stable",
+            event_data={"status": "completed"},
+            answer="first",
+        )
+        await self.event_store.commit_terminal(original)
+
+        for changed in (
+            TerminalCommit(
+                run_id=run.id,
+                owner_id=run.owner_id,
+                expected_version=running.version,
+                target_status=RunStatus.COMPLETED,
+                event_id="terminal-stable",
+                event_data={"status": "completed", "changed": True},
+                answer="first",
+            ),
+            TerminalCommit(
+                run_id=run.id,
+                owner_id=run.owner_id,
+                expected_version=running.version,
+                target_status=RunStatus.COMPLETED,
+                event_id="terminal-stable",
+                event_data={"status": "completed"},
+                answer="second",
+            ),
+        ):
+            with self.subTest(answer=changed.answer, data=changed.event_data):
+                with self.assertRaises(EventConflictError):
+                    await self.event_store.commit_terminal(changed)
+
+    async def test_competing_terminal_commits_leave_only_the_winner_event(
+        self,
+    ) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        running = await self.run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=0,
+            target_status=RunStatus.RUNNING,
+        )
+        results = await asyncio.gather(
+            self.event_store.commit_terminal(
+                TerminalCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=running.version,
+                    target_status=RunStatus.COMPLETED,
+                    event_id="terminal-completed",
+                    event_data={"status": "completed"},
+                    answer="done",
+                )
+            ),
+            self.event_store.commit_terminal(
+                TerminalCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=running.version,
+                    target_status=RunStatus.CANCELLED,
+                    event_id="terminal-cancelled",
+                    event_data={"status": "cancelled"},
+                    failure=RunFailure(
+                        code="cancelled_by_user",
+                        category="cancellation",
+                        public_message="Run cancelled",
+                    ),
+                )
+            ),
+            return_exceptions=True,
+        )
+        stored = await self.run_store.get(run.id, owner_id=run.owner_id)
+        events = await self.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertEqual(
+            1,
+            sum(isinstance(result, TerminalCommitResult) for result in results),
+        )
+        self.assertEqual(
+            1,
+            sum(isinstance(result, ConcurrentWriteError) for result in results),
+        )
+        self.assertEqual(1, len(events))
+        self.assertEqual(f"run.{stored.status.value}", events[0].type)
+
     async def test_concurrent_append_assigns_unique_increasing_sequences(
         self,
     ) -> None:
@@ -320,14 +563,14 @@ class RunStoreContract:
             event_id="event-1",
             run_id=first_run.id,
             owner_id=first_run.owner_id,
-            event_type="run.started",
+            event_type="model.started",
             data={},
         )
         second = await self.event_store.append(
             event_id="event-1",
             run_id=second_run.id,
             owner_id=second_run.owner_id,
-            event_type="run.started",
+            event_type="model.started",
             data={},
         )
 
@@ -343,7 +586,7 @@ class RunStoreContract:
             event_id="event-1",
             run_id=run.id,
             owner_id=run.owner_id,
-            event_type="run.started",
+            event_type="model.started",
             data={"attempt": 1},
         )
 
@@ -351,7 +594,7 @@ class RunStoreContract:
             event_id="event-1",
             run_id=run.id,
             owner_id=run.owner_id,
-            event_type="run.started",
+            event_type="model.started",
             data={"attempt": 1},
         )
 
@@ -362,7 +605,7 @@ class RunStoreContract:
                 event_id="event-1",
                 run_id=run.id,
                 owner_id=run.owner_id,
-                event_type="run.started",
+                event_type="model.started",
                 data={"attempt": 2},
             )
         self.assertEqual("event_conflict", raised.exception.code)
@@ -377,7 +620,7 @@ class RunStoreContract:
                     event_id="event-stable",
                     run_id=run.id,
                     owner_id=run.owner_id,
-                    event_type="run.started",
+                    event_type="model.started",
                     data={"attempt": 1},
                 )
                 for _ in range(20)
@@ -392,39 +635,29 @@ class RunStoreContract:
         self.assertEqual({1}, {result.event.sequence for result in results})
         self.assertEqual(1, len(stored))
 
-    async def test_terminal_run_rejects_new_events_but_allows_event_replay(
+    async def test_terminal_run_rejects_new_events_but_allows_commit_replay(
         self,
     ) -> None:
         run = _new_run()
         await self.run_store.create(run)
-        final_event = await self.event_store.append(
-            event_id="event-final",
-            run_id=run.id,
-            owner_id=run.owner_id,
-            event_type="run.completed",
-            data={"status": "completed"},
-        )
         running = await self.run_store.transition(
             run.id,
             owner_id=run.owner_id,
             expected_version=0,
             target_status=RunStatus.RUNNING,
         )
-        await self.run_store.transition(
-            run.id,
+        command = TerminalCommit(
+            run_id=run.id,
             owner_id=run.owner_id,
             expected_version=running.version,
             target_status=RunStatus.COMPLETED,
+            event_id="event-final",
+            event_data={"status": "completed"},
             answer="done",
         )
+        final_event = await self.event_store.commit_terminal(command)
 
-        replay = await self.event_store.append(
-            event_id="event-final",
-            run_id=run.id,
-            owner_id=run.owner_id,
-            event_type="run.completed",
-            data={"status": "completed"},
-        )
+        replay = await self.event_store.commit_terminal(command)
         self.assertFalse(replay.created)
         self.assertEqual(final_event.event, replay.event)
 
@@ -436,6 +669,26 @@ class RunStoreContract:
                 event_type="model.delta",
                 data={"text": "late"},
             )
+
+    async def test_ordinary_append_rejects_owned_lifecycle_events(self) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+
+        for event_type in (
+            "run.started",
+            "run.completed",
+            "run.failed",
+            "run.cancelled",
+        ):
+            with self.subTest(event_type=event_type):
+                with self.assertRaises(ValueError):
+                    await self.event_store.append(
+                        event_id=f"ordinary-{event_type}",
+                        run_id=run.id,
+                        owner_id=run.owner_id,
+                        event_type=event_type,
+                        data={},
+                    )
 
     async def test_event_append_and_read_hide_unknown_or_other_owner_runs(self) -> None:
         run = _new_run()
@@ -451,7 +704,7 @@ class RunStoreContract:
                         event_id="hidden-event",
                         run_id=run_id,
                         owner_id=owner_id,
-                        event_type="run.started",
+                        event_type="model.started",
                         data={},
                     )
                 self.assertEqual(
@@ -504,7 +757,7 @@ class RunStoreContract:
             event_id="event-1",
             run_id=run.id,
             owner_id=run.owner_id,
-            event_type="run.started",
+            event_type="model.started",
             data=payload,
         )
         payload["nested"]["value"] = 2
@@ -531,7 +784,7 @@ class RunStoreContract:
                         event_id="event-invalid",
                         run_id=run.id,
                         owner_id=run.owner_id,
-                        event_type="run.started",
+                        event_type="model.started",
                         data=payload,
                     )
 
@@ -578,6 +831,78 @@ class InMemoryRunStoreContractTest(
         self.assertEqual(
             list(range(1, 51)),
             sorted(result.event.sequence for result in results),
+        )
+
+    async def test_memory_terminal_fault_before_publish_changes_neither_store(
+        self,
+    ) -> None:
+        class FaultingEventStore(InMemoryEventStore):
+            def _before_terminal_publish(self) -> None:
+                raise StoreUnavailableError()
+
+        run_store = InMemoryRunStore(clock=lambda: STORE_NOW)
+        event_store = FaultingEventStore(run_store, clock=lambda: STORE_NOW)
+        run = _new_run()
+        await run_store.create(run)
+        running = await run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=0,
+            target_status=RunStatus.RUNNING,
+        )
+
+        with self.assertRaises(StoreUnavailableError):
+            await event_store.commit_terminal(
+                TerminalCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=running.version,
+                    target_status=RunStatus.COMPLETED,
+                    event_id="terminal-completed",
+                    event_data={"status": "completed"},
+                    answer="done",
+                )
+            )
+
+        self.assertEqual(
+            RunStatus.RUNNING,
+            (await run_store.get(run.id, owner_id=run.owner_id)).status,
+        )
+        self.assertEqual(
+            (),
+            await event_store.list_for_run(run.id, owner_id=run.owner_id),
+        )
+
+    async def test_memory_start_fault_before_publish_changes_neither_store(
+        self,
+    ) -> None:
+        class FaultingEventStore(InMemoryEventStore):
+            def _before_start_publish(self) -> None:
+                raise StoreUnavailableError()
+
+        run_store = InMemoryRunStore(clock=lambda: STORE_NOW)
+        event_store = FaultingEventStore(run_store, clock=lambda: STORE_NOW)
+        run = _new_run()
+        await run_store.create(run)
+
+        with self.assertRaises(StoreUnavailableError):
+            await event_store.commit_start(
+                StartCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=run.version,
+                    event_id="lifecycle-started",
+                    event_data={"status": "running"},
+                )
+            )
+
+        self.assertEqual(
+            RunStatus.QUEUED,
+            (await run_store.get(run.id, owner_id=run.owner_id)).status,
+        )
+        self.assertEqual(
+            (),
+            await event_store.list_for_run(run.id, owner_id=run.owner_id),
         )
 
 

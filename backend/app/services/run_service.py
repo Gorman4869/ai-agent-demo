@@ -175,13 +175,30 @@ def execute_agent(
     cancellation_token: CancellationToken | None = None,
 ) -> AgentRunResult:
     """Run the deterministic learning Agent without storing API state."""
-    model = MockModel(_script_decisions(message))
-    return ManualAgentLoop(
-        model,
-        create_default_registry(),
+    return create_learning_agent_loop(
+        message,
         execution_context=execution_context,
         cancellation_token=cancellation_token,
     ).run(message)
+
+
+def create_learning_agent_loop(
+    message: str,
+    *,
+    execution_context: ToolExecutionContext | None = None,
+    cancellation_token: CancellationToken | None = None,
+    max_steps: int = 8,
+    max_model_retries: int = 2,
+) -> ManualAgentLoop:
+    """Build a fresh offline loop for one Runtime invocation."""
+    return ManualAgentLoop(
+        MockModel(_script_decisions(message)),
+        create_default_registry(),
+        max_steps=max_steps,
+        execution_context=execution_context,
+        cancellation_token=cancellation_token,
+        max_model_retries=max_model_retries,
+    )
 
 
 def _script_decisions(message: str) -> list[ModelDecision]:

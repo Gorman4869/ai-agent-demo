@@ -23,7 +23,7 @@ class SettingsError(ValueError):
 
 
 class RunBudgetSettings(BaseModel):
-    """Per-run server upper bounds; M8-T1 validates but does not consume them."""
+    """Server-owned bounds consumed incrementally by Runtime milestones."""
 
     model_config = ConfigDict(
         extra="forbid",
