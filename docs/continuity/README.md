@@ -10,6 +10,7 @@
 - Git 分支：`main`
 - 远程仓库：尚未配置
 - 在线模型：默认关闭，付费验证必须显式授权
+- 课程交付模式：课程优先、里程碑验收
 
 ## 文档职责
 
@@ -17,6 +18,7 @@
 | --- | --- | --- |
 | `docs/implementation-plan.md` | 稳定任务、依赖、产物和验收契约 | 任务发布后不重编号 |
 | `docs/continuity/status.md` | 当前任务、状态、阻塞和下一动作 | 每次工作结束更新 |
+| `docs/continuity/course-delivery-playbook.md` | 课程质量底线、任务分级、时间盒与里程碑验收规则 | 仅在用户确认交付协议变更后更新 |
 | `docs/continuity/verification-log.md` | 实际命令与结果证据 | 只追加，不改写历史结果 |
 | `docs/continuity/known-issues.md` | 稳定编号的缺口和风险 | 状态变化时更新 |
 | `docs/continuity/decisions/ADR-*.md` | 已接受架构决策及取舍 | 新 ADR 取代旧 ADR |
@@ -29,12 +31,13 @@
 
 1. 在仓库根目录运行 `git status --short` 和 `git log -3 --oneline`。
 2. 阅读本文件与 `status.md`。
-3. 在 `implementation-plan.md` 定位当前任务 ID、依赖和验收条件。
-4. 阅读当前任务关联 ADR 和最新 handoff。
-5. 阅读最近的关联 verification ID。
-6. 检查实际文件是否与 handoff 描述一致。
-7. 重跑 handoff 指定的最小验证命令。
-8. 只执行 handoff 的下一条原子动作。
+3. 阅读 `course-delivery-playbook.md`，确定任务等级、时间盒和本轮验证深度。
+4. 在 `implementation-plan.md` 定位当前任务 ID、依赖和验收条件。
+5. 阅读当前任务关联 ADR 和最新 handoff。
+6. 阅读最近的关联 verification ID。
+7. 检查实际文件是否与 handoff 描述一致。
+8. 重跑 handoff 指定的最小验证命令。
+9. 只执行 handoff 的下一条原子动作。
 
 如果最小验证结果与记录不同，停止扩展实现，先登记 known issue 并定位漂移原因。
 

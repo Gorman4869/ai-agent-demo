@@ -341,3 +341,34 @@
 - `M8-T4` 达到 `code_complete`，实现锚点为 `ac24dda`；不得写成在线 `verified`。
 - `KI-001` 降为 mitigated；`KI-017` 扩展同步工具线程边界；新增 `KI-018` 记录请求/Token/费用与全程 timeout 的真实治理缺口。
 - 下一任务为 `M8-T5`：保持 offline，完成 Manual、Agents SDK、LangGraph 三 Runtime 契约和 LangChain 最小对照；M8-T6 仍需用户新的单次在线授权。
+
+## V-20260716-007：模型切换与课程高效交付协议
+
+- 任务：C0 连续性维护；当前业务任务仍为 `M8-T5 / planned`
+- 时间：2026-07-16 19:01–19:06，Asia/Shanghai
+- 计划版本：2.0
+- 验证目标：基线 HEAD `ed5ad9c` 上的课程交付协议、模型切换 handoff 和入口导航工作区；提交由后续本地 commit 固定
+- 模式：offline；未读取真实 API Key，未访问模型服务，费用 0
+- 依赖：没有新增、安装、升级或删除依赖
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` | 0 | 修改前工作区无输出；没有未提交的 M8-T4 或 M8-T5 业务修改 |
+| `git diff --check` | 0 | 无空白错误；仅有既有 LF/CRLF 转换提示 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、49 个 Markdown 文件；任务 ID、当前任务、accepted spec、相对链接和大纲映射全部通过 |
+| `rg -n "TBD\|TODO\|PLACEHOLDER\|待补\|待定\|以后填写" AGENTS.md README.md docs\implementation-plan.md docs\continuity\README.md docs\continuity\status.md docs\continuity\course-delivery-playbook.md docs\continuity\handoffs\2026-07-16-model-switch-course-delivery.md` | 1 | 预期无匹配；协议、交接和入口文件不存在占位符 |
+
+### 内容一致性与复审
+
+- 用户已确认采用“仓库入口 + 永久 playbook + 动态 status + 不可变 handoff”的模型切换方案。
+- Playbook 固定课程质量底线、A/B/C 任务等级、E0–E4 证据等级、时间盒、定向/全量验证触发条件和权限门。
+- 实施计划只调整通用交付节奏和完成定义的聚合位置；没有重编号 52 个稳定任务，也没有改变 M8-T5 的产物与验收契约。
+- 一次独立聚焦复审发现纯文档 B 类任务与 6–12 个业务用例表述冲突，已改为纯文档只做内容、链接、连续性和 diff 检查；复审指出的验证记录缺口由本条关闭。
+- M8-T4 的 `ac24dda`、`V-20260716-006` 和 `code_complete` 边界保持不变；本轮没有重跑 231 项全量回归，因为没有代码、依赖、构建配置或公共接口变化。
+
+### 结论
+
+- 模型切换协议达到文档级验证门；本轮只固定后续生产方式，不提升任何业务任务状态。
+- 当前任务继续是 `M8-T5 / planned`，下一步先设计三 Runtime 的共享成功/失败 fixture；不得重做 M8-T4、运行 M8-T6 或提前实现 M10–M13。

@@ -6,11 +6,12 @@
 
 1. `docs/continuity/README.md`
 2. `docs/continuity/status.md`
-3. `docs/implementation-plan.md` 中当前任务及其依赖
-4. 当前任务关联的 `docs/continuity/decisions/ADR-*.md`
-5. `docs/continuity/handoffs/` 中最新交接文件
-6. `docs/continuity/verification-log.md` 中最近的关联验证
-7. 后端任务读取 `BACKEND_CODING_STANDARDS.md`；前端任务读取 `docs/项目编码规约 v1.0.md`
+3. `docs/continuity/course-delivery-playbook.md`
+4. `docs/implementation-plan.md` 中当前任务及其依赖
+5. 当前任务关联的 `docs/continuity/decisions/ADR-*.md`
+6. `docs/continuity/handoffs/` 中最新交接文件
+7. `docs/continuity/verification-log.md` 中最近的关联验证
+8. 后端任务读取 `BACKEND_CODING_STANDARDS.md`；前端任务读取 `docs/项目编码规约 v1.0.md`
 
 不得只根据聊天记录或旧说明文档推断当前状态。
 
@@ -79,5 +80,7 @@ M8–M14 每个里程碑必须同时包含：
 - 概念题、实操题、场景题
 - 一页速查表和费曼复述任务
 - 与 30 项大纲的映射
+
+原子任务的分级、时间盒、测试深度、文档粒度、全量验证触发条件和提交节奏统一遵循 `docs/continuity/course-delivery-playbook.md`。普通原子任务不重复编写整章教程；完整跟练、自测、速查表和费曼材料在所属里程碑验收任务中汇总，但不得因此省略原子任务的可运行代码、关键测试和真实证据。
 
 学习者个人勾选只写 `docs/progress.md`；工程实施状态只写 `docs/continuity/status.md`。

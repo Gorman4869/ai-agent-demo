@@ -2,7 +2,7 @@
 
 这是一个面向前端开发者的渐进式课程：M0–M7 是 12 周基础线，M8–M14 是 14 周生产补齐线。主线采用 Python + FastAPI、Vue 3 + TypeScript，并用 TypeScript 完成 MCP 专项实验。项目先手写 Agent Loop，再进入真实 OpenAI Runtime、MCP Client、LangGraph 持久恢复、真实 RAG、实时 UI、工程化和高级 Agent。
 
-> 中断、换模型或换会话后，不要重新推断进度。先阅读[连续性恢复入口](docs/continuity/README.md)和[当前实施状态](docs/continuity/status.md)。
+> 中断、换模型或换会话后，不要重新推断进度。先阅读[连续性恢复入口](docs/continuity/README.md)、[当前实施状态](docs/continuity/status.md)和[课程交付协议](docs/continuity/course-delivery-playbook.md)。
 
 ## 现在开始
 
@@ -76,6 +76,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 
 - [连续性恢复入口](docs/continuity/README.md)
 - [当前工程状态](docs/continuity/status.md)
+- [课程交付协议](docs/continuity/course-delivery-playbook.md)
 - [验证证据日志](docs/continuity/verification-log.md)
 - [已知问题台账](docs/continuity/known-issues.md)
 - [M8–M14 补齐设计规格](docs/superpowers/specs/2026-07-16-ai-agent-transition-completion-design.md)
