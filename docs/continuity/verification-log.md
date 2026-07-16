@@ -59,3 +59,19 @@
 - `C0-T3` 的计划、ADR、状态和校验脚本达到 `code_complete`；创建首份 handoff 并执行提交后检查，才能把整个 C0 标记为 `verified`。
 - `KI-012` 关闭；`KI-009` 保持 open，继续跟踪真实 Docker 运行验收。
 - 未执行任何在线模型、在线 Embedding 或远程 Git 操作。
+
+## V-20260716-002：C0 提交后连续性闭环
+
+- 任务：`C0-T3`
+- 时间：2026-07-16 11:40，Asia/Shanghai
+- 计划版本：2.0
+- 验证目标：计划基线提交 `6f8490a`，加首份 handoff 与状态更新的工作区
+- 模式：offline；费用为 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、39 个 Markdown 文件；任务 ID、当前任务、accepted spec、相对链接和大纲映射全部通过 |
+| `git diff --check` | 0 | 无空白错误；仅有 LF/CRLF 转换提示 |
+| `git status --short` | 0 | 只有 status 与首份 handoff 文档修改，没有业务代码或未知产物 |
+
+结论：`C0-T1` 至 `C0-T4` 全部达到 `verified`，下一任务为 `M8-T1`。
