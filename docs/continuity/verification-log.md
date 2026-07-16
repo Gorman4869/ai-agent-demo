@@ -372,3 +372,59 @@
 
 - 模型切换协议达到文档级验证门；本轮只固定后续生产方式，不提升任何业务任务状态。
 - 当前任务继续是 `M8-T5 / planned`，下一步先设计三 Runtime 的共享成功/失败 fixture；不得重做 M8-T4、运行 M8-T6 或提前实现 M10–M13。
+
+## V-20260716-008：M8-T5 三 Runtime 契约与 LangChain 对照
+
+- 任务：`M8-T5`
+- 时间：2026-07-16 22:07，Asia/Shanghai
+- 计划版本：2.0
+- 验证目标：基线 HEAD `f83cbbc` 上的 M8-T5 工作区；提交由后续本地 commit 固定
+- 模式：offline；未读取真实 API Key，未访问模型服务，未执行 M8-T6，费用 0
+- 依赖事实：Python 3.12.10、`langchain==1.3.13`、`langgraph==1.2.9`、`openai-agents==0.18.2`；没有新增、安装、升级或删除依赖
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 接手恢复检查通过：52 个稳定任务、49 个 Markdown 文件 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime backend.tests.test_runtime_contract backend.tests.test_run_coordinator -q` | 0 | handoff 最小恢复集 64 项通过；三条 notifier 失败日志来自既有负向用例 |
+| `.\.venv\Scripts\python.exe -X utf8 -B .\labs\langchain-agent\demo.py` | 0 | 实际输出一次 `add_numbers`、`ToolMessage`、四段消息序列和最终答案 5 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_comparison backend.tests.test_langchain_agent_lab backend.tests.test_runtime_contract backend.tests.test_openai_agents_runtime backend.tests.test_run_coordinator backend.tests.test_container backend.tests.test_framework_runtimes -v` | 0 | 最终定向回归 89 项全部通过 |
+| `.\.venv\Scripts\python.exe -S -B -m unittest backend.tests.test_manual_agent_loop -v` | 0 | 禁用 `site-packages` 后 7 项 M1 测试通过，证明 LangGraph 未污染手写 Loop 顶层导入 |
+| `.\.venv\Scripts\python.exe -S -B -m backend.app.demo` | 0 | 禁用 `site-packages` 后 M1 Demo 仍依次输出 start、tool start/completed 与 run completed |
+| `.\.venv\Scripts\python.exe -B -c "import importlib.metadata as m, sys; ..."` | 0 | 确认 Python 与三项锁定框架版本 |
+| `git diff --check` | 0 | 代码与阶段文档修改无空白错误；仅有既有 LF/CRLF 转换提示 |
+| `rg -n "OPENAI_API_KEY\|api[_-]?key\|sk-[A-Za-z0-9]" ...` | 1 | 预期无匹配；本任务代码、测试和 lab 未写入 Key 或疑似密钥 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（文档闭环后） | 0 | 52 个稳定任务、50 个 Markdown 文件；任务 ID、当前任务、accepted spec、相对链接和大纲映射全部通过 |
+| `git diff --check`（文档闭环后） | 0 | 最终工作区无空白错误；仅有既有 LF/CRLF 转换提示 |
+
+### 共享契约与真实框架路径
+
+- 同一成功 fixture 对 Manual、Agents SDK 和 LangGraph 使用相同输入、`add_numbers` 定义与参数；三者均完成并产生 `tool.started -> tool.completed`，handler 各执行一次。
+- 同一失败 fixture 缺少必需参数 `b`；三者均产生 `tool.failed(error_code=invalid_arguments)`，handler 均未执行，并返回相同安全 fallback 结果。
+- Agents SDK fixture 通过实际 `build_sdk_tools()`、`FunctionTool.on_invoke_tool()` 和 Runtime 事件映射；fake Runner 只替代 Provider/SDK 外部执行边界。
+- LangGraph Runtime 通过公开 `StateGraph.compile().ainvoke()` 执行模型节点、工具节点和条件边，并可由现有 Container 在 `langgraph + mock` 配置下选择。
+- LangChain lab 通过公开 `create_agent()` 与 `agent.invoke()` 进入 ToolNode；确定性 ChatModel 只替代外部 Provider，工具绑定、消息循环和执行由框架完成。
+
+### 安全、失败与范围证据
+
+- 共享工具事件不包含 arguments、value 或 error_message；Agents SDK 额外 usage/输出事件继续遵守 M8-T4 白名单。
+- LangGraph 在模型错误时只返回稳定 `model_execution_failed`，预取消不构造 model/tool，Event sink 故障原样传播，不伪装为模型失败。
+- LangGraph Runtime 使用显式模块导入，不从 `backend.app.agent` 顶层导出；M1 的 `python -S` 测试与 Demo 证明标准库学习路径未新增 LangGraph 依赖。
+- LangChain socket 双守卫测试通过；非有限或布尔操作数在 Agent 执行前被拒绝。
+- 新增 9 个高价值测试方法，并通过参数化子用例覆盖三 Runtime 的成功、失败、脱敏、取消、模型错误、Store 失败、LangChain 工具调用、零网络与输入边界。
+
+### 警告、失败尝试与未验证范围
+
+- FastAPI 定向回归仍出现既有 Starlette/httpx 弃用警告；没有安装 `httpx2` 或升级依赖。
+- 首次直接运行 lab 时 PowerShell 控制台把中文显示为乱码，命令本身退出码为 0；使用 Python `-X utf8` 重跑后输出可读，测试中的 Unicode 断言始终通过。
+- 没有运行 `scripts/verify.ps1` 全量门：本任务未改变依赖、锁文件、前端、HTTP API、跨前后端契约或发布配置，定向 89 项已覆盖修改边界。
+- fake Runner、MockModel 与确定性 ChatModel 只能证明 E2/E3 离线调用链，不能证明 Provider streaming、工具调用、usage、费用或资源清理。
+- LangGraph checkpoint、interrupt、resume 和重启恢复仍属于 `KI-004` / M10；LangChain 不进入主 `AgentRuntime` 或 `RunCoordinator`。
+- Docker、PostgreSQL/pgvector、Nginx 和真实在线模型均未验证。
+
+### 结论
+
+- `M8-T5` 达到 `verified`：三 Runtime 共享契约为 E3，LangChain 独立调用链为 E2，框架取舍与运行命令已落盘。
+- `KI-003` 关闭；`KI-001` 的离线代码对照部分完成，但真实 Provider 证据仍缺，因此保持 mitigated 并继续由 M8-T6 接管。
+- 下一任务是 `M8-T6`；可以准备 fail-closed 在线脚本，但没有用户新的单次授权时不得读取 Key 或执行真实模型调用。

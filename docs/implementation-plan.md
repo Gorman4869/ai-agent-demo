@@ -392,6 +392,14 @@ docker compose -f deploy/compose.yaml config --quiet
 - 验收：能够解释手写 Loop、SDK、LangChain 和 LangGraph 的抽象收益、成本和使用边界。
 - 关闭目标：KI-001、KI-003 的代码部分。
 
+#### M8-T5 离线实现结果与恢复边界
+
+- 已实现：`LangGraphRuntime` 通过实际 `StateGraph.ainvoke()` 接入共享 `AgentRuntime`，并在 `langgraph + mock` Container 配置下可选择；M10 前不包含 checkpoint、interrupt 或 resume。
+- 已实现：共享 fixture 用同一输入、`add_numbers` 工具、成功结果和缺参错误比较 Manual、Agents SDK 与 LangGraph；Agents SDK 路径实际执行 `FunctionTool` 桥，事件只保留稳定字段。
+- 已实现：`labs/langchain-agent/` 通过 LangChain `create_agent().invoke()` 实际进入 ToolNode，保留离线确定性模型边界和四框架取舍报告，不接入主 Run。
+- 离线证据：三 Runtime 共享契约达到 E3，LangChain 实验达到 E2；验证见 `V-20260716-008`。
+- 未验证：真实 Provider、费用与在线 usage 仍由 M8-T6 接管；LangGraph 持久恢复由 M10 接管，旧 HTTP/SSE 不变。
+
 ### M8-T6：显式在线付费冒烟
 
 - 依赖：M8-T4、M8-T5。

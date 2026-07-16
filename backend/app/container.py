@@ -5,12 +5,16 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from backend.app.agent import AgentRuntime, ManualRuntime
+from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.domain.run import RuntimeName
 from backend.app.knowledge import InMemoryKnowledgeBase, KnowledgeBase
 from backend.app.memory import ConversationMemory
 from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import InMemoryRunService, RunCoordinator
-from backend.app.services.run_service import create_learning_agent_loop
+from backend.app.services.run_service import (
+    create_learning_agent_loop,
+    create_learning_model,
+)
 from backend.app.settings import Settings
 from backend.app.stores import (
     EventStore,
@@ -86,6 +90,10 @@ class ApplicationContainer:
                 runtime_map["agents_sdk"] = _create_agents_sdk_runtime(
                     resolved_settings
                 )
+            elif resolved_settings.runtime == "langgraph":
+                runtime_map["langgraph"] = _create_langgraph_runtime(
+                    resolved_settings
+                )
             resolved_runtimes: Mapping[RuntimeName | str, AgentRuntime] = (
                 MappingProxyType(runtime_map)
             )
@@ -159,4 +167,18 @@ def _create_agents_sdk_runtime(settings: Settings) -> AgentRuntime:
         provider=settings.model_provider,
         model=settings.openai_model,
         budget=settings.budget,
+    )
+
+
+def _create_langgraph_runtime(settings: Settings) -> AgentRuntime:
+    """Assemble the deterministic LangGraph comparison Runtime."""
+    from backend.app.tools.builtin import create_default_registry
+
+    if settings.runtime != "langgraph" or settings.model_provider != "mock":
+        raise ValueError("langgraph runtime currently requires the mock provider")
+    return LangGraphRuntime(
+        model_factory=lambda request: create_learning_model(request.input_text),
+        tool_registry_factory=lambda _request: create_default_registry(),
+        max_steps=settings.budget.max_steps,
+        max_model_retries=settings.budget.max_model_retries,
     )

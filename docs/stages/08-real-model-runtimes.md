@@ -577,6 +577,15 @@ Runtime 自身契约错误另行处理：usage 缺失/无效使用 `agents_sdk_u
 
 复述合格标准：听者能画出一条“SDK event → RuntimeEvent → EventStore → 未来 SSE/Vue”的数据线，能指出至少两个不能透传的敏感字段，并能准确说出一个当前仍未关闭的预算或取消边界。
 
+## M8-T5 三 Runtime 与 LangChain 对照入口
+
+- 三 Runtime 共享 fixture：`backend/tests/runtime_comparison_fixtures.py`。同一输入、`add_numbers` 工具、成功结果和缺参错误分别经过 Manual、Agents SDK `FunctionTool` 桥与 LangGraph `StateGraph.ainvoke()`。
+- 共享契约测试：`backend/tests/test_runtime_comparison.py`。比较结果状态、答案、工具事件、稳定错误码、handler 是否执行和敏感字段边界。
+- LangChain 独立实验：`labs/langchain-agent/README.md`。实验实际执行 `create_agent()`、`agent.invoke()` 和 ToolNode，但使用离线确定性 ChatModel，不接入主 Run。
+- 证据边界：三 Runtime 对照目标为 E3；LangChain 实验为 E2。两者都不是 Provider 在线证据，M8-T6 仍需新的单次授权。
+
+本任务不增加 checkpoint、interrupt、resume、费用账本或统一 HTTP/SSE；这些能力分别由 M10、M13 与 M12 验收。完整题库、速查表和里程碑复盘在 M8-T7 汇总。
+
 ## 跟练顺序
 
 ### 第 1 次：配置与领域契约

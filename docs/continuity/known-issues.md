@@ -4,9 +4,9 @@
 
 | ID | 严重度 | 状态 | 归属 | 问题 | 关闭证据 |
 | --- | --- | --- | --- | --- | --- |
-| KI-001 | blocker | mitigated | M8 | M8-T4 已完成离线可验证的生产 OpenAI Agents SDK 适配器、流式工具调用、聚合 usage 与提供方错误闭环；真实线上流式与工具调用仍待 M8-T6 | M8-T4 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
+| KI-001 | blocker | mitigated | M8 | M8-T4 已完成离线可验证的 OpenAI Agents SDK 适配器，M8-T5 已证明它与 Manual/LangGraph 的共享工具和错误语义；真实线上流式、工具与 usage 仍待 M8-T6 | M8-T4/M8-T5 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
 | KI-002 | blocker | open | M9 | 只有 MCP Server，没有 Client 发现和协议调用 | MCP STDIO 端到端测试通过 |
-| KI-003 | high | open | M8 | LangChain 只有依赖，没有对照实验 | 对照实验、测试和取舍文档通过 |
+| KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
 | KI-004 | high | open | M10 | LangGraph 没有 checkpoint、interrupt、resume 和恢复测试 | 中断、审批、重启恢复测试通过 |
 | KI-005 | high | open | M10–M11 | 上下文选择、记忆注入和动态重规划未进入主 Run | 长对话、记忆纠错与失败重规划评测通过 |
 | KI-006 | high | open | M11 | pgvector 只有 Fake Connection，没有真实数据库、Embedding 与检索指标 | PostgreSQL/pgvector 集成和固定评测集通过 |

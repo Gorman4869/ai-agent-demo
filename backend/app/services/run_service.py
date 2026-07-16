@@ -192,13 +192,18 @@ def create_learning_agent_loop(
 ) -> ManualAgentLoop:
     """Build a fresh offline loop for one Runtime invocation."""
     return ManualAgentLoop(
-        MockModel(_script_decisions(message)),
+        create_learning_model(message),
         create_default_registry(),
         max_steps=max_steps,
         execution_context=execution_context,
         cancellation_token=cancellation_token,
         max_model_retries=max_model_retries,
     )
+
+
+def create_learning_model(message: str) -> MockModel:
+    """Build one deterministic model script shared by offline Runtimes."""
+    return MockModel(_script_decisions(message))
 
 
 def _script_decisions(message: str) -> list[ModelDecision]:

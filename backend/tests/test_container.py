@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from backend.app.agent import ManualRuntime
+from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.agent.sdk_runtime import OpenAIAgentsRuntime
 from backend.app.container import ApplicationContainer
 from backend.app.domain.run import RunRecord, RunStatus
@@ -122,6 +123,10 @@ class ApplicationContainerTest(unittest.TestCase):
         app = create_app(settings=settings)
 
         self.assertIs(settings, app.state.container.settings)
+        self.assertIsInstance(
+            app.state.container.runtimes["langgraph"],
+            LangGraphRuntime,
+        )
 
     def test_create_app_keeps_existing_dependency_injection_compatible(self) -> None:
         authenticator = StaticTokenAuthenticator()
