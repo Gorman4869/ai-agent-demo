@@ -13,12 +13,12 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M8-T4` |
-| 状态 | `planned` |
+| 状态 | `in_progress` |
 | 目标 | 先建立 OpenAI Agents Runtime 的 fake runner/event fixture 与离线适配契约，不执行在线模型调用 |
-| 设计依据 | `docs/superpowers/specs/2026-07-16-ai-agent-transition-completion-design.md`、`ADR-0007` |
-| 当前修改 | M8-T3 已完成并验证：实现锚点 `b171ad0`，验证见 `V-20260716-005`，交接见 `docs/continuity/handoffs/2026-07-16-m8-t3-runtime-coordinator.md` |
+| 设计依据 | `docs/superpowers/specs/2026-07-16-ai-agent-transition-completion-design.md`、`ADR-0007`、`ADR-0008` |
+| 当前修改 | 已核对本地 `openai-agents==0.18.2` 和官方 Runner/stream/usage 文档；正在固定可注入 Runner、显式 client/model、Trace 关闭、事件白名单、每 Run 工具隔离和 aggregate usage 边界 |
 | 前置证据 | `V-20260716-005` |
-| 下一动作 | 核对本地锁定的 `openai-agents==0.18.2` API 与官方文档，先写 `test_openai_agents_runtime.py` 的 fake runner/event 离线契约；没有新的单次授权不得在线调用 |
+| 下一动作 | 提交 M8-T4 设计基线后，先写 `test_openai_agents_runtime.py` 的 fake runner/event 失败契约，再实现适配器；没有新的单次授权不得在线调用 |
 
 ## 里程碑状态
 
@@ -42,10 +42,10 @@
 
 ## 未验证修改
 
-- 当前工作区没有未提交或未验证修改。M8-T3 业务实现锚点为 `b171ad0`，文档闭环锚点为 `5086ddc`。
+- 当前没有 M8-T4 未验证业务代码；实施前设计基线由实施计划、ADR-0008 与本状态固定。
 - 实现提交 `b171ad0` 已通过 60 项提交后核心回归和统一验证：197 项后端测试通过、1 项既有环境跳过，前端、MCP、pip 与 Compose 配置均通过。
 - `KI-015` 已 mitigated：内存 start/terminal 一次提交已实现；PostgreSQL 同事务与多进程证据仍缺。`KI-016`、`KI-017` 分别跟踪 running 恢复与同步兼容 Runtime 限制。
 
 ## 恢复入口
 
-若本轮中断，保留实现提交 `b171ad0` 与文档闭环提交 `5086ddc`，依次阅读 `docs/continuity/handoffs/2026-07-16-m8-t3-runtime-coordinator.md`、`docs/continuity/decisions/ADR-0007-runtime-coordinator-lifecycle-commits.md` 与 `V-20260716-005`。M8-T3 已验证，不要重做或迁移旧 HTTP/SSE；从 M8-T4 的 fake runner/event fixture 开始。
+若本轮中断，保留 M8-T3 实现 `b171ad0`，先阅读 `docs/continuity/decisions/ADR-0008-openai-agents-runtime-adapter.md` 与实施计划 M8-T4。若设计基线已提交但 `test_openai_agents_runtime.py` 不存在，就从 fake fixture 开始；不要迁移旧 HTTP/SSE，也不要执行在线 Runner。

@@ -357,8 +357,15 @@ docker compose -f deploy/compose.yaml config --quiet
 ### M8-T4：OpenAI Agents SDK Runtime
 
 - 依赖：M8-T3。
-- 产物：真实 SDK Runner/stream 适配器、共享工具包装、结构化输出、usage 和提供方错误映射。
-- 离线测试：使用 fake runner/event fixture 验证文本增量、工具调用、工具结果、终态、usage 和错误。
+- 产物：`OpenAIAgentsRuntime`、可注入 Runner/stream 边界、共享 `ToolRegistry` 包装、最小结构化输出、Run 级 usage 事件和提供方错误映射；不修改 Coordinator 或旧 HTTP/SSE。
+- 组合与密钥：Container 只在完整 `agents_sdk + openai + online=true + Key + model` 配置下注册 SDK Runtime；每次 Run 使用显式 client/model，不调用进程全局 Key setter，不依赖 SDK 默认模型，构造 Container 不发网络请求。
+- Trace：每次 Runner 调用显式设置 `tracing_disabled=true`、`trace_include_sensitive_data=false`；不能依赖 SDK 默认值或只依赖应用 Settings。
+- 工具：每个 Run 建立隔离的 SDK context，把已按身份过滤的 `ToolDefinition` 转为 `FunctionTool`；执行仍经过 `ToolRegistry` 的角色、审批和参数校验。持久事件不包含原始参数、结果或异常文本。
+- 事件：只映射审核过的文本 delta、工具开始/完成/失败和 Run 级 usage；Provider raw response、SDK 对象、响应 ID 和 trace payload 不越过 Runtime 边界。文本 delta 是内容事件，必须限制单块与累计字节，且不得进入普通日志或 repr。
+- Usage：`result.context_wrapper.usage` 映射为明确标记 `scope=run` 的聚合事件，费用未知保持 `null + unknown`；它不能冒充一次调用的 `UsageRecord`。每请求 duration/cost、持久 ledger 与可信定价留 M13。
+- 预算：`max_steps/max_model_calls` 约束 SDK turns，`max_output_tokens` 进入 ModelSettings；client 使用显式 timeout 且关闭自身重试，唯一重试层由 SDK `ModelRetrySettings` 消费 `max_model_retries`。聚合 usage 完成后再次检查请求数和 Token 上限。无法在调用前硬关闭的输入 Token、费用与未知重试成本登记已知风险，不描述成完整成本治理。
+- 取消与失败：调用 SDK stream 的 immediate cancel，并在有界清理期间停止新 emit；不宣称撤销已开始的 Provider 请求或工具副作用。SDK/Provider 异常只映射稳定 code、category、retryable 和安全 public message，Store/sink 异常继续向 Coordinator 传播。
+- 离线测试：使用 0.18.2 兼容的 fake runner/event fixture 验证文本顺序与 await、结构化终态、工具执行和脱敏、并发 Run 上下文隔离、usage/预算、限流/认证/timeout/MaxTurns/guardrail、部分流失败、取消 drain、Trace 参数、零网络和旧 API 不双写。
 - 在线测试：只有显式授权后运行一次低预算冒烟，不把密钥和原始敏感输入写入记录。
 - 验收：在线未执行时最高状态为 `code_complete`；离线契约与在线冒烟均有证据后才能 `verified`。
 
