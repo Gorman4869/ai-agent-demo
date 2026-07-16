@@ -314,10 +314,17 @@ docker compose -f deploy/compose.yaml config --quiet
 ### M8-T1：Settings、在线开关与依赖决策
 
 - 依赖：C0-T4。
-- 产物：服务端 Settings、配置校验、更新后的 `.env.example`、依赖变更清单和 ADR 补充。
+- 产物：`backend/app/settings.py`、`backend/app/container.py`、配置测试、更新后的 `.env.example`、依赖变更清单和 ADR-0005。
 - 约束：默认 `ManualRuntime + MockModel + 内存 Store`；模型名必须来自环境配置，实施时核对当前官方文档。
 - 测试：缺失密钥、空模型、非法预算、在线开关关闭时均 fail closed；日志不包含密钥。
-- 验收：默认环境不触发网络；依赖安装已单独获用户许可。
+- 依赖决策：不新增依赖，不直接使用 MCP 传递安装的 `pydantic-settings` 或 `python-dotenv`；应用只解析显式进程环境。
+- 验收命令：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_settings backend.tests.test_container backend.tests.test_api backend.tests.test_identity -v
+```
+
+- 验收：默认环境不触发网络；本任务未新增或安装依赖，后续新增依赖仍按通用规则单独取得许可。
 
 ### M8-T2：Run、StoredRunEvent 与 Store 协议
 

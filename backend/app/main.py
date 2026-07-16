@@ -25,6 +25,7 @@ from backend.app.api.schemas import (
 )
 from backend.app.agent import CancellationToken
 from backend.app.agent.research_workflow import create_research_workflow
+from backend.app.container import ApplicationContainer
 from backend.app.evals import EvalCase, OfflineEvaluator
 from backend.app.knowledge import (
     DEMO_COURSE_DOCUMENT,
@@ -42,6 +43,7 @@ from backend.app.security import (
 from backend.app.services import InMemoryRunService
 from backend.app.services.run_service import RunRecord
 from backend.app.services.run_service import execute_agent
+from backend.app.settings import Settings
 from backend.app.tools import ToolExecutionContext
 
 
@@ -53,13 +55,39 @@ def create_app(
     knowledge_base: KnowledgeBase | None = None,
     memory: ConversationMemory | None = None,
     authenticator: StaticTokenAuthenticator | None = None,
+    *,
+    settings: Settings | None = None,
+    container: ApplicationContainer | None = None,
 ) -> FastAPI:
-    service = run_service or InMemoryRunService()
-    knowledge = knowledge_base or InMemoryKnowledgeBase()
-    conversation_memory = memory or ConversationMemory()
-    token_authenticator = authenticator or StaticTokenAuthenticator.from_environment()
+    legacy_dependencies = (
+        run_service,
+        knowledge_base,
+        memory,
+        authenticator,
+    )
+    if container is not None:
+        if settings is not None or any(
+            dependency is not None for dependency in legacy_dependencies
+        ):
+            raise ValueError(
+                "container cannot be combined with settings or dependency overrides"
+            )
+        resolved_container = container
+    else:
+        resolved_container = ApplicationContainer.create(
+            settings=settings,
+            run_service=run_service,
+            knowledge_base=knowledge_base,
+            memory=memory,
+            authenticator=authenticator,
+        )
+    service = resolved_container.run_service
+    knowledge = resolved_container.knowledge_base
+    conversation_memory = resolved_container.memory
+    token_authenticator = resolved_container.authenticator
     demo_document_chunk_count = knowledge.add(DEMO_COURSE_DOCUMENT)
     app = FastAPI(title="AI Agent Learning API", version="0.5.0")
+    app.state.container = resolved_container
 
     def current_principal(
         authorization: str | None = Header(default=None),

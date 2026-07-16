@@ -3,7 +3,7 @@
 - 更新时间：2026-07-16，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认提交：`6f8490a`
+- 最近已确认提交：`7dcdfa3`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -12,12 +12,12 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M8-T1` |
-| 状态 | `planned` |
+| 状态 | `code_complete` |
 | 目标 | 建立 Settings、显式在线开关和依赖决策，保持默认离线 fail closed |
 | 设计依据 | `docs/superpowers/specs/2026-07-16-ai-agent-transition-completion-design.md` |
-| 当前修改 | C0 文档基线已提交；尚未开始 M8 业务代码 |
+| 当前修改 | Settings、Run 预算、ApplicationContainer、`create_app()` 兼容接入、测试、`.env.example`、ADR-0005 和阶段速查已完成 |
 | 前置证据 | `V-20260716-001`、`V-20260716-002` |
-| 下一动作 | 阅读后端规约与现有配置/依赖/容器组装，产出 M8-T1 最小改动和依赖决策；未经许可不安装依赖 |
+| 下一动作 | 重跑审查后的全量离线回归，提交 M8-T1 实现，追加验证记录与 handoff；未经许可不安装依赖 |
 
 ## 里程碑状态
 
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | M0–M7 历史基线 | `code_complete` | 现有产物已落盘但审计后仅部分覆盖；未满足项由 M8–M14 接管，旧链暂不标记 `superseded` |
 | C0 连续性基线 | `verified` | 计划基线 `6f8490a`；验证见 `V-20260716-001`、`V-20260716-002` |
-| M8 真实模型与运行时 | `planned` | 依赖 C0 verified |
+| M8 真实模型与运行时 | `in_progress` | M8-T1 code complete，等待最终验证与 handoff |
 | M9 MCP Client 与 Skill | `planned` | 依赖 M8 Runtime 契约 |
 | M10 LangGraph 持久工作流 | `planned` | 依赖 M8、M9 |
 | M11 上下文、记忆与真实 RAG | `planned` | 依赖 M10 状态和 Store 协议 |
@@ -41,7 +41,7 @@
 
 ## 未验证修改
 
-- 当前没有业务代码修改。M8–M14 均未开始实现，不得把规划文档误读为完成证据。
+- M8-T1 工作区尚未提交；审查修订后的全量回归、最终 verification 和 handoff 尚未落盘。
 
 ## 恢复入口
 

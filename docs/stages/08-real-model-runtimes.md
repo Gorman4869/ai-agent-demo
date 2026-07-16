@@ -22,6 +22,27 @@
 | 易错 | 把 fake runner 当在线证据 | CI 与验收 | 能区分契约和冒烟 | M8-T6 |
 | 暂缓 | 第二家模型提供方 | 多云模型网关 | 知道适配边界 | 场景题 |
 
+## M8-T1 配置门禁速查
+
+| 配置 | 默认值 | 作用与边界 |
+| --- | --- | --- |
+| `AI_AGENT_RUNTIME` | `manual` | 可选 `manual`、`agents_sdk`、`langgraph` |
+| `AI_AGENT_MODEL_PROVIDER` | `mock` | Key 存在也不会自动从 `mock` 切到 `openai` |
+| `AI_AGENT_ONLINE_ENABLED` | `false` | 只接受明确的 `true` 或 `false` |
+| `AI_AGENT_TRACE_INCLUDE_SENSITIVE` | `false` | 当前课程始终拒绝敏感 Trace，避免 SDK 默认记录输入内容 |
+| `OPENAI_API_KEY` | 空 | 使用 `SecretStr`，不得写入源码、日志或验证记录 |
+| `OPENAI_MODEL` | 空 | 必须由环境显式指定，仓库不硬编码在线模型 |
+| `AI_AGENT_MAX_STEPS` | `8` | 单 Run 工作流步骤上限，服务端范围 1–64 |
+| `AI_AGENT_MAX_MODEL_CALLS` | `8` | 单 Run 模型调用上限，服务端范围 1–64 |
+| `AI_AGENT_RUN_TIMEOUT_MS` | `30000` | 单 Run 总超时，服务端范围 100–120000 毫秒 |
+| `AI_AGENT_MODEL_TIMEOUT_MS` | `20000` | 单次模型调用超时，不得大于 Run 总超时 |
+| `AI_AGENT_MAX_INPUT_TOKENS` | `16000` | 单 Run 累计输入预算，服务端范围 1–200000 |
+| `AI_AGENT_MAX_OUTPUT_TOKENS` | `2000` | 单 Run 累计输出预算，服务端范围 1–32000 |
+| `AI_AGENT_MAX_COST_USD` | `0.25` | 单 Run 累计费用预算，必须为有限正数且不大于 10 |
+| `AI_AGENT_MAX_MODEL_RETRIES` | `2` | 只允许模型临时错误使用，服务端范围 0–5 |
+
+`backend/.env.example` 只是模板，应用不会自动加载 `.env`。默认组合根只创建本地内存依赖，不实例化在线 Runner；Runtime 与预算的实际执行接线分别在 M8-T3、M8-T4 完成。
+
 ## 跟练顺序
 
 ### 第 1 次：配置与领域契约
@@ -54,6 +75,7 @@
 下列命令只有写入 verification log 后才算已验证：
 
 ```powershell
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_settings backend.tests.test_container -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_store_contract -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime -v
