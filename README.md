@@ -1,6 +1,8 @@
 # AI Agent 从原理到工程实战
 
-这是一个面向前端开发者的 12 周渐进式课程。主线采用 Python + FastAPI、Vue 3 + TypeScript，并用 TypeScript 完成 MCP 专项实验。项目先手写 Agent Loop，再进入 OpenAI Agents SDK、LangGraph、RAG、多 Agent、工程化和高级 Agent。
+这是一个面向前端开发者的渐进式课程：M0–M7 是 12 周基础线，M8–M14 是 14 周生产补齐线。主线采用 Python + FastAPI、Vue 3 + TypeScript，并用 TypeScript 完成 MCP 专项实验。项目先手写 Agent Loop，再进入真实 OpenAI Runtime、MCP Client、LangGraph 持久恢复、真实 RAG、实时 UI、工程化和高级 Agent。
+
+> 中断、换模型或换会话后，不要重新推断进度。先阅读[连续性恢复入口](docs/continuity/README.md)和[当前实施状态](docs/continuity/status.md)。
 
 ## 现在开始
 
@@ -11,11 +13,13 @@
 5. 在项目根目录运行：
 
 ```powershell
-python -m unittest discover -s backend/tests -v
-python -m backend.app.demo
+python -S -m unittest backend.tests.test_manual_agent_loop -v
+python -S -m backend.app.demo
 ```
 
-M1 只使用 Python 标准库，不需要 API Key，也不需要安装依赖。
+上述 M1 精确入口只使用 Python 标准库，不需要 API Key，也不需要安装依赖；全量后端测试需要先准备 `.venv` 和 M2 依赖。
+
+如果 WindowsApps 占位符抢占了 `python` 命令，而项目已有 `.venv`，可把上面两条命令的 `python` 替换为 `.\.venv\Scripts\python.exe`；保留 `-S` 即可继续验证 M1 不依赖第三方包。
 
 完成 M1 后进入 [第 2 阶段](docs/stages/02-api-frameworks-mcp.md)，学习 FastAPI、Agents SDK、LangGraph 与 MCP 的职责边界。
 
@@ -28,6 +32,8 @@ M1 只使用 Python 标准库，不需要 API Key，也不需要安装依赖。
 完成 M5 后进入 [第 6 阶段](docs/stages/06-advanced-agent-safety.md)，以代码 Agent 为完整项目，并完成多模态与浏览器 Agent 的受控最小实验。
 
 完成 M6 后进入 [第 7 阶段](docs/stages/07-system-design-capstone.md)，完成容量估算、故障演练、业务迁移与最终答辩。
+
+M0–M7 的现有产物不等于 30 项均已完成。继续按[实施计划 2.0](docs/implementation-plan.md)进入 M8–M14，补齐真实模型、MCP Client、持久化、真实 pgvector、真 SSE、CI/部署、浏览器和多模态作品集。
 
 ## 当前完整启动方式
 
@@ -68,6 +74,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 
 ## 文档导航
 
+- [连续性恢复入口](docs/continuity/README.md)
+- [当前工程状态](docs/continuity/status.md)
+- [验证证据日志](docs/continuity/verification-log.md)
+- [已知问题台账](docs/continuity/known-issues.md)
+- [M8–M14 补齐设计规格](docs/superpowers/specs/2026-07-16-ai-agent-transition-completion-design.md)
 - [设计规格](docs/specs/2026-07-15-ai-agent-learning-demo-design.md)
 - [实施计划](docs/implementation-plan.md)
 - [学习计划](docs/learning-plan.md)

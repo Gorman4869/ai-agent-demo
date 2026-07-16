@@ -7,11 +7,13 @@
 ## 安装与运行
 
 ```powershell
-D:\program\py\python.exe -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements-m2.txt
 .\.venv\Scripts\python.exe -m unittest discover -s backend/tests -v
 .\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload
 ```
+
+如果 `.venv` 已存在，跳过创建和安装步骤。课程仓库不依赖某台电脑上的 Python 绝对路径；可用 `Get-Command python -All` 确认当前解释器。
 
 打开 `/docs` 查看 FastAPI 自动生成的接口文档。真实 OpenAI 调用不是本阶段默认测试的一部分。
 
