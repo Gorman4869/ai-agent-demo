@@ -97,8 +97,8 @@
 
 ## 13. Durable Run and Store Contracts
 
-- `backend.app.domain.run.RunRecord` is the M8+ durable domain snapshot. `backend.app.services.run_service.RunRecord` is a legacy synchronous API record until M8-T3 migration; code that must reference the latter aliases it as `LegacyRunRecord`.
-- Legacy `run_service` and new `run_store` / `event_store` coexist in the Container without dual writes. New Stores are injected as a pair; an explicit EventStore must validate ownership against the matching RunStore.
+- `backend.app.domain.run.RunRecord` is the M8+ durable domain snapshot. `backend.app.services.run_service.RunRecord` remains the legacy synchronous HTTP/SSE record after M8-T3; code that must reference the latter aliases it as `LegacyRunRecord`. M12 owns the unified API migration.
+- Legacy `run_service` and new `run_store` / `event_store` coexist in the Container without dual writes. M8-T3 exposes the durable path programmatically through `run_coordinator`; old routes remain isolated. New Stores are injected as a pair, and an explicit EventStore validates ownership against the matching RunStore.
 - Run creation scopes idempotency to `(owner_id, idempotency_key_digest)`. A versioned canonical request digest distinguishes a safe replay from a conflicting request, and the raw key is never retained.
 - Run transitions use a monotonically increasing `version` compare-and-set. Terminal states never transition again, including to themselves.
 - Event IDs are caller-generated stable IDs. The Store assigns per-Run sequence and UTC time; same ID plus same content replays the original event, while changed content is a stable conflict.
@@ -109,4 +109,18 @@
 - Logs use `safe_summary()` or an explicit allowlist. `repr=False` is defense in depth and does not authorize `dataclasses.asdict()` on records containing content.
 - In-memory Store locks are single-event-loop and single-process only. The fixed nested order is Run lock before Event lock; code must never acquire them in reverse.
 - The shared Store contract tests are adapter-independent. PostgreSQL fixtures inherit the same contract instead of copying it.
-- A Run transition and its terminal event are not yet a generic atomic unit of work. M8-T3 defines the use-case boundary and M11 implements the PostgreSQL transaction; two independent Store calls must not be described as atomic.
+- Lifecycle start must use `commit_start()` and terminal settlement must use `commit_terminal()`. Ordinary `append()` rejects `run.started`, `run.completed`, `run.failed` and `run.cancelled`; Coordinator code must never simulate a lifecycle transaction with separate `transition()` and `append()` calls.
+- The in-memory lifecycle commit holds the Run lock before the Event lock and mutates both snapshots in one critical section. PostgreSQL must implement the same Protocol with one database transaction; the in-memory proof is not a multi-process or restart proof.
+
+## 14. Runtime and Coordination Contracts
+
+- `AgentRuntime` is async and SDK-independent. Its request, control, progress event and result types must not expose provider response objects through application layers.
+- Runtime owns model/tool/workflow execution and non-lifecycle progress only. `RunCoordinator` uniquely owns lifecycle events, Runtime selection, singleflight, cancellation arbitration and execution deadlines.
+- `RuntimeResult` currently represents only terminal completed, failed or cancelled outcomes. Approval pause and resume extend the contract in M10; they must not be encoded as a fake failure.
+- `PersistentEventEmitter` always awaits Store append before notifier delivery. A replay with `created=false` is not notified twice. Notifier failure or timeout is best effort and cannot roll back a durable event or change the Run outcome.
+- Store locks must be released before model, tool or notifier work. No callback or subscriber await is allowed inside the Run→Event critical section.
+- Runtime and notifier exceptions are converted to stable, safe categories or safe diagnostics. Raw exception text, prompts, tool arguments, tool results and provider payloads do not cross the persistence or logging boundary.
+- ManualRuntime creates a fresh synchronous Loop per Run and executes it in a worker thread. It maps only reviewed event fields, preserves old Loop behavior, and uses cooperative cancellation with a bounded cleanup grace. Code must not claim that a Python worker thread was hard-cancelled.
+- A durable start replay with `created=false` does not execute Runtime again. Multiple coordinators wait for the Store winner; process restart, lease expiry and orphaned-running recovery remain separate persistence concerns.
+- A progress Store failure is fail closed: do not notify or invent a terminal state when commit outcome is unavailable. Leave the durable Run for the recovery service and surface the stable Store error.
+- Default tests inject Manual/Mock or fake Runtime implementations and must not hide SDK or network calls. Online execution remains behind explicit Settings and a separately authorized verification command.

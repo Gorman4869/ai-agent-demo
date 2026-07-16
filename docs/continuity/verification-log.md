@@ -198,3 +198,79 @@
 - `M8-T2` 达到 `verified`；实现与验证锚点为 `4ac81b4`。
 - 新领域模型、异步 Store 扩展缝和可复用合同测试可以进入 M8-T3；旧教学 API 保持兼容。
 - 下一任务为 `M8-T3`，不得把 Store 基础描述成 Runtime、真实模型或数据库事务已经完成。
+
+## V-20260716-005：M8-T3 异步 Runtime 与 RunCoordinator
+
+- 任务：`M8-T3`
+- 时间：2026-07-16 13:15–14:24，Asia/Shanghai
+- 计划版本：2.0
+- 验证目标：实现提交 `b171ad0`，加 ADR、跟练、规范与连续性文档工作区
+- 模式：offline；未读取真实 API Key，未创建在线 Provider Runner，未访问模型服务，费用为 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator backend.tests.test_run_store_contract -q` | 0 | 实现提交后 60 项 Runtime、Coordinator 与 Store 核心回归通过 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator backend.tests.test_run_store_contract backend.tests.test_container backend.tests.test_api backend.tests.test_run_service backend.tests.test_manual_agent_loop backend.tests.test_observability -q` | 0 | 提交前 107 项新旧链兼容回归通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 0 | 197 项后端测试通过、1 项既有 Windows 环境跳过；Controlled Code-Agent Demo、pip check、Vue、MCP 与 Compose 配置全部通过 |
+| `.\.venv\Scripts\python.exe -m pip check` | 0 | 由统一验证执行；`No broken requirements found.`，本任务未新增或安装依赖 |
+| `npm.cmd run build --prefix frontend` | 0 | 由统一验证执行；`vue-tsc -b && vite build` 通过，Vite 8.1.4 转换 18 个模块 |
+| `npm.cmd run build --prefix mcp-servers/knowledge-server` | 0 | 由统一验证执行；TypeScript `tsc` 通过 |
+| `docker compose -f deploy/compose.yaml config --quiet` | 0 | 由统一验证执行；Compose 配置语法通过，不代表容器实际运行 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | handoff 前检查通过：52 个稳定任务、44 个 Markdown 文件 |
+| `git diff --check` | 0 | 无空白错误；只有 Git 的 LF/CRLF 转换提示 |
+
+### Runtime、持久事件与安全证据
+
+- `RuntimeRequest/Control/Event/Result` 和 async `AgentRuntime` 与 SDK 解耦；结果只允许一致的 completed、failed、cancelled 终态。
+- ManualRuntime 每次创建新同步 Loop，在 worker thread 中运行；旧结果与答案保持一致，旧生命周期被过滤，工具过程事件只保留审核白名单。
+- 测试秘密值确认输入、工具参数、工具结果、原始错误和异常文本不进入 Runtime repr、持久事件或公开失败。
+- 未知旧事件 fail closed；sink 失败不重跑同步 Loop，避免重复工具副作用。
+- 取消 worker 先设置共享 token，并只等待有界清理宽限；阻塞线程不能无限击穿 Coordinator deadline，后台结果/异常会被消费。
+- PersistentEventEmitter 先 await Store，再做有界 notifier；通知失败或超时不回滚事件、不改变 Run，精确重放不重复通知。
+
+### 生命周期、幂等与并发证据
+
+- `StartCommit` 在同一 Run→Event 锁对内提交 running 与 `run.started`；发布前故障注入证明 Run 保持 queued 且事件为空。
+- `TerminalCommit` 在同一临界区提交终态、answer/failure 与匹配事件；发布前故障注入证明两边均不可见。
+- 普通 append 拒绝 Coordinator 拥有的 started/completed/failed/cancelled 生命周期，不能绕过一次提交入口。
+- 同终态命令顺序及并发重放只有一次 `created=true`、一个 sequence；改 event data 或 outcome 为稳定 `event_conflict`。
+- complete 与 cancel 竞争同一 version 只有一个持久赢家；终态 event ID 包含目标状态，失败方读取赢家而不覆盖。
+- barrier 测试覆盖“取消发生在 token 检查与 append 之间”：晚到过程事件被终态检查拒绝，execute 返回 durable cancelled 而非 Store 异常。
+- 同 Coordinator 并发 execute 共享一个 shielded task；取消一个 waiter 不取消执行。两个 Coordinator 同时读取 queued 时只有 start claim 的创建者执行 Runtime，另一方等待相同 durable 结果。
+- 过程 Store unavailable 不通知、不伪造 failed，Run 明确保留 running 供恢复流程处理；该待办登记为 `KI-016`。
+
+### 旧链兼容与默认离线证据
+
+- Container 默认组合为匹配的内存 Store、ManualRuntime/MockModel 和 RunCoordinator；构造路径继续通过 socket 双守卫，无网络连接。
+- 默认 Coordinator 程序化执行能得到 `run.started -> run.completed`，并消费 max steps、model retries 与执行 deadline。
+- 旧 POST/GET Run 响应字段精确保持 `id/session_id/status/answer/event_types/error`；旧 HTTP/SSE 继续使用 legacy run_service，新 RunStore/EventStore 为空，没有双写。
+- 本任务未修改真实 Agents SDK、LangGraph 或在线配置门，也未把 fake/Mock 结果当作在线验证。
+
+### 审查中发现并修复
+
+- 首版只原子提交终态，start 仍是 transition+append；补 StartCommit、故障测试和普通 lifecycle append 拒绝。
+- 首版 active cancel 只设置 token，可能返回 true 后仍 completed；改为 cancelled TerminalCommit 与完成共享 CAS，并补确定性 barrier。
+- 首版所有终态共用 event ID，竞争可能产生 event conflict；ID 改为包含目标状态。
+- 首版 ManualRuntime 取消后无界等待 worker；改为有限 grace 和后台结果消费，并补阻塞 worker 反例。
+- 首版 notifier 无上界；增加独立短超时，启动等待会消耗执行 deadline，失败保持最佳努力语义。
+- 首版 cancel 可能穿过 emit token 检查再撞终态 append；增加 durable winner 折叠和 blocked append 竞争测试。
+- 首版跨 Coordinator 的 start 精确重放仍会再次执行 Runtime；改为只有 `created=true` 获得执行权，重放者等待 Store 赢家。
+
+### 警告与未验证范围
+
+- 全量测试继续出现既有 Starlette/httpx 弃用警告；未擅自安装 `httpx2` 或升级依赖。
+- notifier 故障测试预期记录三次安全 `run event notification failed`，日志不包含异常文本或事件数据。
+- Windows 符号链接安全测试继续因环境能力跳过，与前序基线一致。
+- Docker 仍警告无法读取用户级 `C:\Users\gorma\.docker\config.json`；Engine、镜像、容器、PostgreSQL/pgvector 和 Nginx 未验证。
+- PostgreSQL 同事务、多进程 lease、连接结果未知与重启恢复未验证；`KI-015` 只达到 mitigated，不能关闭。
+- ManualRuntime 完成同步 Loop 后才回放进度，线程不能硬取消；`KI-017` 保持 open。
+- waiting approval/resume、模型调用数、单次模型 timeout、Token、usage 和费用预算尚未接入新 Runtime；由 M8-T4/M10 继续。
+- 真实 SDK Runtime、在线模型与 M8-T6 付费冒烟尚未实现或执行。
+
+### 结论
+
+- `M8-T3` 达到 `verified`：实现锚点为 `b171ad0`，文档与 handoff 由后续本地提交固定。
+- `KI-015` 降为 mitigated；新增 `KI-016` 与 `KI-017`，避免把内存一次提交或同步适配器描述成生产恢复与真流式能力。
+- 下一任务为 `M8-T4`：先基于已锁定依赖和当前官方文档写 fake runner/event fixture 与 OpenAI Agents Runtime 离线契约；没有新的单次授权不得执行在线调用。

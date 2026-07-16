@@ -17,7 +17,7 @@
 | --- | --- | --- | --- | --- |
 | 必学 | Agent 定义与 Runner 执行的区别 | 真实 SDK 接入 | 能解释并实现完整执行 | M8-T4 |
 | 必学 | Runtime Protocol 与适配器 | 多模型/多框架 | 新增实现不修改 API | M8-T3 |
-| 必学 | 事件先持久化再推送 | SSE、恢复、审计 | 能证明断线不丢事件 | M8-T2、M8-T3 |
+| 必学 | 事件先持久化再推送 | SSE、恢复、审计 | 能证明通知前已存储、通知失败可重放；HTTP/SSE 断线 E2E 留给 M12 | M8-T2、M8-T3 |
 | 高频 | Tool Schema、结构化输出、usage | 工具型 Agent | 跨 Runtime 统一映射 | M8-T4、M8-T5 |
 | 易错 | 把 fake runner 当在线证据 | CI 与验收 | 能区分契约和冒烟 | M8-T6 |
 | 暂缓 | 第二家模型提供方 | 多云模型网关 | 知道适配边界 | 场景题 |
@@ -57,7 +57,7 @@ ApplicationContainer
       M8+ 持久主链：queued、CAS、审批暂停、恢复与续传
 ```
 
-两条链在 M8-T2 只并存，不双写。`main.py` 把旧类型显式命名为 `LegacyRunRecord`；新类型不具备旧类型的 `event_types/error` 展示字段，不能直接交给旧 `_to_run_response()`。M8-T3 才通过 Coordinator 接入新链，旧测试在迁移完成前继续作为兼容门禁。
+两条链在 M8-T2 只并存，不双写。`main.py` 把旧类型显式命名为 `LegacyRunRecord`；新类型不具备旧类型的 `event_types/error` 展示字段，不能直接交给旧 `_to_run_response()`。M8-T3 把 Coordinator 接入 Container 的程序化路径，但旧 HTTP/SSE 仍保持 legacy 行为；统一持久 API 与前端迁移属于 M12。
 
 ### Run 状态机与 CAS
 
@@ -129,7 +129,7 @@ Run 操作：Run lock
 
 固定锁序使“检查终态 + 追加事件”线性化，不能在持有 Event lock 时反向调用 RunStore。适配器无关合同测试覆盖 20 路幂等创建、完成/取消 CAS 竞争、同 event ID 并发重放和 50 路事件追加；M11 PostgreSQL 继续继承同一 mixin。
 
-当前仍不能宣称 `RunStore.transition()` 与 `EventStore.append()` 两次调用具有原子性：进程可能在终态事件和终态状态之间退出。风险记录为 `KI-015`，M8-T3 固定一次提交用例边界，M11 通过 PostgreSQL 同事务关闭。
+普通 `RunStore.transition()` 与 `EventStore.append()` 两次调用仍不具备原子性，不能用于生命周期。M8-T3 已增加 `commit_start()` 与 `commit_terminal()`，内存适配器在同一 Run→Event 锁对内提交状态和事件；`KI-015` 因而降为 mitigated，但 PostgreSQL 同事务、多进程竞争与重启证据仍由 M11 关闭。
 
 ### 本节跟练 Demo
 
@@ -144,6 +144,90 @@ Run 操作：Run lock
 4. 练习新增一个 `EchoRunStore` 测试 fixture，只实现 Protocol，不修改合同测试；它必须通过 owner、幂等、CAS 与事件测试。
 5. 故意把 EventStore 锁去掉，运行 50 路追加测试并解释为什么“本机偶尔通过”不等于并发正确；练习结束后恢复代码。
 6. 用自己的话说明为什么同 Key 同请求重放要返回 Run 的当前 running 状态，而不是重新生成 queued Run。
+
+## M8-T3 异步 Runtime 与协调器速查
+
+### 主链结构
+
+```text
+RunCoordinator
+├─ commit_start：queued -> running + run.started
+├─ AgentRuntime.run(request, emit, control)
+│  └─ ManualRuntime -> worker thread -> 白名单过程事件
+├─ PersistentEventEmitter：EventStore.append -> notifier
+└─ commit_terminal：终态 + 答案/安全失败 + 终态事件
+```
+
+| 组件 | 只负责什么 | 明确不负责什么 |
+| --- | --- | --- |
+| Runtime | 模型、工具、工作流和非生命周期过程事件 | 不写 RunStore，不产生 `run.*` 生命周期事件 |
+| Coordinator | Runtime 选择、singleflight、执行 deadline、取消和生命周期编排 | 不包含 Provider 响应类型或具体工具业务逻辑 |
+| Store | owner、CAS、sequence、重放和生命周期一次提交 | 不等待模型、工具或实时消费者 |
+| Notifier | 在事件已持久化后做有界、最佳努力的实时唤醒 | 不是真相源，失败不能回滚事件或改变 Run 结果 |
+
+### ManualRuntime 为什么不能直接转发旧 AgentEvent
+
+旧 Loop 的 `tool.completed/tool.failed` 事件包含工具原始结果和错误文本。新适配器只允许以下白名单：
+
+| 旧事件 | 可持久字段 |
+| --- | --- |
+| `model.retrying` | `attempt`、`model_duration_ms` |
+| `tool.started` | `id`、`name`、`model_duration_ms` |
+| `tool.completed` | `id`、`name`、`duration_ms`、`ok` |
+| `tool.failed` | 上述字段加稳定 `error_code` |
+
+用户输入、工具参数、工具 `value`、原始 `error_message` 和最终答案副本不能通过过程事件进入 Store。最终答案只进入 `RunRecord.answer`。未知旧事件类型 fail closed，避免旧 Loop 新增字段后绕过脱敏审查。
+
+ManualRuntime 使用 `asyncio.to_thread()` 包装同步 Loop。它在 Loop 完成后才按顺序回放过程事件，因此只是兼容适配器，不是真实时工具审计。取消时先设置共享 token，只等待有限清理宽限；Python 线程不能安全强杀，宽限后仍阻塞的模型或工具可能继续在后台收尾，该限制由 `KI-017` 跟踪。
+
+### 生命周期一次提交与竞争
+
+```text
+StartCommit
+  expected_version=0
+  -> running(version=1) + run.started(sequence=1)
+
+TerminalCommit
+  expected_version=1
+  -> completed | failed | cancelled
+  + 与状态匹配的 run.* 事件
+```
+
+- 生命周期 event ID 由 Run、阶段和目标状态稳定派生；重试不能换 ID。
+- 同一命令精确重放返回 `created=false`，不增加 sequence，也不重复 notifier。
+- start claim 只有 `created=true` 的 Coordinator 可以启动 Runtime；另一执行者等待并读取持久终态，不能重复工具副作用。
+- 取消不是“只设一个内存布尔值”：它也提交 cancelled CAS。若完成与取消竞争同一 version，Store 只接受一个赢家。
+- 普通 `EventStore.append()` 直接拒绝 `run.started/completed/failed/cancelled`，防止调用者绕过状态与事件一致性。
+
+### 失败矩阵
+
+| 故障点 | 规定结果 |
+| --- | --- |
+| StartCommit 发布前失败 | Run 保持 queued，`run.started` 不可见，Runtime 不启动 |
+| 过程 append 失败 | 不通知该事件、不伪造终态；Run 保持 running 等恢复服务处理 |
+| notifier 抛错或超时 | 事件已存；记录安全告警，Run 继续执行 |
+| Runtime 未配置或抛异常 | 写入安全分类的 failed，不包含原异常文本 |
+| cancel 与 complete 竞争 | version CAS 只有一个终态和一条匹配终态事件 |
+| cancel 发生在 token 检查与 append 之间 | 晚到 append 被拒绝，执行方读取 durable cancelled 赢家 |
+| TerminalCommit 发布前失败 | Run 与终态事件都不变化，不退化成两次调用 |
+| 调用方取消一个 execute waiter | 共享执行任务继续，其他 waiter 可得到结果 |
+
+执行 deadline 从 Coordinator 接受任务时开始，启动通知会消耗预算；Runtime 超时后还允许有限 worker 清理、终态提交和有界通知，所以它不是严格等于配置毫秒数的端到端硬墙钟。真实进度 Store 故障恢复、lease 与重启扫描由 `KI-016` 及 M11–M13 跟踪。
+
+### 本节跟练 Demo
+
+1. 运行 Runtime、Coordinator 与 Store 合同：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator backend.tests.test_run_store_contract -v
+```
+
+2. 对比 `test_direct_answer_matches_legacy_loop_and_filters_lifecycle`：最终答案保持一致，但新 Runtime 不把旧 `run.started/run.completed` 当过程事件发出。
+3. 仿照 `StaticRuntime` 实现一个 `EchoRuntime`，只返回 `RuntimeResult(completed)`；不得修改 Coordinator。
+4. 阅读 `InspectingNotifier`，解释为什么 notifier 被调用时事件已经能从 EventStore 重放。
+5. 在内存 Store 的 start/terminal fault seam 注入错误，验证 Run 和 Event 均未半提交。
+6. 阅读 cancel-vs-complete、blocked append 和双 Coordinator barrier 测试，画出各自的 CAS 赢家。
+7. 运行旧 API 兼容测试，确认字段仍为 `id/session_id/status/answer/event_types/error`，且 durable Store 为空。
 
 ## 跟练顺序
 

@@ -18,7 +18,9 @@
 | KI-012 | medium | closed | C0 | M1 文档零依赖命令、硬编码 Python 路径、测试数量与当前实现漂移 | `V-20260716-001`：删除硬编码路径和固定测试数；禁用 `site-packages` 后 7 项测试与 Demo 通过 |
 | KI-013 | medium | open | M10 | 当前多 Agent 是确定性节点，没有真实角色、handoff 和单 Agent 对照 | 多 Agent 与单 Agent 固定评测完成 |
 | KI-014 | medium | open | M11 | ConversationMemory 未接入 Run 且不持久化 | Agent 上下文读取、纠正、删除和重启恢复通过 |
-| KI-015 | high | open | M8–M11 | Run 终态转换与对应终态事件尚无跨 Store 原子 Unit of Work；内存 append 的终态 TOCTOU 已修复，但两次独立调用仍有崩溃窗口 | M8-T3 固定一次提交契约，M11 PostgreSQL 同事务 CAS 与终态事件竞争测试通过 |
+| KI-015 | high | mitigated | M8–M11 | M8-T3 已用 StartCommit/TerminalCommit 固定一次提交协议，并在内存 Run→Event 锁对内原子发布；PostgreSQL 同事务、多进程和连接结果未知重试尚未验证 | M11 PostgreSQL 继承合同测试，并通过同事务 CAS、精确重放、连接中断和多进程终态竞争 |
+| KI-016 | high | open | M11–M13 | Runtime 开始后的过程事件 Store 故障或进程退出会保留 running Run；当前选择 fail closed，不通知、不伪造终态，但尚无 lease、恢复扫描和安全重调度 | 持久 lease/heartbeat、RunRecoveryService、结果未知重试与重启恢复测试通过 |
+| KI-017 | medium | open | M8–M13 | ManualRuntime 在同步 Loop 完成后回放过程事件；阻塞 worker 只能协作取消并可能在有限宽限后后台收尾，不能提供真流式审计或硬取消 | 真实 async Runtime 成为主链；同步工具隔离、超时后副作用测试和进程级清理策略通过 |
 
 ## 状态值
 

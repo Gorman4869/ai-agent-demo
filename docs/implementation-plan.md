@@ -345,10 +345,14 @@ docker compose -f deploy/compose.yaml config --quiet
 ### M8-T3：异步 AgentRuntime 与 RunCoordinator
 
 - 依赖：M8-T2。
-- 产物：`AgentRuntime` Protocol、`ManualRuntime`、`RunCoordinator`、运行控制、持久 emitter，以及 Run 终态与终态事件的一次提交用例边界。
-- 兼容：保留现有 `ManualAgentLoop`、`execute_agent()` 和旧 API 测试。
-- 测试：事件先存储后通知、终态事件与状态一致、取消竞争、总超时、Runtime 失败、旧 Loop 结果一致。
-- 验收：同步手写 Loop 不被改写成 SDK；新协调器不包含具体工具业务逻辑。
+- 产物：`RuntimeRequest`、`RuntimeControl`、`RuntimeEvent`、`RuntimeResult`、`AgentRuntime` Protocol、`ManualRuntime`、`RunCoordinator`、运行控制和持久 emitter。
+- 生命周期所有权：Runtime 只产生非 `run.*` 过程事件；Coordinator 通过 `StartCommit` 一次提交 `queued -> running + run.started`，通过 `TerminalCommit` 一次提交终态、答案或安全失败以及对应终态事件。普通 `append()` 不得绕过这两个入口。
+- 兼容：保留现有同步 `ManualAgentLoop`、`execute_agent()`、旧 HTTP/SSE 和旧响应；M8-T3 只把新 Coordinator 接入 Container 的程序化路径，不双写旧 API，统一 API 属于 M12。
+- 执行语义：同一 Coordinator 的并发调用共享一个任务；多个 Coordinator 以持久 start claim 仲裁，只有 `created=true` 的执行者启动 Runtime；取消与完成通过 version CAS 竞争。
+- 测试：结果映射和事件脱敏、顺序 await、start/terminal 故障原子性、精确及并发重放、通知前已存储、通知失败/超时、取消与完成竞争、阻塞 append 窗口、共享 waiter、多 Coordinator、执行 deadline、同步 worker 有界取消宽限、Runtime/Store 失败和旧 API 不双写。
+- 当前结果边界：`RuntimeResult` 只接受 completed、failed、cancelled；waiting approval、interrupt 和 resume 属于 M10。模型调用数、单次模型超时、Token、usage 与费用预算继续由 M8-T4 及后续任务消费。
+- 验收：同步手写 Loop 不被改写成 SDK；新协调器不包含 Provider 或具体工具业务逻辑；内存锁内不等待模型、工具或 notifier。
+- 残余边界：PostgreSQL 同事务、多进程 lease、重启恢复和进度 Store 故障恢复属于 M11–M13；ManualRuntime 是同步兼容适配器，不是真流式也不能硬终止 Python worker thread。
 
 ### M8-T4：OpenAI Agents SDK Runtime
 
