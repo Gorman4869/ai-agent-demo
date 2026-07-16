@@ -274,3 +274,70 @@
 - `M8-T3` 达到 `verified`：实现锚点为 `b171ad0`，文档与 handoff 由后续本地提交固定。
 - `KI-015` 降为 mitigated；新增 `KI-016` 与 `KI-017`，避免把内存一次提交或同步适配器描述成生产恢复与真流式能力。
 - 下一任务为 `M8-T4`：先基于已锁定依赖和当前官方文档写 fake runner/event fixture 与 OpenAI Agents Runtime 离线契约；没有新的单次授权不得执行在线调用。
+
+## V-20260716-006：M8-T4 OpenAI Agents SDK Runtime 离线契约
+
+- 任务：`M8-T4`
+- 时间：2026-07-16 14:25–17:46，Asia/Shanghai
+- 计划版本：2.0
+- 验证目标：实现提交 `ac24dda`；文档、handoff 与最终状态由后续本地提交固定
+- 模式：offline；未读取真实 API Key，未访问模型服务，未执行 M8-T6 在线冒烟，在线费用为 0
+- 依赖事实：Python 3.12.10、Node.js v22.16.0、`openai-agents==0.18.2`、`openai==2.45.0`；本任务没有新增或安装依赖
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime -v` | 0 | 最终 33 项 SDK Runtime、工具桥、Coordinator 集成专项测试全部通过 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime backend.tests.test_runtime_contract backend.tests.test_run_coordinator backend.tests.test_tool_security backend.tests.test_container backend.tests.test_settings backend.tests.test_framework_runtimes backend.tests.test_api backend.tests.test_run_service -v` | 0 | 结构化分段补强前的兼容门 123 项全部通过；之后由最终专项与全量验证覆盖新增修改 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 0 | 最终 231 项后端测试通过、1 项既有 Windows 环境能力测试跳过；Controlled Code-Agent Demo、pip check、Vue 生产构建、MCP TypeScript 构建和 Compose 配置全部通过 |
+| `.\.venv\Scripts\python.exe -c "import importlib.metadata as m; ..."` | 0 | 确认本地锁定版本为 `openai-agents=0.18.2`、`openai=2.45.0` |
+| `git diff --check` / `git diff --cached --check` | 0 | 无空白错误；仅出现 Git 的 LF/CRLF 转换提示 |
+| `.\.venv\Scripts\python.exe -B -m compileall -q backend\app backend\tests` | 1 | 辅助检查因既有 `__pycache__` 目录拒绝写入报 `WinError 5`；没有删除缓存或改权限，模块已由 231 项测试实际导入执行 |
+
+### Runtime、结构化流与 SDK 契约证据
+
+- `OpenAIAgentsRuntime` 只依赖公开 Runner Protocol；生产路径调用 `Runner.run_streamed()`，测试注入 0.18.2 兼容 fake stream，不使用 SDK 私有 run-loop。
+- 每 Run 显式创建 `AsyncOpenAI(max_retries=0)` 和 `OpenAIResponsesModel`，并有界关闭 client；Container 构造时 patch client factory 与 socket 双守卫，证明不创建 client、不联网。
+- 每次 RunConfig 显式设置 `tracing_disabled=True`、`trace_include_sensitive_data=False`、显式 model、include usage、输出上限和唯一 SDK retry 层。
+- Provider strict schema 不携带 `minLength/maxLength`；空白和最终 UTF-8 字节上限仍由 Runtime 校验，降低首个在线请求因 schema 子集差异返回 400 的风险。
+- 结构化 raw JSON delta 经过跨 chunk 增量解码，只持久化 `answer` 正文。转义键、转义字符和 Unicode 代理对均有反例；安全 `segment` 区分多轮结构化对象，最终 typed output 必须与最后 segment 一致。
+- Runtime 只映射审核过的文本、工具开始/完成/失败和 Run aggregate usage；未知顶层 wrapper、handoff、扩展工作流、未闭合工具与不一致终态 fail closed，Provider raw 对象与异常文本不越界。
+
+### 工具、身份与持久安全证据
+
+- 每 Run 建立不可共享的可信 context、定义快照和隔离 ToolRegistry；Schema 重新校验名称、根关键字、深度、节点与 UTF-8 字节边界。
+- M8-T4 只暴露低风险、无需审批、无副作用工具。高风险、需审批或有副作用的定义在 M10 interruption/resume 完成前一律省略。
+- 工具执行继续经过角色和参数 Schema；SDK call ID 有界，参数、原始结果和异常文本不进入持久事件，custom data 只保留 `ok/error_code`。
+- 循环、过深、过多节点、非有限数、非法 Unicode、单值或累计超过 64 KB 的输出均返回稳定 `tool_output_invalid`；直接累计大字符串回归已覆盖。
+- Coordinator 在 active 执行前强制 `execution_context.principal_id == Run.owner_id`；身份不一致测试证明 Runtime 与 Store 都没有被调用。
+
+### 取消、错误、usage 与预算证据
+
+- token 取消、外层 task 取消、流处理失败和 sink 失败都在同一 stream 实例上 immediate cancel，并继续 drain 原迭代器；晚到事件被抑制，stalled consumer 使用两段有限清理。
+- Event sink/Store 异常不被重分类为 Provider 错误；与 token 或外层取消竞态时 Store 失败优先传播，避免隐藏持久化故障。
+- SDK/Provider timeout、认证、限流、连接、5xx、bad request、MaxTurns、guardrail 与行为错误映射为稳定 code/category/retryable，不公开 `str(exception)`。
+- `model.usage` 明确为 `scope=run` 聚合；费用保持 `None + unknown`，不伪造成单次 `UsageRecord` 或零费用。
+- `max_turns=min(max_steps,max_model_calls)` 与每请求 `max_output_tokens` 是前置上限；requests/input/output aggregate 在流结束后核对。SDK retry 可能先使 requests 超额，输入 Token 只能事后发现，`max_cost_usd` 尚未执行，HTTP timeout 也不是整个 Run 的硬墙钟；由 `KI-018` 跟踪。
+
+### 独立复审
+
+- SDK API 复审核对本地 0.18.2 的 `Runner/RunConfig/FunctionTool` 签名、事件字段和 `AsyncOpenAI` 生命周期；最终未发现阻断项。
+- Runtime 契约复审重点检查较紧 `max_turns`、外层取消与 Store 失败竞态、结构化终态和同迭代器 drain；阻断项与高风险项清零。
+- 工具/安全复审检查审批跨 Run、同步副作用、owner/principal、Schema TOCTOU、累计输出、call ID、Container 门禁和 client 延迟创建；阻断项与高风险项清零。
+
+### 警告、失败尝试与未验证范围
+
+- 全量测试仍有既有 Starlette/httpx 弃用警告；没有擅自安装 `httpx2` 或升级依赖。
+- notifier 负向测试按预期记录安全的 `run event notification failed`；日志没有事件数据或原始异常文本。
+- Windows 符号链接测试因当前环境能力跳过；与前序基线一致。
+- Docker Compose 仅配置语法通过，且仍警告无法读取用户级 Docker config；Engine、镜像、容器、PostgreSQL/pgvector 和 Nginx 未验证。
+- `compileall` 失败是缓存目录写权限问题，不将其隐藏成通过，也不把它误报为语法错误；实际测试导入是本次 Python 可执行证据。
+- 同步只读工具使用 `asyncio.to_thread()`；取消后不能硬停止底层线程，可能继续占用默认 executor，由 `KI-017` 跟踪。
+- Provider strict schema 接受度、真实 streaming、真实工具调用、真实 usage、模型质量、在线费用和 Provider 侧资源清理由 M8-T6 单次授权冒烟验证。
+
+### 结论
+
+- `M8-T4` 达到 `code_complete`，实现锚点为 `ac24dda`；不得写成在线 `verified`。
+- `KI-001` 降为 mitigated；`KI-017` 扩展同步工具线程边界；新增 `KI-018` 记录请求/Token/费用与全程 timeout 的真实治理缺口。
+- 下一任务为 `M8-T5`：保持 offline，完成 Manual、Agents SDK、LangGraph 三 Runtime 契约和 LangChain 最小对照；M8-T6 仍需用户新的单次在线授权。

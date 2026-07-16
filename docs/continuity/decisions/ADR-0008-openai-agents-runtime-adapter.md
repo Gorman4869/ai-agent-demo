@@ -57,7 +57,7 @@ model_settings.retry = bounded SDK retry policy
 
 | SDK 事实 | Runtime 事件 | 允许字段 |
 | --- | --- | --- |
-| `response.output_text.delta` | `model.output.delta` | `delta` |
+| `response.output_text.delta` | `model.output.delta` | `delta`；结构化模式增加正整数 `segment` |
 | `RunItemStreamEvent(tool_called)` | `tool.started` | `id`、`name` |
 | `RunItemStreamEvent(tool_output)` 成功 | `tool.completed` | `id`、`name`、`ok` |
 | `RunItemStreamEvent(tool_output)` 失败 | `tool.failed` | `id`、`name`、`ok`、`error_code` |
@@ -65,7 +65,7 @@ model_settings.retry = bounded SDK retry policy
 
 其他正常 raw response 事件显式忽略；未知顶层包装、缺失关键字段或不一致终态属于稳定 contract failure。不得把 raw response、SDK item、response ID、工具 arguments/output 或异常文本放进 EventStore。
 
-文本 delta 是最终输出内容的一部分，可以持久化供未来 SSE 重放，但必须限制单块和累计 UTF-8 字节，并依靠 `repr=False` 与日志白名单避免普通日志泄漏。
+文本 delta 是模型输出内容的一部分，可以持久化供未来 SSE 重放，但必须限制单块和累计 UTF-8 字节，并依靠 `repr=False` 与日志白名单避免普通日志泄漏。结构化模式用递增 `segment` 标识每个 JSON 对象；消费者只能在同一 segment 内追加，最终 Run answer 对应最后 segment。
 
 ### 6. 结构化输出只在 Runtime 内归一化
 
@@ -97,6 +97,19 @@ SDK turns、输出 Token、client timeout/retry 在调用前受限；完成后�
 - 输出 delta 会成为持久内容，后续 API/日志必须继续把它当敏感业务数据。
 - aggregate usage 可用于离线映射和事后预算判断，但不等于生产 usage ledger 或费用硬门禁。
 - 在线调用、真实 Provider 行为、资源清理和费用仍未验证。
+
+## 实现校准（2026-07-16）
+
+实现与独立复审对设计作出以下收紧；这些条目覆盖本 ADR 前文中较宽泛的描述：
+
+1. 使用结构化输出时，SDK 的 `response.output_text.delta` 承载 JSON framing，而不是可直接展示的答案。Runtime 采用增量 JSON 解码，只把 `answer` 字符串与安全递增 `segment` 作为 `model.output.delta` 发出；同一对象跨 chunk 保持编号，终态只核对最后 segment 与 typed final output 一致。JSON 括号、键名和 Provider raw 内容均不得持久化。
+2. M8-T4 不执行需要审批、高风险或有副作用的工具。每 Run 工具快照仍经过身份、角色和 Schema 校验，但审批中断、恢复、幂等副作用和持久审批证据属于 M10；在这些能力完成前必须 fail closed。
+3. SDK 的 `max_turns` 使用 `min(max_steps, max_model_calls)`，并把超限映射到更紧的应用预算。但 SDK retry 会计入 aggregate requests，因此真实请求数仍可能先超出近似上限，再在 Run 结束后被发现；输入 Token 同样只能事后核对，费用没有可信定价时不能执行硬门禁。
+4. client timeout 是 HTTP 各阶段和流读取 timeout，不是整个模型执行的硬墙钟。Coordinator 的 `run_timeout_ms` 才是当前 Run 级期限；已开始的 Provider 请求和 worker thread 仍只能有界清理，不能宣称被撤销。
+5. 流取消必须在原 `stream_events()` 迭代器上执行 immediate cancel 并继续 drain，停止任何新事件。若外层 task 取消与 Event sink/Store 失败竞态，Store 失败优先向 Coordinator 传播，避免把持久化故障伪装成普通取消。
+6. 显式 client 每 Run 创建并在有界清理内关闭。同步低风险工具通过 worker thread 运行；即使 Run 已取消，阻塞线程也可能继续占用 executor，该风险由 `KI-017` 跟踪。
+
+本次离线实现最高状态为 `code_complete`。Provider 对 strict schema、真实流、真实 usage 和费用的行为尚无在线证据，继续由 M8-T6 的单次授权冒烟验证。
 
 ## 未采用方案
 
