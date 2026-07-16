@@ -134,3 +134,67 @@
 - `M8-T1` 达到 `verified`；实现与验证锚点为 `c8b968b`。
 - `KI-001`、`KI-003` 保持 open；本任务没有用配置存在冒充真实 Runner 或 LangChain 完成。
 - 下一任务为 `M8-T2`，不得提前把 M8 整体标记为完成或 accepted。
+
+## V-20260716-004：M8-T2 持久 Run 与 Store 契约
+
+- 任务：`M8-T2`
+- 时间：2026-07-16 12:18–13:11，Asia/Shanghai
+- 计划版本：2.0
+- 验证目标：实现提交 `4ac81b4`
+- 模式：offline；未读取真实 API Key，未创建在线 Runner，未访问模型服务，费用为 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract -v` | 0 | 32 项领域与 Store 测试全部通过 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract backend.tests.test_settings backend.tests.test_container backend.tests.test_api backend.tests.test_run_service -v` | 0 | 中途兼容门 70 项全部通过；之后的补测由全量验证覆盖 |
+| `.\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests -v` | 0 | 最终 156 项通过，1 项既有 Windows 符号链接能力测试跳过，0 失败 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 0 | 再次完成 156/1 后端回归、Controlled Code-Agent Demo、pip check、Vue 构建、MCP 构建和 Compose 配置 |
+| `.\.venv\Scripts\python.exe -m pip check` | 0 | `No broken requirements found.`；本任务未新增或安装依赖 |
+| `npm.cmd run build --prefix frontend` | 0 | `vue-tsc -b && vite build` 通过；Vite 8.1.4 转换 18 个模块 |
+| `npm.cmd run build --prefix mcp-servers/knowledge-server` | 0 | TypeScript `tsc` 构建通过 |
+| `docker compose -f deploy/compose.yaml config --quiet` | 0 | Compose 配置语法通过；不代表容器运行通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、42 个 Markdown 文件；提交前链接和状态检查通过 |
+| `git diff --check` / `git diff --cached --check` | 0 | 无空白错误；只有 Git 的 LF/CRLF 转换提示 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract -q` | 0 | 实现提交 `4ac81b4` 后 33 项快速回归通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | handoff 加入后 52 个稳定任务、43 个 Markdown 文件全部通过 |
+
+### 行为、并发与安全证据
+
+- 新 Run 状态固定为 queued、running、waiting_approval、completed、failed、cancelled；合法边、非法边、同状态转换和终态不可回退均有测试。
+- `(owner_id, idempotency_key_digest)` 幂等作用域在 20 路并发创建中只有一个赢家；同 Key 不同请求并发产生稳定冲突，不覆盖原 Run，也不泄漏 Key 或输入。
+- 版本 CAS 使 completed 与 cancelled 竞争只有一个成功；错误 owner 与不存在 Run 使用一致的隐藏语义。
+- 50 路成功事件追加产生唯一递增序号；内存实现额外证明全部提交时精确为 1–50。相同 event ID 并发只创建一条，改内容稳定冲突。
+- 终态检查与 append 使用固定 Run lock → Event lock 顺序。独立确定性反例复核确认旧 TOCTOU 已关闭，公共 API 没有反向锁链或死锁环。
+- 事件和工具数据拒绝非字符串 Key、NaN/Infinity、非法 Unicode、循环、超深/超多节点与超过 64,000 字节的数据；Store 写入和每次返回均深度隔离。
+- Tool 审批拒绝可以在未执行时进入 failed；工具时间不能倒退。副作用记录创建时即要求幂等摘要，持久化还原也不能绕过。
+- Usage 按每次模型调用建模，未知费用保持 `None`，已知费用必须为 `Decimal` 并带来源；float 金额和 bool Token 被拒绝。
+- Run/Tool 提供显式 `safe_summary()`；原始输入、Key、答案、工具参数、原始结果和公开错误内容不进入安全投影。
+- 敏感模式扫描只命中既有空 `OPENAI_API_KEY=` 断言和本地教学 Token 示例，人工复核没有真实密钥、Token 或密码。
+- 新 Store 已进入 Container，但旧 `run_service`、旧 API 和旧 SSE 不双写；`main.py` 用 `LegacyRunRecord` 明确旧类型边界。
+
+### 审查中发现并修复
+
+- 首版 Tool 状态图允许 waiting_approval → failed，但不变量错误地要求 failed 必须有 started_at；补审批拒绝测试并修复。
+- 首版 Tool 没有 updated_at，等待审批后时间可倒退；增加单调更新时间并补反例。
+- 首版副作用工具可创建无幂等键的死记录；改为创建和持久化还原都 fail closed。
+- 首版非法 Unicode 可能逸出 `UnicodeEncodeError`；规范 JSON、请求摘要和文本边界现在统一转换为稳定 `ValueError`。
+- 首版 EventStore 在读取 Run 后再取 Event 锁，终态转换可穿过检查；改为同一临界区的 Run → Event 固定锁序并复测。
+- 首版分页先复制全部剩余事件再切片；改为 `islice` 后再生成快照，限制锁占用与复制量。
+- 首版合同测试绑定内存对象身份；已抽成适配器无关 mixin，值相等断言可由 M11 PostgreSQL 复用。
+
+### 警告与未验证范围
+
+- 全量测试仍出现既有 Starlette/httpx 弃用警告；本任务未擅自安装 `httpx2` 或升级依赖。
+- Windows 符号链接安全测试继续因环境能力跳过，与 C0/M8-T1 基线一致。
+- Docker 仍警告无法读取用户级 `C:\Users\gorma\.docker\config.json`；Engine、镜像、容器、PostgreSQL/pgvector 和 Nginx 未验证。
+- 内存锁只承诺单进程、单 event loop；不能替代多 worker 或数据库唯一约束。
+- `RunStore.transition()` 与 `EventStore.append()` 仍不是通用原子 Unit of Work。`KI-015` 保持 open，由 M8-T3 固定用例契约、M11 PostgreSQL 同事务关闭。
+- M8-T3 Runtime/Coordinator、M8-T4 真实 Runner 与 M8-T6 在线冒烟尚未实现或执行。
+
+### 结论
+
+- `M8-T2` 达到 `verified`；实现与验证锚点为 `4ac81b4`。
+- 新领域模型、异步 Store 扩展缝和可复用合同测试可以进入 M8-T3；旧教学 API 保持兼容。
+- 下一任务为 `M8-T3`，不得把 Store 基础描述成 Runtime、真实模型或数据库事务已经完成。
