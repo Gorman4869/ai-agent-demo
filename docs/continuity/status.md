@@ -3,7 +3,8 @@
 - 更新时间：2026-07-16，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认提交：`b171ad0`
+- 最近已确认实现提交：`b171ad0`
+- 最近文档闭环提交：`5086ddc`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -41,10 +42,10 @@
 
 ## 未验证修改
 
-- 当前未提交修改仅为 M8-T3 的计划、规范、ADR、验证记录、跟练与 handoff 文档闭环；没有未验证的业务代码。
+- 当前工作区没有未提交或未验证修改。M8-T3 业务实现锚点为 `b171ad0`，文档闭环锚点为 `5086ddc`。
 - 实现提交 `b171ad0` 已通过 60 项提交后核心回归和统一验证：197 项后端测试通过、1 项既有环境跳过，前端、MCP、pip 与 Compose 配置均通过。
 - `KI-015` 已 mitigated：内存 start/terminal 一次提交已实现；PostgreSQL 同事务与多进程证据仍缺。`KI-016`、`KI-017` 分别跟踪 running 恢复与同步兼容 Runtime 限制。
 
 ## 恢复入口
 
-若本轮中断，保留实现提交 `b171ad0`，依次阅读 `docs/continuity/handoffs/2026-07-16-m8-t3-runtime-coordinator.md`、`docs/continuity/decisions/ADR-0007-runtime-coordinator-lifecycle-commits.md` 与 `V-20260716-005`。M8-T3 已验证，不要重做或迁移旧 HTTP/SSE；从 M8-T4 的 fake runner/event fixture 开始。
+若本轮中断，保留实现提交 `b171ad0` 与文档闭环提交 `5086ddc`，依次阅读 `docs/continuity/handoffs/2026-07-16-m8-t3-runtime-coordinator.md`、`docs/continuity/decisions/ADR-0007-runtime-coordinator-lifecycle-commits.md` 与 `V-20260716-005`。M8-T3 已验证，不要重做或迁移旧 HTTP/SSE；从 M8-T4 的 fake runner/event fixture 开始。
