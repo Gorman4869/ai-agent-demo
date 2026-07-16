@@ -1,0 +1,502 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from threading import Lock
+from typing import Any
+from uuid import uuid4
+
+
+ToolHandler = Callable[[dict[str, Any]], Any]
+ApprovalClock = Callable[[], datetime]
+
+
+class ToolRisk(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+@dataclass(frozen=True)
+class ToolApproval:
+    id: str
+    principal_id: str
+    tool_call_id: str
+    tool_name: str
+    arguments_digest: str
+    expires_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalDecision:
+    approved: bool
+    reason: str
+
+
+class InMemoryApprovalStore:
+    """Consume exact, single-use approvals for the teaching runtime."""
+
+    def __init__(self, *, clock: ApprovalClock | None = None) -> None:
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._approvals: dict[tuple[str, str, str, str], ToolApproval] = {}
+        self._consumed: set[str] = set()
+        self._lock = Lock()
+
+    def grant(
+        self,
+        *,
+        principal_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        expires_at: datetime | None = None,
+    ) -> ToolApproval:
+        if (
+            expires_at is not None
+            and (expires_at.tzinfo is None or expires_at.utcoffset() is None)
+        ):
+            raise ValueError("approval expires_at must be timezone-aware")
+        approval = ToolApproval(
+            id=str(uuid4()),
+            principal_id=_required_name(principal_id, "principal_id"),
+            tool_call_id=_required_name(tool_call_id, "tool_call_id"),
+            tool_name=_required_name(tool_name, "tool_name"),
+            arguments_digest=tool_arguments_digest(arguments),
+            expires_at=expires_at,
+        )
+        key = _approval_key(approval)
+        with self._lock:
+            if key in self._approvals:
+                raise ValueError("an approval already exists for this exact tool call")
+            self._approvals[key] = approval
+        return approval
+
+    def consume(
+        self,
+        *,
+        principal_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> ApprovalDecision:
+        key = (
+            principal_id,
+            tool_call_id,
+            tool_name,
+            tool_arguments_digest(arguments),
+        )
+        with self._lock:
+            approval = self._approvals.get(key)
+            if approval is None:
+                return ApprovalDecision(False, "exact_call_approval_missing")
+            if approval.id in self._consumed:
+                return ApprovalDecision(False, "approval_already_consumed")
+            if approval.expires_at is not None and self._clock() >= approval.expires_at:
+                return ApprovalDecision(False, "approval_expired")
+            self._consumed.add(approval.id)
+        return ApprovalDecision(True, "approved")
+
+
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    """Trusted caller identity and approvals for one tool execution boundary.
+
+    The application layer must build this context from authenticated state and
+    approval records. Tool arguments are deliberately excluded from it.
+    """
+
+    principal_id: str = "anonymous"
+    roles: frozenset[str] = field(default_factory=frozenset)
+    approval_store: InMemoryApprovalStore | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        principal_id = self.principal_id.strip()
+        if not principal_id:
+            raise ValueError("principal_id must not be empty")
+        object.__setattr__(self, "principal_id", principal_id)
+        object.__setattr__(self, "roles", _normalize_names(self.roles, "role"))
+
+
+@dataclass(frozen=True)
+class ToolDefinition:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    handler: ToolHandler
+    allowed_roles: frozenset[str] = field(default_factory=frozenset)
+    risk_level: ToolRisk = ToolRisk.LOW
+    has_side_effects: bool = False
+    requires_approval: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "allowed_roles",
+            _normalize_names(self.allowed_roles, "allowed role"),
+        )
+        if not isinstance(self.risk_level, ToolRisk):
+            object.__setattr__(self, "risk_level", ToolRisk(self.risk_level))
+        _validate_schema_definition(self.input_schema)
+
+    @property
+    def approval_required(self) -> bool:
+        """Return the effective policy; mandatory controls cannot be disabled."""
+        return (
+            self.requires_approval
+            or self.has_side_effects
+            or self.risk_level is ToolRisk.HIGH
+        )
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    ok: bool
+    value: Any = None
+    error_code: str | None = None
+    error_message: str | None = None
+    error_details: dict[str, Any] | None = None
+
+
+class ToolRegistry:
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolDefinition] = {}
+
+    def register(self, tool: ToolDefinition) -> None:
+        if tool.name in self._tools:
+            raise ValueError(f"Tool already registered: {tool.name}")
+        self._tools[tool.name] = tool
+
+    def definitions(
+        self,
+        *,
+        context: ToolExecutionContext | None = None,
+    ) -> tuple[ToolDefinition, ...]:
+        execution_context = context or ToolExecutionContext()
+        return tuple(
+            tool
+            for tool in self._tools.values()
+            if not tool.allowed_roles
+            or not tool.allowed_roles.isdisjoint(execution_context.roles)
+        )
+
+    def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        context: ToolExecutionContext | None = None,
+        call_id: str | None = None,
+    ) -> ToolResult:
+        tool = self._tools.get(name)
+        if tool is None:
+            return ToolResult(
+                ok=False,
+                error_code="unknown_tool",
+                error_message=f"Unknown tool: {name}",
+            )
+
+        execution_context = context or ToolExecutionContext()
+        denied = _authorize(
+            tool,
+            execution_context,
+            call_id=call_id,
+            arguments=arguments,
+        )
+        if denied is not None:
+            return denied
+
+        validation_error = _validate_arguments(arguments, tool.input_schema)
+        if validation_error:
+            return ToolResult(
+                ok=False,
+                error_code="invalid_arguments",
+                error_message=validation_error,
+            )
+
+        try:
+            return ToolResult(ok=True, value=tool.handler(arguments))
+        except TimeoutError:
+            return ToolResult(
+                ok=False,
+                error_code="tool_timeout",
+                error_message=f"Tool timed out: {tool.name}",
+            )
+        except PermissionError:
+            return ToolResult(
+                ok=False,
+                error_code="tool_permission_error",
+                error_message=f"Tool permission error: {tool.name}",
+            )
+        except OSError:
+            return ToolResult(
+                ok=False,
+                error_code="tool_io_error",
+                error_message=f"Tool I/O error: {tool.name}",
+            )
+        except (TypeError, ValueError):
+            return ToolResult(
+                ok=False,
+                error_code="tool_execution_failed",
+                error_message=f"Tool execution failed: {tool.name}",
+            )
+
+
+def _authorize(
+    tool: ToolDefinition,
+    context: ToolExecutionContext,
+    *,
+    call_id: str | None,
+    arguments: Mapping[str, Any],
+) -> ToolResult | None:
+    if tool.allowed_roles and tool.allowed_roles.isdisjoint(context.roles):
+        return ToolResult(
+            ok=False,
+            error_code="permission_denied",
+            error_message=f"Permission denied for tool: {tool.name}",
+            error_details={
+                "reason": "role_not_allowed",
+                "tool_name": tool.name,
+                "principal_id": context.principal_id,
+                "required_roles": sorted(tool.allowed_roles),
+                "actual_roles": sorted(context.roles),
+            },
+        )
+
+    if tool.approval_required:
+        if call_id is None or context.approval_store is None:
+            return _approval_denied(tool, context, "exact_call_approval_missing")
+        try:
+            decision = context.approval_store.consume(
+                principal_id=context.principal_id,
+                tool_call_id=call_id,
+                tool_name=tool.name,
+                arguments=arguments,
+            )
+        except ValueError:
+            return _approval_denied(tool, context, "arguments_not_approvable")
+        if not decision.approved:
+            return _approval_denied(tool, context, decision.reason)
+
+    return None
+
+
+def _validate_arguments(arguments: dict[str, Any], schema: dict[str, Any]) -> str | None:
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+
+    for field_name in required:
+        if field_name not in arguments:
+            return f"Missing required argument: {field_name}"
+
+    for field_name, value in arguments.items():
+        field_schema = properties.get(field_name)
+        if field_schema is None:
+            return f"Unexpected argument: {field_name}"
+
+        expected_type = field_schema.get("type")
+        if expected_type == "number" and not _is_number(value):
+            return f"Argument {field_name} must be a number"
+        if expected_type == "integer" and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            return f"Argument {field_name} must be an integer"
+        if expected_type == "string" and not isinstance(value, str):
+            return f"Argument {field_name} must be a string"
+        if expected_type == "boolean" and not isinstance(value, bool):
+            return f"Argument {field_name} must be a boolean"
+        if "enum" in field_schema and value not in field_schema["enum"]:
+            return f"Argument {field_name} must be one of {field_schema['enum']!r}"
+        if isinstance(value, str):
+            if len(value) < field_schema.get("minLength", 0):
+                return f"Argument {field_name} is shorter than minLength"
+            if len(value) > field_schema.get("maxLength", math.inf):
+                return f"Argument {field_name} is longer than maxLength"
+            pattern = field_schema.get("pattern")
+            if pattern is not None and re.fullmatch(pattern, value) is None:
+                return f"Argument {field_name} does not match pattern"
+        if _is_number(value):
+            if "minimum" in field_schema and value < field_schema["minimum"]:
+                return f"Argument {field_name} is below minimum"
+            if "maximum" in field_schema and value > field_schema["maximum"]:
+                return f"Argument {field_name} is above maximum"
+
+    return None
+
+
+def _normalize_names(values: frozenset[str], label: str) -> frozenset[str]:
+    normalized = frozenset(value.strip() for value in values)
+    if "" in normalized:
+        raise ValueError(f"{label} must not be empty")
+    return normalized
+
+
+def _approval_denied(
+    tool: ToolDefinition,
+    context: ToolExecutionContext,
+    reason: str,
+) -> ToolResult:
+    return ToolResult(
+        ok=False,
+        error_code="approval_required",
+        error_message=f"Explicit approval required for tool: {tool.name}",
+        error_details={
+            "reason": reason,
+            "tool_name": tool.name,
+            "principal_id": context.principal_id,
+            "risk_level": tool.risk_level.value,
+            "has_side_effects": tool.has_side_effects,
+        },
+    )
+
+
+def tool_arguments_digest(arguments: Mapping[str, Any]) -> str:
+    try:
+        payload = json.dumps(
+            dict(arguments),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("tool arguments must be JSON serializable") from error
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _approval_key(approval: ToolApproval) -> tuple[str, str, str, str]:
+    return (
+        approval.principal_id,
+        approval.tool_call_id,
+        approval.tool_name,
+        approval.arguments_digest,
+    )
+
+
+def _required_name(value: str, label: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{label} must not be empty")
+    return normalized
+
+
+def _is_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _validate_schema_definition(schema: Mapping[str, Any]) -> None:
+    allowed_root = {"type", "properties", "required", "additionalProperties"}
+    unsupported_root = set(schema) - allowed_root
+    if unsupported_root:
+        raise ValueError(f"Unsupported tool schema keywords: {sorted(unsupported_root)}")
+    if schema.get("type") != "object":
+        raise ValueError("Tool input schema type must be object")
+    properties = schema.get("properties")
+    required = schema.get("required", [])
+    if not isinstance(properties, dict):
+        raise ValueError("Tool input schema properties must be an object")
+    if not isinstance(required, list) or not all(
+        isinstance(name, str) for name in required
+    ):
+        raise ValueError("Tool input schema required must be a string array")
+    if any(name not in properties for name in required):
+        raise ValueError("Tool input schema required fields must exist in properties")
+    if (
+        "additionalProperties" in schema
+        and schema["additionalProperties"] is not False
+    ):
+        raise ValueError("Tool input schema does not allow additionalProperties")
+    if len(required) != len(set(required)):
+        raise ValueError("Tool input schema required fields must be unique")
+
+    allowed_property = {
+        "type",
+        "enum",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "minimum",
+        "maximum",
+    }
+    supported_types = {"string", "number", "integer", "boolean"}
+    for name, field_schema in properties.items():
+        if not isinstance(name, str) or not isinstance(field_schema, dict):
+            raise ValueError("Tool property schemas must be named objects")
+        unsupported = set(field_schema) - allowed_property
+        if unsupported:
+            raise ValueError(
+                f"Unsupported schema keywords for {name}: {sorted(unsupported)}"
+            )
+        if field_schema.get("type") not in supported_types:
+            raise ValueError(f"Unsupported schema type for {name}")
+        field_type = field_schema["type"]
+        enum_values = field_schema.get("enum")
+        if enum_values is not None:
+            if not isinstance(enum_values, list) or not enum_values:
+                raise ValueError(f"Schema enum for {name} must be a non-empty array")
+            if any(not _matches_schema_type(value, field_type) for value in enum_values):
+                raise ValueError(f"Schema enum values for {name} have invalid types")
+        string_keywords = {"minLength", "maxLength", "pattern"} & set(field_schema)
+        if string_keywords and field_type != "string":
+            raise ValueError(f"String schema keywords require string type for {name}")
+        numeric_keywords = {"minimum", "maximum"} & set(field_schema)
+        if numeric_keywords and field_type not in {"number", "integer"}:
+            raise ValueError(f"Numeric schema keywords require numeric type for {name}")
+        if field_type == "string":
+            min_length = field_schema.get("minLength", 0)
+            max_length = field_schema.get("maxLength", math.inf)
+            if (
+                not isinstance(min_length, int)
+                or isinstance(min_length, bool)
+                or min_length < 0
+                or (
+                    "maxLength" in field_schema
+                    and (
+                        not isinstance(max_length, int)
+                        or isinstance(max_length, bool)
+                        or max_length < min_length
+                    )
+                )
+            ):
+                raise ValueError(f"Invalid string length constraints for {name}")
+        if field_type in {"number", "integer"}:
+            minimum = field_schema.get("minimum", -math.inf)
+            maximum = field_schema.get("maximum", math.inf)
+            if (
+                ("minimum" in field_schema and not _is_number(minimum))
+                or ("maximum" in field_schema and not _is_number(maximum))
+                or minimum > maximum
+            ):
+                raise ValueError(f"Invalid numeric constraints for {name}")
+        if "pattern" in field_schema:
+            if not isinstance(field_schema["pattern"], str):
+                raise ValueError(f"Invalid schema pattern for {name}")
+            try:
+                re.compile(field_schema["pattern"])
+            except (re.error, TypeError) as error:
+                raise ValueError(f"Invalid schema pattern for {name}") from error
+
+
+def _matches_schema_type(value: object, schema_type: str) -> bool:
+    if schema_type == "string":
+        return isinstance(value, str)
+    if schema_type == "number":
+        return _is_number(value)
+    if schema_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "boolean":
+        return isinstance(value, bool)
+    return False

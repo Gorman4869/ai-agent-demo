@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Summary"
+  short_description: "Create concise summaries grounded in supplied evidence"
+  default_prompt: "Use $research-summary to create a concise, cited summary from the supplied evidence."

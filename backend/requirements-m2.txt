@@ -1,0 +1,8 @@
+# M2: API, Agent SDK, graph orchestration, and MCP learning dependencies.
+fastapi==0.139.0
+uvicorn==0.51.0
+httpx==0.28.1
+openai-agents==0.18.2
+langchain==1.3.13
+langgraph==1.2.9
+mcp==1.28.1

@@ -1,0 +1,21 @@
+{
+  "name": "ai-agent-learning-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@vitejs/plugin-vue": "latest",
+    "typescript": "5.9.3",
+    "vite": "latest",
+    "vue-tsc": "latest"
+  }
+}
