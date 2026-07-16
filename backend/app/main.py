@@ -41,7 +41,7 @@ from backend.app.security import (
     StaticTokenAuthenticator,
 )
 from backend.app.services import InMemoryRunService
-from backend.app.services.run_service import RunRecord
+from backend.app.services.run_service import RunRecord as LegacyRunRecord
 from backend.app.services.run_service import execute_agent
 from backend.app.settings import Settings
 from backend.app.tools import ToolExecutionContext
@@ -388,7 +388,7 @@ def create_app(
     return app
 
 
-def _to_run_response(run: RunRecord) -> RunResponse:
+def _to_run_response(run: LegacyRunRecord) -> RunResponse:
     return RunResponse(
         id=run.id,
         session_id=run.session_id,
@@ -451,7 +451,9 @@ def _require_role(principal: Principal, role: str) -> None:
         )
 
 
-async def _wait_for_cancelled_run(run_task: asyncio.Task[RunRecord]) -> None:
+async def _wait_for_cancelled_run(
+    run_task: asyncio.Task[LegacyRunRecord],
+) -> None:
     try:
         await asyncio.wait_for(asyncio.shield(run_task), timeout=0.25)
     except TimeoutError:
@@ -462,7 +464,7 @@ async def _wait_for_cancelled_run(run_task: asyncio.Task[RunRecord]) -> None:
         return
 
 
-def _consume_task_result(run_task: asyncio.Task[RunRecord]) -> None:
+def _consume_task_result(run_task: asyncio.Task[LegacyRunRecord]) -> None:
     try:
         run_task.result()
     except asyncio.CancelledError:

@@ -5,7 +5,7 @@
 - Language: Python 3.11+ syntax; verified with Python 3.12.10.
 - Frameworks: FastAPI for HTTP, LangGraph for explicit state workflows, OpenAI Agents SDK for the SDK comparison, and MCP SDK for protocol labs.
 - Dependency management: project-local `.venv` with direct versions locked in `backend/requirements-m2.txt`.
-- Layers: `domain` owns stable types, `models` owns model adapters, `tools` owns tool contracts, `knowledge` owns retrieval, `memory` owns memory policies, `services` owns use cases, `agent` owns orchestration, `observability` owns run summaries, and `evals` owns offline behavior checks.
+- Layers: `domain` owns stable types, `stores` owns persistence protocols and adapters, `models` owns model adapters, `tools` owns tool contracts, `knowledge` owns retrieval, `memory` owns memory policies, `services` owns use cases, `agent` owns orchestration, `observability` owns run summaries, and `evals` owns offline behavior checks.
 
 ## 2. Naming
 
@@ -25,6 +25,7 @@
 
 - M1–M3 use immutable dataclasses and explicit in-memory adapters.
 - Storage implementations expose narrow interfaces so pgvector or database adapters can be added without changing orchestration.
+- Store semantics use stable application exceptions. Database-driver errors must not cross the Store boundary.
 - Application-owned knowledge uses reserved identifiers that arbitrary document-write APIs must not replace.
 
 ## 5. API Conventions
@@ -93,3 +94,19 @@
 - Token and cost settings are per-run cumulative upper bounds. Request values may narrow server policy but never raise a server-owned limit.
 - `ApplicationContainer` is the composition root, not a service locator. FastAPI routes continue to close over narrow dependencies, and tests may inject explicit adapters.
 - A complete Container and legacy `create_app()` dependency overrides are two alternative assembly paths and must not be mixed.
+
+## 13. Durable Run and Store Contracts
+
+- `backend.app.domain.run.RunRecord` is the M8+ durable domain snapshot. `backend.app.services.run_service.RunRecord` is a legacy synchronous API record until M8-T3 migration; code that must reference the latter aliases it as `LegacyRunRecord`.
+- Legacy `run_service` and new `run_store` / `event_store` coexist in the Container without dual writes. New Stores are injected as a pair; an explicit EventStore must validate ownership against the matching RunStore.
+- Run creation scopes idempotency to `(owner_id, idempotency_key_digest)`. A versioned canonical request digest distinguishes a safe replay from a conflicting request, and the raw key is never retained.
+- Run transitions use a monotonically increasing `version` compare-and-set. Terminal states never transition again, including to themselves.
+- Event IDs are caller-generated stable IDs. The Store assigns per-Run sequence and UTC time; same ID plus same content replays the original event, while changed content is a stable conflict.
+- Event data and tool data accept bounded standard JSON only: finite numbers, string keys, at most 64,000 encoded bytes, bounded depth and bounded node count. Stores copy nested data on write and every return.
+- Heartbeats are transport events and never consume a business event sequence. Consumers rely on unique increasing sequence values; they do not sort by timestamps.
+- `UsageRecord` describes exactly one model call. Unknown cost remains `None`; persisted currency uses `Decimal`, never a float conversion.
+- Side-effecting `ToolExecution` records require an idempotency digest at creation. Raw arguments and raw results are not retained; safe summaries and digests are bounded.
+- Logs use `safe_summary()` or an explicit allowlist. `repr=False` is defense in depth and does not authorize `dataclasses.asdict()` on records containing content.
+- In-memory Store locks are single-event-loop and single-process only. The fixed nested order is Run lock before Event lock; code must never acquire them in reverse.
+- The shared Store contract tests are adapter-independent. PostgreSQL fixtures inherit the same contract instead of copying it.
+- A Run transition and its terminal event are not yet a generic atomic unit of work. M8-T3 defines the use-case boundary and M11 implements the PostgreSQL transaction; two independent Store calls must not be described as atomic.

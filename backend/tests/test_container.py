@@ -4,11 +4,13 @@ import json
 import os
 import socket
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
 from backend.app.container import ApplicationContainer
+from backend.app.domain.run import RunRecord
 from backend.app.knowledge import InMemoryKnowledgeBase
 from backend.app.main import create_app
 from backend.app.memory import ConversationMemory
@@ -16,6 +18,7 @@ from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import InMemoryRunService
 from backend.app.settings import Settings
 from backend.app.settings import SettingsError
+from backend.app.stores import InMemoryEventStore, InMemoryRunStore
 
 
 class ApplicationContainerTest(unittest.TestCase):
@@ -45,6 +48,8 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertEqual("manual", container.settings.runtime)
         self.assertFalse(container.settings.online_provider_enabled)
         self.assertIsInstance(container.run_service, InMemoryRunService)
+        self.assertIsInstance(container.run_store, InMemoryRunStore)
+        self.assertIsInstance(container.event_store, InMemoryEventStore)
         self.assertIsInstance(container.knowledge_base, InMemoryKnowledgeBase)
         self.assertIsInstance(container.memory, ConversationMemory)
         self.assertIsInstance(container.authenticator, StaticTokenAuthenticator)
@@ -52,6 +57,8 @@ class ApplicationContainerTest(unittest.TestCase):
     def test_explicit_dependencies_are_preserved(self) -> None:
         settings = Settings.from_environment({})
         run_service = InMemoryRunService()
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
         knowledge_base = InMemoryKnowledgeBase()
         memory = ConversationMemory()
         authenticator = StaticTokenAuthenticator()
@@ -59,6 +66,8 @@ class ApplicationContainerTest(unittest.TestCase):
         container = ApplicationContainer.create(
             settings=settings,
             run_service=run_service,
+            run_store=run_store,
+            event_store=event_store,
             knowledge_base=knowledge_base,
             memory=memory,
             authenticator=authenticator,
@@ -66,9 +75,25 @@ class ApplicationContainerTest(unittest.TestCase):
 
         self.assertIs(settings, container.settings)
         self.assertIs(run_service, container.run_service)
+        self.assertIs(run_store, container.run_store)
+        self.assertIs(event_store, container.event_store)
         self.assertIs(knowledge_base, container.knowledge_base)
         self.assertIs(memory, container.memory)
         self.assertIs(authenticator, container.authenticator)
+
+    def test_explicit_stores_must_be_provided_as_a_pair(self) -> None:
+        run_store = InMemoryRunStore()
+
+        with self.assertRaisesRegex(ValueError, "provided together"):
+            ApplicationContainer.create(
+                settings=Settings.from_environment({}),
+                event_store=InMemoryEventStore(run_store),
+            )
+        with self.assertRaisesRegex(ValueError, "provided together"):
+            ApplicationContainer.create(
+                settings=Settings.from_environment({}),
+                run_store=run_store,
+            )
 
     def test_create_app_accepts_container_and_exposes_it_on_app_state(self) -> None:
         container = ApplicationContainer.create(
@@ -175,6 +200,35 @@ class ApplicationContainerTest(unittest.TestCase):
                 create_app(knowledge_base=knowledge_base)
 
         knowledge_base.add.assert_not_called()
+
+
+class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
+    async def test_default_event_store_is_bound_to_default_run_store(self) -> None:
+        now = datetime(2026, 7, 16, 4, 0, tzinfo=UTC)
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        run = RunRecord.create(
+            run_id="container-run",
+            session_id="container-session",
+            owner_id="container-owner",
+            runtime="manual",
+            input_text="hello",
+            idempotency_key="container-key",
+            created_at=now,
+        )
+
+        await container.run_store.create(run)
+        appended = await container.event_store.append(
+            event_id="container-event",
+            run_id=run.id,
+            owner_id=run.owner_id,
+            event_type="run.started",
+            data={},
+        )
+
+        self.assertTrue(appended.created)
+        self.assertEqual(1, appended.event.sequence)
 
 
 if __name__ == "__main__":

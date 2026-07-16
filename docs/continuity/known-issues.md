@@ -18,6 +18,7 @@
 | KI-012 | medium | closed | C0 | M1 文档零依赖命令、硬编码 Python 路径、测试数量与当前实现漂移 | `V-20260716-001`：删除硬编码路径和固定测试数；禁用 `site-packages` 后 7 项测试与 Demo 通过 |
 | KI-013 | medium | open | M10 | 当前多 Agent 是确定性节点，没有真实角色、handoff 和单 Agent 对照 | 多 Agent 与单 Agent 固定评测完成 |
 | KI-014 | medium | open | M11 | ConversationMemory 未接入 Run 且不持久化 | Agent 上下文读取、纠正、删除和重启恢复通过 |
+| KI-015 | high | open | M8–M11 | Run 终态转换与对应终态事件尚无跨 Store 原子 Unit of Work；内存 append 的终态 TOCTOU 已修复，但两次独立调用仍有崩溃窗口 | M8-T3 固定一次提交契约，M11 PostgreSQL 同事务 CAS 与终态事件竞争测试通过 |
 
 ## 状态值
 

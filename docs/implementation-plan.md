@@ -330,21 +330,24 @@ docker compose -f deploy/compose.yaml config --quiet
 
 - 依赖：M8-T1。
 - 产物：独立 `RunRecord`、`StoredRunEvent`、`ToolExecution`、`UsageRecord`，以及 `RunStore`、`EventStore` 内存实现。
-- 测试：事件序号单调、Run 所有权隔离、幂等创建、终态不可回退、并发追加无重复序号。
+- 测试：事件序号单调、Run 所有权隔离、幂等创建、终态不可回退、并发追加无重复序号、CAS 竞争、事件重放、审批拒绝和有界 JSON。
+- 兼容：旧 `InMemoryRunService`、旧 RunRecord、HTTP API 和 SSE 不双写新 Store；`ApplicationContainer` 只增加成对 Store 扩展缝。
+- 复用：`test_run_store_contract.py` 是适配器无关 mixin；M11 PostgreSQL 实现必须继承同一合同测试，不复制断言。
 - 验收命令：
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_store_contract -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_container backend.tests.test_run_service backend.tests.test_api backend.tests.test_observability backend.tests.test_manual_agent_loop -v
 ```
 
-- 工作映射：建立数据库替换缝和断线续传的数据基础。
+- 工作映射：建立数据库替换缝和断线续传的数据基础；Run 终态与终态事件的原子提交继续由 M8-T3 的用例边界和 M11 的数据库事务关闭，不把两次独立调用称为事务。
 
 ### M8-T3：异步 AgentRuntime 与 RunCoordinator
 
 - 依赖：M8-T2。
-- 产物：`AgentRuntime` Protocol、`ManualRuntime`、`RunCoordinator`、运行控制和持久 emitter。
+- 产物：`AgentRuntime` Protocol、`ManualRuntime`、`RunCoordinator`、运行控制、持久 emitter，以及 Run 终态与终态事件的一次提交用例边界。
 - 兼容：保留现有 `ManualAgentLoop`、`execute_agent()` 和旧 API 测试。
-- 测试：事件先存储后通知、取消、总超时、Runtime 失败、旧 Loop 结果一致。
+- 测试：事件先存储后通知、终态事件与状态一致、取消竞争、总超时、Runtime 失败、旧 Loop 结果一致。
 - 验收：同步手写 Loop 不被改写成 SDK；新协调器不包含具体工具业务逻辑。
 
 ### M8-T4：OpenAI Agents SDK Runtime

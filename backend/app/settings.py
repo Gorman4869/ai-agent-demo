@@ -4,7 +4,6 @@ import os
 import unicodedata
 from collections.abc import Mapping
 from decimal import Decimal
-from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -16,9 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-
-RuntimeName = Literal["manual", "agents_sdk", "langgraph"]
-ModelProviderName = Literal["mock", "openai"]
+from backend.app.domain.run import ModelProviderName, RuntimeName
 
 
 class SettingsError(ValueError):
