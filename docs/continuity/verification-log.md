@@ -495,3 +495,53 @@
 
 - M8-T6 实现提交固定为 `bd6c09a`；`V-20260717-001` 的 102 项定向回归、零费用边界与 `code_complete` 结论不变。
 - 当前任务保持 `M8-T7 / planned`；真实在线 E4 仍需用户新的单次明确授权。
+
+## V-20260717-003：M8-T7 跟练材料与离线里程碑验收
+
+- 任务：`M8-T7`
+- 时间：2026-07-17 10:48，Asia/Shanghai
+- 验证目标：HEAD `6e86e1e` 上的 M8-T7 纯文档工作区；提交由后续本地 commit 固定
+- 模式：offline；没有读取真实 API Key、访问模型服务或执行付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；沿用 Python 3.12.10、`openai-agents==0.18.2`、现有 Vue/MCP 锁定环境
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 接手时工作区干净；M8-T6 实现 `bd6c09a` 与文档锚点 `6e86e1e` 存在 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_online_smoke -q` | 0 | handoff 最小恢复集 12 项通过 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_online_smoke backend.tests.test_settings backend.tests.test_container backend.tests.test_runtime_contract backend.tests.test_openai_agents_runtime backend.tests.test_run_coordinator -q` | 0 | handoff 定向恢复集 102 项通过；既有 Starlette/httpx 弃用警告和三条 notifier 负向日志不变 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 -Suite M8`（不带授权） | 64 | 自动化已确认原始 `powershell.exe` 进程在进入 Python 前返回 64；统一命令宿主显示非零为 1，未读取 Provider 环境配置 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_openai_agents_runtime.OpenAIAgentsRuntimeTest.test_stream_and_post_stream_errors_use_safe_stable_mapping -v` | 0 | 教程中的 Provider 稳定错误定位命令 1 项通过 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_runtime_comparison backend.tests.test_langchain_agent_lab backend.tests.test_framework_runtimes -v` | 0 | 修正后的三 Runtime、LangChain 与框架对照命令 12 项通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 0 | 授权重跑后全量离线门通过：后端 252 项通过、1 项既有 Windows symlink 跳过；Code-Agent Demo、`pip check`、Vue 18 模块生产构建、MCP TypeScript 构建和 Compose 配置全部通过 |
+| `rg` 检查 M8-T7 必需章节 | 0 | 跟练、Provider 故障、验证/E4、三类自测、速查表、费曼、30 项映射和最终验收章节均存在 |
+| `rg -n "TBD|TODO|PLACEHOLDER|待补|待定|test_langchain_comparison" ...` | 1 | 预期无匹配；不存在占位符或已删除的错误测试模块名 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、52 个 Markdown 文件；相对链接、当前任务和 handoff 规则通过 |
+| `git diff --check` | 0 | 无空白错误；只有既有 LF/CRLF 转换提示 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（handoff 后） | 0 | 52 个稳定任务、53 个 Markdown 文件；新增 handoff 与恢复链接通过 |
+
+### 课程与验收证据
+
+- M8 阶段文档现在包含四次递进跟练，每次均给出时间、目标、实际命令、产物、工作映射、通关标准和常见错误；不会重写已经稳定的 T1-T5 实现细节。
+- 默认离线分支与经授权 E4 分支分开：教程列出完整在线门、低预算和费率参数，但明确禁止未授权读取 Key 或执行模型。
+- Provider 故障演练固定按 Settings、Coordinator、Runtime、Store/Event、重试与副作用顺序定位；公开证据只使用稳定 code/category/retryable。
+- 自测分为 5 道概念题、4 道实操题、4 道工作场景题，含 100 分评分和安全红线；费曼任务覆盖讲解、主链、框架取舍、故障与未验证边界。
+- 新增独立一页速查表，压缩 Agent/Runner/Runtime/Coordinator/Store 职责、门禁、状态/事件、四框架、白名单、预算、错误、取消、命令和排查顺序。
+- M8 与 30 项大纲映射明确列出 01、03、05、06、09、10、11、23、24 的当前证据和 M10/M12/M13 承接点，并链接全局主题映射。
+
+### 失败尝试、警告与未验证范围
+
+- 两个关联 ADR 的首次读取使用了错误文件名，返回 path not found；列出 decisions 目录后按真实文件名读取，内容无漂移。
+- 30 项映射首次探测了不存在的 `docs/curriculum-outline.md`；随后定位到真实 `docs/syllabus-map.md`，未新增重复大纲。
+- 一次多文件 `apply_patch` 因 hunk 结构无效未应用；拆成两个最小补丁后成功，未产生部分修改。
+- 全量门首次在 Vue 写 `frontend/tsconfig.app.tsbuildinfo` 时被沙箱以 EPERM 拒绝；此前后端 252/1、Code-Agent Demo 和 `pip check` 已通过。取得仅工作区验证授权后重跑同一脚本，所有步骤通过，且构建未留下任务外改动。
+- 全量后端仍有既有 Starlette/httpx 弃用警告、Windows symlink 跳过、预期 HTTP/observer/notifier 负向日志；没有安装 `httpx2` 或修改环境能力。
+- 没有运行带 `-Authorized` 的 online smoke；Provider strict schema、真实 streaming、真实工具调用、真实 usage、在线费用和资源清理仍无 E4 证据。
+- Compose 只验证配置展开，不代表 Docker Engine、镜像、容器、PostgreSQL/pgvector 或 Nginx 已运行。
+
+### 结论
+
+- `M8-T7` 达到 `verified`：阶段跟练、真实工作映射、故障演练、三类自测、一页速查表、费曼任务、30 项映射和离线全量门均有证据。
+- M8 的离线课程与工程产物达到 `code_complete`；M8-T4/M8-T6 和整个 M8 仍缺真实在线 E4，不得标为 `accepted` 或在线 `verified`。
+- `KI-001` 保持 mitigated、`KI-018` 保持 open；下一任务可按计划进入 `M9-T1 / planned`，不重做 M8 或提前实现 M10。

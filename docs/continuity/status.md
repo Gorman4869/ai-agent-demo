@@ -10,6 +10,7 @@
 - M8-T5 实现提交：`e03f8d6`
 - M8-T6 验证基线提交：`e03f8d6`
 - M8-T6 实现提交：`bd6c09a`
+- M8-T7 验证基线提交：`6e86e1e`；课程文档提交待本轮本地 commit 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -17,14 +18,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M8-T7` |
+| 任务 ID | `M9-T1` |
 | 状态 | `planned` |
-| 目标 | 汇总 M8 跟练、自测、速查表、费曼复述与 30 项大纲映射，并以可复现证据验收里程碑边界 |
-| 设计依据 | `docs/stages/08-real-model-runtimes.md`、实施计划 M8-T7、`ADR-0002`、`ADR-0005`、`ADR-0008` |
+| 目标 | 建立允许配置驱动的 MCP Client 生命周期，在 FastAPI lifespan 中完成连接、超时、关闭与稳定失败诊断 |
+| 设计依据 | `docs/stages/09-mcp-client-skills.md`、实施计划 M9-T1、`ADR-0001`、现有 M8 Runtime/Container 契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M8-T6 已在基线 `e03f8d6` 上完成独立在线脚本、双重授权门、低预算策略、安全摘要和 12 项离线关键测试；真实在线 E4 未授权且未执行，状态为 `code_complete` |
-| 前置证据 | `V-20260716-008`、`V-20260717-001`、`V-20260717-002` |
-| 下一动作 | 按 B 类里程碑验收任务审阅 `docs/stages/08-real-model-runtimes.md`，先列出 M8-T7 教程与验收缺口；引用 M8-T6 online not authorized 状态，不运行带 `-Authorized` 的脚本 |
+| 当前修改 | M8-T7 已在基线 `6e86e1e` 上补齐四次跟练、Provider 故障演练、三类自测、一页速查表、费曼任务和 30 项映射；全量离线门通过，状态为 `verified` |
+| 前置证据 | `V-20260717-003` |
+| 下一动作 | 按 B 类普通框架任务只读审阅实施计划 M9-T1、阶段 09、现有 TypeScript MCP Server 和锁定 Python MCP 依赖，先定义允许的 Server 配置与 Client 生命周期；不实现 M9-T2 工具映射 |
 
 ## 里程碑状态
 
@@ -32,8 +33,8 @@
 | --- | --- | --- |
 | M0–M7 历史基线 | `code_complete` | 现有产物已落盘但审计后仅部分覆盖；未满足项由 M8–M14 接管，旧链暂不标记 `superseded` |
 | C0 连续性基线 | `verified` | 计划基线 `6f8490a`；验证见 `V-20260716-001`、`V-20260716-002` |
-| M8 真实模型与运行时 | `in_progress` | M8-T1、M8-T2、M8-T3、M8-T5 verified；M8-T4、M8-T6 code_complete；M8-T7 planned，在线执行仍未授权 |
-| M9 MCP Client 与 Skill | `planned` | 依赖 M8 Runtime 契约 |
+| M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
+| M9 MCP Client 与 Skill | `planned` | 当前任务 M9-T1；依赖的 M8 Runtime 契约已具备 E3 离线证据 |
 | M10 LangGraph 持久工作流 | `planned` | 依赖 M8、M9 |
 | M11 上下文、记忆与真实 RAG | `planned` | 依赖 M10 状态和 Store 协议 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
@@ -48,12 +49,14 @@
 
 ## 未验证范围
 
+- M8-T7 课程验收见 `V-20260717-003`：Provider 故障命令 1 项、框架对照 12 项和全量后端 252 项通过，1 项既有 Windows symlink 跳过；Vue、MCP 与 Compose 配置门通过。
 - M8-T6 工作区验证见 `V-20260717-001`，实现提交 `bd6c09a` 的恢复锚点见 `V-20260717-002`：12 项新增关键测试与 102 项定向回归通过，Fake Runtime 经实际 Store/Coordinator 纵切；这只是 E3，不是在线 Provider 证据。
 - 没有用户新的单次授权，因此没有读取真实 Key、运行带 `-Authorized` 的脚本、访问模型服务或产生费用；Provider strict schema、真实 streaming、工具调用、usage、模型质量、费用和资源清理仍无 E4 证据。
 - M8-T6 没有修改依赖、锁文件、HTTP API、前端、跨前后端公共契约或发布配置，因此没有运行 `scripts/verify.ps1` 全量门。
 - `KI-018` 的逐调用硬成本门、版本化定价源与持久 usage/cost 账本仍未实现；本次 operator-supplied 费用估算不得描述成账单事实。
-- `KI-019` 已由 `V-20260717-001` 关闭；`KI-001` 保持 mitigated，`KI-016`、`KI-017`、`KI-018` 的生产缺口不变。
+- M8 课程和离线工程已 `code_complete`，但没有真实在线 E4，不能标记 `accepted`；学习者个人自测与费曼勾选仍只写 `docs/progress.md`。
+- `KI-001` 保持 mitigated；`KI-016`、`KI-017`、`KI-018` 的生产缺口不变，后续分别由 M11-M13 承接。
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-17-m8-t6-online-smoke-gate.md`，再核对 `V-20260717-001`、`V-20260717-002`、ADR-0008 与实施计划 M8-T7。若 12 项 M8-T6 新增测试和 102 项定向回归仍通过，不要重做 M8-T5/M8-T6；下一步只审阅并补齐 M8-T7 里程碑跟练与验收。没有用户新的单次授权，不得读取 Key、执行真实模型、迁移旧 HTTP/SSE 或提前进入 M9/M10。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-17-m8-t7-course-acceptance.md`，再核对 `V-20260717-003`、实施计划 M9-T1 和 `docs/stages/09-mcp-client-skills.md`。若全量离线门、52 个稳定任务/53 个 Markdown 文件的连续性检查和 M8 文档内容仍一致，不要重做 M8；下一步只设计 M9-T1 的 MCP Client 配置与生命周期，不提前实现工具发现、Skill 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。

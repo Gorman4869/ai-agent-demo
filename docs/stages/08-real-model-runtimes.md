@@ -235,14 +235,14 @@ TerminalCommit
 
 ### 先确认状态与证据边界
 
-> 本节离线实现证据等级为 `code_complete`。该标签表示代码与离线契约测试已经完成，不替代 `../continuity/status.md` 的任务账本，也不等于真实 Provider 已验证。M8-T6 在线冒烟尚未执行，本节没有读取真实 API Key、没有发起在线模型调用，实际费用为 0。
+> 本节只说明离线实现与证据边界，不替代 `../continuity/status.md` 的任务账本，也不等于真实 Provider 已验证。在线状态每次都必须回到状态页和最新 verification 核对；没有当次明确授权时，不得读取真实 API Key 或发起在线模型调用。
 
 | 项目 | 当前事实 | 不能据此声称什么 |
 | --- | --- | --- |
 | 实现状态 | 离线 `code_complete` | 不能写成在线 `verified` |
-| 离线证据 | fake Runner、真实 SDK dataclass、Container 门禁和 33 项专项测试；全量后端 231 项通过、1 项既有环境跳过 | fake 响应不能证明 Provider strict schema、真实流或真实 usage 正常 |
-| 在线调用 | 未执行 | 不得展示伪造的在线截图、Token 或模型答案 |
-| 本节费用 | 0 | `estimated_cost_usd=None` 不是“真实费用为 0”，而是“费用未知” |
+| 离线证据 | fake Runner、真实 SDK dataclass、Container 门禁、专项测试和全量离线门；实际数量查关联 verification | fake 响应不能证明 Provider strict schema、真实流或真实 usage 正常 |
+| 在线调用 | 本教程不自动执行，实际状态查连续性记录 | 不得展示伪造的在线截图、Token 或模型答案 |
+| 费用 | 离线练习为 0；在线费用只认当次授权记录 | `estimated_cost_usd=None` 不是“真实费用为 0”，而是“费用未知” |
 
 ### 从前端心智迁移到 Agent Runtime
 
@@ -517,7 +517,7 @@ Runtime 自身契约错误另行处理：usage 缺失/无效使用 `agents_sdk_u
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime -q
 ```
 
-当前基线应得到 33 项通过。记录命令、退出码、测试数，并明确写下：证据类型为 offline contract、实现为 `code_complete`、online smoke 未运行、真实 Provider 未验证、在线费用为 0。
+记录命令、退出码和实际测试数，并明确写下：证据类型为 offline contract；在线 smoke 是否运行、真实 Provider 是否验证和费用多少，只按当次 verification 的事实填写。
 
 测试数量未来可能随回归增加；验收看退出码和全部通过，不要为了保持“30”而删除新增测试。
 
@@ -562,7 +562,7 @@ Runtime 自身契约错误另行处理：usage 缺失/无效使用 `agents_sdk_u
 7. Usage 题：为什么 Run aggregate usage 不能伪造成一条带 duration/cost 的 `UsageRecord`？
 8. 取消题：为什么要在原 `stream_events()` 迭代器上 drain，而不是重新调用该方法？
 9. 竞态题：Store append 失败与外层 task 取消同时发生时，哪一个应对 Coordinator 可见？
-10. 证据题：33 项 fake/SDK-shape 测试全部通过后，为什么状态仍不能写在线 `verified`？
+10. 证据题：fake/SDK-shape 专项测试全部通过后，为什么状态仍不能写在线 `verified`？
 
 ### 费曼复述
 
@@ -582,81 +582,241 @@ Runtime 自身契约错误另行处理：usage 缺失/无效使用 `agents_sdk_u
 - 三 Runtime 共享 fixture：`backend/tests/runtime_comparison_fixtures.py`。同一输入、`add_numbers` 工具、成功结果和缺参错误分别经过 Manual、Agents SDK `FunctionTool` 桥与 LangGraph `StateGraph.ainvoke()`。
 - 共享契约测试：`backend/tests/test_runtime_comparison.py`。比较结果状态、答案、工具事件、稳定错误码、handler 是否执行和敏感字段边界。
 - LangChain 独立实验：`labs/langchain-agent/README.md`。实验实际执行 `create_agent()`、`agent.invoke()` 和 ToolNode，但使用离线确定性 ChatModel，不接入主 Run。
-- 证据边界：三 Runtime 对照目标为 E3；LangChain 实验为 E2。两者都不是 Provider 在线证据，M8-T6 仍需新的单次授权。
+- 证据边界：三 Runtime 对照目标为 E3；LangChain 实验为 E2。两者都不是 Provider 在线证据；M8-T6 的实际状态只查看连续性状态页和关联 verification。
 
 本任务不增加 checkpoint、interrupt、resume、费用账本或统一 HTTP/SSE；这些能力分别由 M10、M13 与 M12 验收。完整题库、速查表和里程碑复盘在 M8-T7 汇总。
 
-## 跟练顺序
+## M8 里程碑跟练
 
-### 第 1 次：配置与领域契约
+四次训练共约 16-28 小时。每次先完成产物，再看参考实现；不要把“读完文件”当作通关。
 
-- 前置：C0-T4 verified。
-- 动作：完成 M8-T1、M8-T2；画出 Run、Event、Runtime 和 Store 的依赖图。
-- 产物：Settings、领域模型、内存 Store 契约测试。
-- 通关：默认环境零网络；事件序号唯一；终态不可回退。
+### 第 1 次：配置、Run 与持久事件
 
-### 第 2 次：异步 Runtime 与兼容
-
-- 动作：完成 M8-T3；用 ManualRuntime 包装现有 Loop。
-- 产物：RunCoordinator、持久 emitter、兼容测试。
-- 通关：旧 API 与原测试继续通过；EventStore 失败时不向消费者伪报事件。
-
-### 第 3 次：真实 SDK 与框架对照
-
-- 动作：完成 M8-T4、M8-T5。
-- 产物：OpenAI Runtime、LangChain 实验、统一契约与取舍报告。
-- 通关：离线 fixture 覆盖文本、工具、usage、限流、超时和取消；LangChain 确实进入调用链。
-
-### 第 4 次：显式在线验证与复盘
-
-- 动作：仅在用户单次授权后完成 M8-T6；随后完成 M8-T7。
-- 产物：在线验证记录、速查表、自测和费曼复述。
-- 通关：真实工具调用和 usage 有证据；日志无密钥；费用记录完整。
-
-## 计划验证命令
-
-下列命令只有写入 verification log 后才算已验证：
+- 时间预算：4-7 小时。
+- 目标：从默认离线配置出发，解释 Run、Event、Store、幂等与 CAS。
+- 动作：画出 Settings 到 Container 的门禁图；手画 Run 状态机；从合同测试反推 Store 协议。
+- 命令：
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_settings backend.tests.test_container -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract backend.tests.test_container -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_langchain_comparison -v
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract -v
 ```
 
-在线计划命令：
+- 产物：一张配置门禁表、一张 Run 状态图、一份幂等/CAS/sequence 说明。
+- 工作映射：模型网关配置、任务表设计、断线续传和重复请求防护。
+- 通关：能证明 Key 单独存在不会联网；能解释同 Key 重放、终态不可回退和 sequence 游标。
+- 常见错误：把 `.env.example` 当自动加载文件；用 `expected_status` 代替 version CAS；把普通 append 当生命周期事务。
+
+### 第 2 次：Runtime、Coordinator 与失败仲裁
+
+- 时间预算：4-7 小时。
+- 目标：在不修改 Coordinator 的前提下替换 Runtime，并解释取消、通知和 Store 失败的优先级。
+- 动作：实现练习用 `EchoRuntime`；画出 start claim、process event、terminal commit；复盘 cancel-vs-complete 竞争。
+- 命令：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 -Suite M8
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator backend.tests.test_run_store_contract -v
 ```
+
+- 产物：Runtime 四对象职责表、一次竞争时序图、稳定失败分类表。
+- 工作映射：异步任务平台、事件通知、服务重试和多 worker 仲裁。
+- 通关：Runtime 不产生 `run.*`；Notifier 失败不回滚已存事件；Store/sink 失败不伪装成 Provider 失败。
+- 常见错误：在 Runtime 写 Store；通知后才持久化；把 Python worker thread 描述成可强制终止。
+
+### 第 3 次：Agents SDK 与四框架对照
+
+- 时间预算：4-7 小时。
+- 目标：实际进入 SDK、LangChain 和 LangGraph 的公开执行路径，并保持共享工具与错误语义。
+- 动作：完成上文 M8-T4 步骤 1-8；运行三 Runtime fixture；运行 LangChain ToolNode Demo；写一页取舍报告。
+- 命令：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_comparison backend.tests.test_langchain_agent_lab backend.tests.test_framework_runtimes -v
+.\.venv\Scripts\python.exe -X utf8 -B .\labs\langchain-agent\demo.py
+```
+
+- 产物：Agent/Runner/Runtime/Coordinator 数据流图、事件白名单、Manual/Agents SDK/LangChain/LangGraph 取舍表。
+- 工作映射：Provider adapter、框架选型、工具安全桥和结构化流消费。
+- 通关：能指出真实框架 API 在哪里执行；能解释 E2/E3 为什么不等于 Provider E4；不能只用 import 作为证据。
+- 常见错误：透传 Provider raw delta；把 fake Runner 写成在线成功；把 LangGraph 对照误写成已有 checkpoint 恢复。
+
+### 第 4 次：提供方故障、在线门与里程碑复盘
+
+- 时间预算：4-7 小时。
+- 目标：定位一次提供方失败，完成默认离线总验收，并能说明如何在授权后切到显式在线模式。
+- 默认离线动作：运行稳定错误映射用例、在线门禁测试和全量离线验证；完成自测、速查表与费曼复述。
+- 命令：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime.OpenAIAgentsRuntimeTest.test_stream_and_post_stream_errors_use_safe_stable_mapping -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_online_smoke -v
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+```
+
+- 产物：提供方失败定位表、离线 verification 摘要、[M8 Runtime 一页速查表](../m8-runtime-cheat-sheet.md)和费曼录音或文字稿。
+- 工作映射：线上故障分流、成本门、发布门和审计证据。
+- 离线通关：默认路径无 Key、无网络、零费用；能指出 online 未授权时 M8 只能保持未完成 E4 的状态。
+- E4 通关：只有获得当次明确授权后，真实流、`add_numbers`、正 usage、模型、耗时、估算费用和退出码都有脱敏记录。
+- 常见错误：为了完成课程擅自读取 Key；把 `estimated_cost_usd=None` 写成零费用；把未授权拒绝当 Provider 失败。
+
+## 提供方失败定位演练
+
+先运行第 4 次训练中的稳定错误映射用例，再任选一个子 case 填写下表：
+
+| 检查层 | 要回答的问题 | 合格证据 |
+| --- | --- | --- |
+| Settings | 是否通过完整在线门，且错误发生在请求前还是请求后？ | `safe_summary()` 只有配置存在性，不含 Key |
+| Coordinator | Run 是否已 durable start，终态由谁提交？ | 生命周期事件来自 Coordinator |
+| Runtime | SDK/Provider 异常映射成哪个 code/category/retryable？ | 只记录稳定字段，不使用 `str(exception)` |
+| Store/Event | 已有哪些过程事件？有无 raw body、请求 ID 或工具数据泄漏？ | 白名单事件可重放，敏感字段不存在 |
+| 重试 | 这是模型 retry、整个 Run retry 还是禁止自动重试？ | 只有有界模型 retry；工具型 Run 不自动重跑 |
+
+诊断顺序固定为“配置门 -> Run 生命周期 -> Runtime 稳定错误 -> 已持久事件 -> 重试与副作用”。不要先改 Prompt，也不要把鉴权失败、限流、timeout 和 Store unavailable 混成同一种错误。
+
+## M8 验证命令与证据等级
+
+下列命令只有实际运行并写入 verification log 后才算证据：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_settings backend.tests.test_container -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_run_domain backend.tests.test_run_store_contract -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_openai_agents_runtime -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_comparison backend.tests.test_langchain_agent_lab backend.tests.test_framework_runtimes -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_online_smoke -v
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+```
+
+| 证据 | 最高等级 | 能证明 | 不能证明 |
+| --- | --- | --- | --- |
+| Settings/对象构造 | E1 | 配置与 API 形状可用 | 框架或 Provider 已执行 |
+| SDK/LangChain/LangGraph Fake 路径 | E2 | 真实框架公开 API 进入调用链 | Provider 兼容、费用或真实容量 |
+| Runtime/Store/Coordinator 集成 | E3 | 共享契约、错误、取消和持久语义一致 | 真实网络与账单 |
+| 经当次授权的 online smoke | E4 | 指定模型与当次环境真实执行 | 永久兼容、无限预算或生产 SLA |
+
+### 经授权的可选 E4 分支
+
+默认学习和 CI 不执行本分支。只有用户针对当次调用明确授权，并由执行者在进程环境中配置完整门禁、显式模型和低预算后，才能运行：
+
+| 配置 | M8 online smoke 要求 |
+| --- | --- |
+| Runtime / Provider / online | `agents_sdk` / `openai` / `true` |
+| Trace | `AI_AGENT_TRACE_INCLUDE_SENSITIVE=false` |
+| Key / model | Key 只存在于进程环境；model 显式配置 |
+| step / model calls | step 为 2-4；model calls 固定为 2 |
+| Run / model timeout | 不超过 60000 / 30000 毫秒 |
+| input / output Token | 不超过 4000 / 512 |
+| cost cap / model retry | 不超过 0.25 USD / retry 为 0 |
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 `
+  -Authorized `
+  -Suite M8 `
+  -InputPricePerMillionUsd <核对后的当前输入费率> `
+  -OutputPricePerMillionUsd <核对后的当前输出费率>
+```
+
+不得把 Key 放进命令行或文档。费率必须由执行者在当次授权前核对；输出的 operator-supplied estimate 不是 Provider 账单。没有授权时只允许运行不带 `-Authorized` 的拒绝路径，并记录 online not run、费用 0。
 
 ## 常见错误与排查
 
 | 现象 | 可能原因 | 排查顺序 |
 | --- | --- | --- |
-| 默认测试访问网络 | Settings 默认值或 fixture 泄漏 | 检查在线开关，再检查 Runtime 注入 |
-| SSE 有事件但 Store 为空 | emitter 顺序错误 | 检查 append 是否在 notify 前完成 |
-| usage 为 0 或空 | Provider 事件映射不完整 | 保存最小脱敏 fixture，对照 SDK 结果对象 |
-| 工具被执行两次 | 重试与幂等边界错误 | 检查 tool call ID、幂等键和 retryable |
-| Run 已终态仍出现新事件 | Store 终态检查与追加未线性化 | 检查 Run→Event 锁序；数据库检查同事务锁 |
-| completed 事件存在但 Run 仍 running | 两次 Store 调用间崩溃 | 检查 KI-015；不要把独立调用描述成事务 |
-| LangChain 实验“通过”但无 import | 只写了文档或包装原 Loop | 用调用链测试证明框架实际参与 |
+| 默认测试访问网络 | Settings 默认值、环境污染或模型 factory 提前执行 | 查 `manual + mock + online=false`，再查 Runtime 注入与 client 创建时机 |
+| Key 存在但 OpenAI Runtime 未注册 | Provider、Runtime、online 或 model 任一门缺失 | 只查字段存在性与安全错误，不打印 Key |
+| SSE 有事件但 Store 为空 | emitter 顺序错误 | 检查 append 是否在 notify 前；M12 前不要用旧 SSE 证明新 Store |
+| usage 为 0 或空 | SDK usage 缺失或 fixture 不合法 | 查 requests/Token 正数校验与 input+output=total |
+| 工具被执行两次 | 整个 Run 被重试或 call/idempotency 边界错误 | 查 tool call ID、Run 幂等键、retry 层和副作用状态 |
+| Run 已终态仍出现新事件 | Store 终态检查与追加未线性化 | 查 Run->Event 锁序；数据库实现查同事务锁 |
+| completed 事件存在但 Run 仍 running | 生命周期被拆成两次写 | 只用 `commit_terminal()`；PostgreSQL 事务证据留 M11 |
+| LangChain 实验通过但没有 ToolMessage | 只 import/构造，未进入 `agent.invoke()` 和 ToolNode | 运行 lab Demo 与调用链测试 |
+| 取消后仍有新 delta | 未先 suppress，或 drain 时继续 emit | 查 immediate cancel、原迭代器 drain 和 late-event 用例 |
+| 限流被显示成未知内部错误 | Provider 异常映射遗漏 | 查稳定 code/category/retryable，不记录原异常正文 |
+| 未授权脚本显示失败 | 第一层门禁按设计拒绝 | 核对原始退出码与拒绝消息，不把它描述成在线失败 |
 
-## 自测
+## M8 自测题库
 
-1. 概念题：为什么创建 `Agent` 对象不等于完成真实 Agent 调用？
-2. 概念题：为什么 `StoredRunEvent` 不直接复用现有 `AgentEvent`？
-3. 实操题：新增 `EchoRuntime`，不修改 Coordinator 即通过契约测试。
-4. 排错题：在线开关关闭但代码仍发请求，按层定位根因。
-5. 场景题：如果接入第二家模型，哪些 Provider 字段不能泄漏到 API 和 Vue？
-6. 并发题：为什么 `expected_status` 不如 `expected_version` 足以防止所有丢失更新？
-7. 事务题：Event append 的终态检查已加锁，为什么仍不能说终态事件和 Run 状态原子提交？
+### 概念题（5 题，共 20 分）
 
-## 费曼复述
+1. 为什么创建 `Agent` 对象不等于模型或工具已经执行？
+2. `Runtime`、`Coordinator`、`Store` 和 `Notifier` 各自拥有哪一段职责？
+3. 为什么 `StoredRunEvent` 不直接复用瞬时 `AgentEvent`？
+4. E1、E2、E3、E4 各能证明什么，Fake Runner 的上限在哪里？
+5. 为什么 `max_turns`、aggregate usage 和 `max_cost_usd` 不能统称为请求前硬预算？
 
-用“浏览器请求一个后端任务”的语言解释 Manual、Agents SDK 和 LangGraph 如何共享一个 Runtime 契约，以及为什么默认测试必须使用 Mock。
+评分：每题 4 分；定义正确 2 分，边界与反例 2 分。
+
+### 实操题（4 题，共 40 分）
+
+1. 画出 `queued -> running -> completed` 的状态、version 与生命周期 event sequence，并标出一次取消竞争。
+2. 新增练习用 `EchoRuntime`，不修改 Coordinator，证明结果和事件契约可替换。
+3. 给定跨 chunk 的 `{"answer":"..."}`，写出按 segment 还原正文和终态核对的步骤。
+4. 执行第 4 次训练的 Provider 错误用例，提交一张“来源 -> stable code -> category -> retryable -> 是否可自动重跑 Run”表。
+
+评分：每题 10 分；可运行证据 4 分，解释 3 分，失败/安全边界 3 分。
+
+### 工作场景题（4 题，共 40 分）
+
+1. 团队要接第二家模型 Provider。哪些 SDK 字段不得进入领域事件，哪些组件应保持不变？
+2. 用户刷新页面后 SSE 重连。为什么应该按 Store sequence 恢复，而不是相信内存 notifier？
+3. 一个工具已经开始写外部系统，此时 Provider timeout。你会怎样判断是否重试，为什么不能自动重跑整个 Run？
+4. 发布经理要求“CI 必须验证真实模型”。设计一套默认离线门和少量授权 E4 门，并说明费用、密钥和证据记录方式。
+
+评分：每题 10 分；方案 4 分，取舍 3 分，风险与未验证范围 3 分。
+
+总分 80 分通关。以下任一项出现即使总分达标也不通过：把 Fake 写成在线证据、把 Key 写入提交或日志、把未知费用填 0、允许模型参数提供身份/审批、建议无幂等地自动重试副作用。
+
+## M8 一页速查表
+
+工作时优先打开 [M8 Runtime 一页速查表](../m8-runtime-cheat-sheet.md)。它只保留职责、门禁、主链、框架取舍、预算事实、稳定错误、命令与排查顺序；详细原因回到本章对应小节。
+
+使用方式：先凭记忆完成一次任务，再只查速查表修正；如果仍需通读本章才能回答，说明该项尚未内化。
+
+## M8 费曼复述任务
+
+不查资料，向一名只会调用普通 HTTP API 的前端同事讲 5 分钟：
+
+1. Agent、Runner、Runtime 和 Coordinator 分别像什么，为什么要分层？
+2. 一次任务如何从 Run 创建、模型流、工具调用走到持久终态？
+3. 为什么 Provider chunk、工具参数和原始异常不能直接进入 Vue？
+4. Manual、Agents SDK、LangChain、LangGraph 各在什么场景使用，当前各自缺什么？
+5. 为什么 CI 默认 Mock，但真实模型仍需要单独 E4？
+6. 取消、重试、usage 和费用各有哪些“看起来已经控制、实际只是有限保证”的地方？
+7. 给出一个真实业务故障案例，并说出第一条排查命令或文件。
+
+复述合格标准：语言简单、至少一个生活类比和一个工作案例、能画出主链、能说出两个安全边界和两个未验证边界。若只会堆 SDK/Store/CAS 术语而不能举例，或把离线结果说成在线成功，必须重述。
+
+## M8 与 30 项大纲映射
+
+完整 30 项目标见[主题映射](../syllabus-map.md)。M8 直接建立以下主题的基础证据，其余主题由表中 M9-M14 稳定任务承接：
+
+| 编号 | 主题 | M8 产物 | 当前证据与边界 |
+| --- | --- | --- | --- |
+| 01 | Agent 基础 | ManualRuntime、统一执行主链 | E3；手写 Loop 保留 |
+| 03 | Python 基础 | async Protocol、冻结领域对象、并发 Store 测试 | E3；多进程数据库留 M11 |
+| 05 | LLM 推理机制 | 流式结构化输出、usage 与 Provider 错误 | 离线 E2/E3；真实模型取决于 M8-T6 E4 状态 |
+| 06 | Function Calling | ToolRegistry、SDK FunctionTool 桥、三 Runtime fixture | E3；审批恢复与副作用留 M10 |
+| 09 | Agent 架构 | Settings、Container、Runtime、Coordinator、Store | E3；统一 HTTP/SSE 留 M12 |
+| 10 | LangChain | `create_agent().invoke()` 与 ToolNode lab | E2；不进入主 Run |
+| 11 | LangGraph | `StateGraph.ainvoke()` Runtime 对照 | E2/E3；checkpoint/interrupt/resume 留 M10 |
+| 23 | 可观测性 | 安全事件与 Run aggregate usage | 只有基础字段；成本账本和指标留 M13 |
+| 24 | 自动化测试 | Mock/Fake 契约、定向回归、离线全量门 | 默认无网络；E4 独立授权 |
+
+## M8 最终验收清单
+
+- [ ] 能从默认 Mock 配置说明切换到显式在线模式所需的全部门，但没有授权时不会执行或读取 Key。
+- [ ] 能运行本章全部离线命令和 `scripts/verify.ps1`，记录实际退出码、通过/跳过/警告和费用 0。
+- [ ] 能画出 Run/Runtime/Coordinator/Store/Notifier 主链，并说明生命周期事件所有权。
+- [ ] 能用真实框架调用链证明 Agents SDK、LangChain 和 LangGraph 被实际使用，而不是只 import。
+- [ ] 能定位一个 Provider 失败并输出稳定 code/category/retryable，不泄漏异常正文。
+- [ ] 能解释结构化 delta、工具隔离、取消 drain、重试、副作用与 usage/cost 边界。
+- [ ] 概念、实操、场景题总分至少 80，且没有安全红线错误。
+- [ ] 完成一页速查表使用练习和一次合格费曼复述。
+- [ ] 能指出 M8 对 30 项大纲的直接覆盖，以及 M10、M12、M13 的后续承接点。
+- [ ] online 未授权时如实保留 E4 缺口；只有真实在线 verification 存在时才引用该证据。
+
+完成上述离线条目可以验收 M8-T7 的课程材料，但不能自动把 M8-T4/M8-T6 或整个 M8 标为在线 `verified/accepted`。工程状态只由连续性状态页和实际 verification 决定。
 
 ## 官方资源
 
