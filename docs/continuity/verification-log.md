@@ -428,3 +428,50 @@
 - `M8-T5` 达到 `verified`：三 Runtime 共享契约为 E3，LangChain 独立调用链为 E2，框架取舍与运行命令已落盘。
 - `KI-003` 关闭；`KI-001` 的离线代码对照部分完成，但真实 Provider 证据仍缺，因此保持 mitigated 并继续由 M8-T6 接管。
 - 下一任务是 `M8-T6`；可以准备 fail-closed 在线脚本，但没有用户新的单次授权时不得读取 Key 或执行真实模型调用。
+
+## V-20260717-001：M8-T6 在线冒烟门禁离线代码完成
+
+- 任务：`M8-T6`
+- 时间：2026-07-17 09:57，Asia/Shanghai
+- 验证目标：HEAD `e03f8d6` 上的 M8-T6 工作区；该 HEAD 同时确认了 M8-T5 的实际实现提交
+- 模式：offline；没有读取真实 API Key、访问模型服务或执行付费调用，费用 0
+- 依赖事实：复用现有 `openai-agents==0.18.2` 与 Python 3.12.10；没有新增、安装、升级或删除依赖
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 接手时工作区干净；HEAD 为 M8-T5 实现提交 `e03f8d6`，由此发现并登记 `KI-019` 连续性漂移 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 接手恢复检查通过：52 个稳定任务、50 个 Markdown 文件 |
+| `.\.venv\Scripts\python.exe -X utf8 -B .\labs\langchain-agent\demo.py` | 0 | handoff Demo 恢复通过：答案 5、一次工具调用和完整消息序列 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_runtime_comparison backend.tests.test_langchain_agent_lab backend.tests.test_runtime_contract backend.tests.test_openai_agents_runtime backend.tests.test_run_coordinator backend.tests.test_container backend.tests.test_framework_runtimes -q` | 0 | handoff 最小恢复集 89 项通过；既有警告和三条 notifier 负向用例日志不变 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_online_smoke -v` | 0 | 最终 12 项新增离线门禁、纵切、脱敏与 PowerShell 包装测试通过 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_online_smoke backend.tests.test_settings backend.tests.test_container backend.tests.test_runtime_contract backend.tests.test_openai_agents_runtime backend.tests.test_run_coordinator -v` | 0 | 102 项定向回归通过；既有 Starlette/httpx 弃用警告和三条 notifier 负向用例日志不变 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 -Suite M8`（不带授权） | 64 | `powershell.exe` 原始进程由自动化测试确认返回 64，并在启动 Python 前拒绝；统一命令宿主直接展示时把非零状态归一为 1 |
+| `rg -n 'sk-...|Bearer ...|OPENAI_API_KEY=...' backend/app/online_smoke.py backend/tests/test_online_smoke.py scripts/verify-online.ps1` | 1 | 预期无匹配；测试凭据每次随机生成，代码和脚本没有固定 Key、Bearer Token 或疑似真实密钥 |
+| `git diff --check` | 0 | 无空白错误；仅有既有 LF/CRLF 转换提示 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（文档闭环后） | 0 | 52 个稳定任务、51 个 Markdown 文件；当前任务、状态、相对链接和 handoff 均通过 |
+| `git diff --check`（文档闭环后） | 0 | 最终工作区无空白错误；仅有既有 LF/CRLF 转换提示 |
+
+### 门禁与纵切证据
+
+- `scripts/verify-online.ps1` 独立于默认 `verify.ps1`；缺少 `-Authorized` 时第一步退出，不检查项目 Python，也不读取任何 Provider 环境配置。
+- Python 入口再次要求 `--authorized`，然后才解析 `Settings`；测试使用不可读取的 Mapping 证明未授权路径不会访问环境或调用 executor。
+- 完整配置固定要求 `agents_sdk + openai + online=true + OPENAI_API_KEY + OPENAI_MODEL`；真实脚本另要求 M8 suite、调用者提供输入/输出 token 估算费率，以及低 step、调用次数、token、重试、超时和成本上限。
+- 离线 Fake Runtime 通过实际 `RunRecord -> RunStore -> RunCoordinator -> EventStore` 纵切，产出持久 `run.started`、流式 delta、匹配的 `add_numbers` start/completed、正 usage 与 `run.completed`；这属于 E3 集成证据，不是 Provider E4 证据。
+- 成功摘要只含 suite、Run ID、状态、模型、时长、流分段数、工具完成标记、token usage、估算费用、费率来源、事件数和退出码；不含 prompt、answer、工具参数、工具结果或 Key。
+- 费用按调用者显式提供的每百万 token 费率估算，并标记 `operator_supplied_per_million_token_rates`；它不是账单事实，也不替代 `KI-018` 所需的可版本化定价源和持久成本账本。
+
+### 失败尝试、警告与未验证范围
+
+- 新增测试首轮为 11 通过、1 失败：Windows 默认执行策略在脚本逻辑前返回 1；测试改为仓库统一的 `-ExecutionPolicy Bypass` 后 12 项全部通过，没有改写系统执行策略。
+- 一次疑似凭据扫描因 PowerShell 嵌套引号解析失败；改用单引号正则重跑后预期无匹配。
+- 没有用户新的单次授权，因此未运行带 `-Authorized` 的脚本，未读取真实 Key、未验证 Provider strict schema、真实 streaming、真实工具调用、真实 usage、模型质量、费用或资源清理。
+- 没有运行 `scripts/verify.ps1` 全量门：本任务没有修改依赖、锁文件、HTTP API、前端、跨前后端公共契约或发布配置，102 项定向回归覆盖修改边界。
+- `KI-018` 保持 open：当前 runner 只能在 usage 返回后计算本次估算费用，不能提供逐调用硬成本阻断、版本化定价或持久账本。
+
+### 结论
+
+- `M8-T6` 达到 `code_complete`：独立脚本、双重授权门、低预算策略、安全摘要和离线测试已落盘；真实在线 E4 未授权且未执行，因此不得标为 `verified`。
+- `KI-019` 的提交事实漂移由本条记录 `e03f8d6` 后关闭；`KI-001` 保持 mitigated，等待一次新的明确授权完成线上 E4。
+- 下一任务可进入 `M8-T7` 里程碑跟练与验收汇总，并明确引用 M8-T6 的 `code_complete / online not authorized` 状态；不得把在线缺口包装成通过。
