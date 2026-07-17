@@ -545,3 +545,48 @@
 - `M8-T7` 达到 `verified`：阶段跟练、真实工作映射、故障演练、三类自测、一页速查表、费曼任务、30 项映射和离线全量门均有证据。
 - M8 的离线课程与工程产物达到 `code_complete`；M8-T4/M8-T6 和整个 M8 仍缺真实在线 E4，不得标为 `accepted` 或在线 `verified`。
 - `KI-001` 保持 mitigated、`KI-018` 保持 open；下一任务可按计划进入 `M9-T1 / planned`，不重做 M8 或提前实现 M10。
+
+## V-20260717-004：M9-T1 MCP Client 配置与生命周期
+
+- 任务：`M9-T1`
+- 时间：2026-07-17 11:27，Asia/Shanghai
+- 验证目标：HEAD `ba7adf9` 上的 M9-T1 工作区；提交由后续本地 commit 固定
+- 模式：offline；只启动本地 Python MCP STDIO Server，没有读取真实 API Key、访问网络服务或执行付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用已锁定 Python 3.12.10、`mcp==1.28.1`、FastAPI 与 TestClient 环境
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 接手时工作区干净；M8-T7 提交 `ba7adf9` 存在 |
+| M8-T7 handoff 的 Provider 错误、框架对照和连续性恢复命令 | 0 | 1 项、12 项通过；连续性为 52 个稳定任务和 53 个 Markdown 文件，未发现漂移 |
+| 本地 `inspect` 检查 `mcp==1.28.1` 的 `stdio_client`、`ClientSession.initialize()` 与 context manager | 0 | 确认使用公开 SDK 路径，并识别 context manager 必须在同一 Task 退出的约束 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_settings backend.tests.test_mcp_client_lifecycle backend.tests.test_container -v` | 0 | 首轮 36 项通过，但取消用例出现 4 个 ResourceWarning；该轮不作为最终清理证据 |
+| 同一 36 项命令加 `-W always::ResourceWarning` | 0 | 改为每 Server 独立 worker 后 36 项通过，无 ResourceWarning；非法协议日志只保留固定摘要 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_lifecycle backend.tests.test_settings backend.tests.test_container backend.tests.test_api backend.tests.test_online_smoke -q` | 0 | 最终 68 项定向回归通过；覆盖 Settings、Container、FastAPI、既有 API 与离线 online-smoke，无资源泄漏警告 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_lifecycle -q` | 0 | 9 项 M9-T1 聚焦测试通过：真实 SDK 初始化/关闭、空选择、允许目录、进程缺失、超时、协议错误、取消和部分启动回滚 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、54 个 Markdown 文件；新增 ADR 和阶段链接通过 |
+| `git diff --check` | 0 | 无空白错误；只有既有 LF/CRLF 转换提示 |
+
+### 实现与安全证据
+
+- `Settings.mcp` 只解析 Server ID 和 100–30000 ms 的启动超时；默认 ID 为空，普通应用启动不创建 MCP 进程。
+- 不可变 `McpServerConfig` 目录独占 command、args 和绝对 cwd；未知 ID 在进程启动前以 `server_not_allowed` 拒绝，请求层没有启动配置字段。
+- FastAPI lifespan 真实执行 `stdio_client -> ClientSession -> initialize()`；本地 `python-knowledge` Server 进入真实 JSON-RPC 初始化链，不是 import 或对象构造证据。
+- 每个连接由独立 worker 在同一 Task 中进入和退出 SDK context manager。Manager 超时或取消只发停止信号并等待清理；后启动 Server 失败时已初始化连接也被关闭。
+- 进程缺失、超时和协议错误只返回稳定 code 与安全 Server ID。stderr 被隔离，无效 JSON-RPC 的 SDK 堆栈被改写为固定摘要，不暴露原始行或异常文本。
+- 证据等级为本地协议与应用生命周期 E3；没有网络或远程 Server E4，也没有工具发现/调用证据。
+
+### 失败尝试、警告与未验证范围
+
+- 首次 `apply_patch` 因新父目录不存在而未应用；随后 `New-Item` 在沙箱中被拒绝，经工作区写权限授权后只创建 `backend/app/integrations/mcp` 目录，再重放补丁成功。
+- 一次用于诊断清理异常的内联 Python 命令因 `-c` 引号解析失败；改为 PowerShell here-string 管道后执行成功，没有写临时源码文件。
+- 首轮取消测试虽然退出码为 0，但有 4 个 anyio MemoryObjectStream 未关闭警告；未把该结果当作通过证据，改用专属 worker 后以 ResourceWarning 开启模式复验通过。
+- 既有 Starlette/httpx 弃用警告仍存在；没有安装 `httpx2` 或升级依赖。
+- 未执行 `scripts/verify.ps1` 全量门：本任务未修改依赖/锁文件、HTTP Schema、前端或跨前后端接口，68 项定向回归覆盖 Settings、Container、lifespan 和现有 API 边界。
+- 未实现 `list_tools`、Schema/RBAC/命名冲突、`call_tool`、断线重连、调用幂等或 TypeScript Server E2E；分别由 M9-T2、M9-T3 接管，`KI-002` 不能关闭。
+
+### 结论
+
+- `M9-T1` 达到 `verified`：服务端允许配置、真实 SDK STDIO 初始化、FastAPI lifespan、稳定失败、正常关闭、取消和部分回滚均有离线可复现证据。
+- `KI-002` 保持 open 但已完成 Client 生命周期部分；下一任务进入 `M9-T2 / planned`，只实现工具发现与共同 ToolDefinition 映射，不提前执行 M9-T3 TypeScript E2E 或 Skill。

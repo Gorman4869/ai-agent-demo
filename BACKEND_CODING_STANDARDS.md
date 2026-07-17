@@ -139,3 +139,12 @@
 - SDK context usage is currently aggregate, Run-scoped evidence and is emitted as `model.usage` with `scope=run`. It is not a domain `UsageRecord`, because that record represents one model call and the aggregate lacks per-call duration and cost.
 - Unknown cost stays `None` with `cost_source=unknown`; never report zero, guess a value, or hard-code unversioned pricing. `max_turns` is a Run-loop bound and configured output tokens are a per-model-request bound, while model-call and input-token checks are aggregate post-run or approximate. The HTTP client timeout is not a strict whole-workflow wall clock, and `max_cost_usd` is not yet enforced. Code and teaching material must disclose KI-018 instead of claiming hard budget guarantees.
 - Offline construction and fake-Runner contract tests establish only code-complete evidence. Do not claim online verification; M8-T6 owns the separately authorized real-provider streaming and tool-call smoke test.
+
+## 16. MCP Client Lifecycle
+
+- `Settings.mcp` selects only stable IDs from a server-owned `McpServerConfig` catalog. HTTP or model input must never provide an executable, arguments, working directory, environment, or transport policy.
+- The default MCP selection is empty and must not start a process. Enabling a local Server remains offline evidence and must not be described as a remote or production MCP deployment.
+- Each STDIO connection enters `stdio_client`, enters `ClientSession`, initializes, and exits in one worker task. Manager timeout and cancellation signal that worker and await cleanup instead of exiting anyio cancel scopes from another task.
+- FastAPI lifespan owns Manager start and close. Startup is all-or-nothing; a partial set of initialized Servers is closed before a stable startup failure leaves the boundary.
+- Public diagnostics expose only the reviewed lifecycle code and safe Server ID. Raw commands, arguments, stderr, invalid protocol lines, and exception text do not enter logs or errors.
+- M9-T1 does not expose Session discovery or invocation. Tool listing, Schema normalization, permission filtering, namespace conflicts, timeout policy, and call adaptation belong to M9-T2.

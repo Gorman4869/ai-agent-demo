@@ -5,7 +5,7 @@
 | ID | 严重度 | 状态 | 归属 | 问题 | 关闭证据 |
 | --- | --- | --- | --- | --- | --- |
 | KI-001 | blocker | mitigated | M8 | M8-T4/M8-T5 已完成 SDK 适配与共享契约，M8-T6 已完成双重授权门和 E3 离线纵切，M8-T7 已完成课程材料与全量离线门；没有新的单次授权，真实线上流式、工具与 usage 仍未执行 | M8-T4/M8-T5 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
-| KI-002 | blocker | open | M9 | 只有 MCP Server，没有 Client 发现和协议调用 | MCP STDIO 端到端测试通过 |
+| KI-002 | blocker | open | M9 | M9-T1 已完成服务端允许配置、真实 SDK initialize、lifespan 与安全清理；仍缺 `list_tools`、共同 ToolDefinition 映射、`call_tool` 和 TypeScript Server 协议 E2E | MCP STDIO 端到端测试通过 |
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
 | KI-004 | high | open | M10 | LangGraph 没有 checkpoint、interrupt、resume 和恢复测试 | 中断、审批、重启恢复测试通过 |
 | KI-005 | high | open | M10–M11 | 上下文选择、记忆注入和动态重规划未进入主 Run | 长对话、记忆纠错与失败重规划评测通过 |

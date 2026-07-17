@@ -14,6 +14,7 @@ from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.agent.sdk_runtime import OpenAIAgentsRuntime
 from backend.app.container import ApplicationContainer
 from backend.app.domain.run import RunRecord, RunStatus
+from backend.app.integrations.mcp import McpClientState
 from backend.app.knowledge import InMemoryKnowledgeBase
 from backend.app.main import create_app
 from backend.app.memory import ConversationMemory
@@ -56,6 +57,8 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIsInstance(container.runtimes["manual"], ManualRuntime)
         self.assertNotIn("agents_sdk", container.runtimes)
         self.assertIsInstance(container.run_coordinator, RunCoordinator)
+        self.assertEqual(McpClientState.CREATED, container.mcp_clients.state)
+        self.assertEqual((), container.mcp_clients.connected_server_ids)
         self.assertIsInstance(container.knowledge_base, InMemoryKnowledgeBase)
         self.assertIsInstance(container.memory, ConversationMemory)
         self.assertIsInstance(container.authenticator, StaticTokenAuthenticator)

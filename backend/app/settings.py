@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
 from collections.abc import Mapping
 from decimal import Decimal
@@ -16,6 +17,9 @@ from pydantic import (
 )
 
 from backend.app.domain.run import ModelProviderName, RuntimeName
+
+
+_MCP_SERVER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
 class SettingsError(ValueError):
@@ -52,6 +56,33 @@ class RunBudgetSettings(BaseModel):
         return self
 
 
+class McpClientSettings(BaseModel):
+    """Server-owned MCP selectors and connection bounds."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+    )
+
+    server_ids: tuple[str, ...] = ()
+    startup_timeout_ms: int = Field(default=5_000, ge=100, le=30_000)
+
+    @field_validator("server_ids")
+    @classmethod
+    def validate_server_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) > 8:
+            raise ValueError("at most 8 MCP servers may be enabled")
+        if len(value) != len(set(value)):
+            raise ValueError("MCP server IDs must be unique")
+        if any(
+            _MCP_SERVER_ID_PATTERN.fullmatch(server_id) is None
+            for server_id in value
+        ):
+            raise ValueError("MCP server ID has an invalid format")
+        return value
+
+
 class Settings(BaseModel):
     """Immutable application configuration parsed from explicit environment data.
 
@@ -77,6 +108,7 @@ class Settings(BaseModel):
     )
     openai_model: str | None = None
     budget: RunBudgetSettings = Field(default_factory=RunBudgetSettings)
+    mcp: McpClientSettings = Field(default_factory=McpClientSettings)
 
     @field_validator("openai_api_key", mode="before")
     @classmethod
@@ -146,6 +178,7 @@ class Settings(BaseModel):
             "openai_api_key_configured": self.openai_api_key is not None,
             "openai_model_configured": self.openai_model is not None,
             "budget": self.budget.model_dump(mode="json"),
+            "mcp": self.mcp.model_dump(mode="json"),
         }
 
     @classmethod
@@ -210,6 +243,17 @@ class Settings(BaseModel):
                         values,
                         "AI_AGENT_MAX_MODEL_RETRIES",
                         2,
+                    ),
+                ),
+                mcp=McpClientSettings(
+                    server_ids=_read_csv_names(
+                        values,
+                        "AI_AGENT_MCP_SERVERS",
+                    ),
+                    startup_timeout_ms=_read_int(
+                        values,
+                        "AI_AGENT_MCP_STARTUP_TIMEOUT_MS",
+                        5_000,
                     ),
                 ),
             )
@@ -295,6 +339,19 @@ def _read_optional_secret(
 ) -> SecretStr | None:
     value = _read_optional_text(environment, name)
     return SecretStr(value) if value is not None else None
+
+
+def _read_csv_names(
+    environment: Mapping[str, str],
+    name: str,
+) -> tuple[str, ...]:
+    raw_value = environment.get(name)
+    if raw_value is None or not raw_value.strip():
+        return ()
+    values = tuple(part.strip().lower() for part in raw_value.split(","))
+    if any(not value for value in values):
+        raise SettingsError(f"{name} must be a comma-separated name list")
+    return values
 
 
 def _safe_validation_message(error: ValidationError) -> str:

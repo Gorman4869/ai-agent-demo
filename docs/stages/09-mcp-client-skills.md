@@ -29,6 +29,22 @@
 4. 加载 `research-summary` Skill，覆盖显式触发、不触发、越界引用和错误元数据。
 5. 运行固定评测，对比 Function Calling、MCP 和 Skill 的职责。
 
+## M9-T1 最小纵切：Client 配置与生命周期
+
+默认 `AI_AGENT_MCP_SERVERS` 为空，应用不启动进程。需要观察真实本地协议初始化时，服务端操作者可选择代码目录中已经登记的 `python-knowledge` ID；请求、模型和工具参数都不能提供命令、参数或工作目录。
+
+```powershell
+$env:AI_AGENT_MCP_SERVERS='python-knowledge'
+$env:AI_AGENT_MCP_STARTUP_TIMEOUT_MS='5000'
+.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_mcp_client_lifecycle.McpFastApiLifespanTest -v
+Remove-Item Env:AI_AGENT_MCP_SERVERS
+Remove-Item Env:AI_AGENT_MCP_STARTUP_TIMEOUT_MS
+```
+
+真实路径是 `FastAPI lifespan -> McpClientManager -> stdio_client -> ClientSession.initialize()`。Server 的 worker 在同一 Task 中进入和退出 SDK context manager；启动超时或取消只发停止信号并等待清理。稳定诊断包括 `server_not_allowed`、`process_unavailable`、`startup_timeout` 和 `protocol_error`，不包含原始命令、stderr 或异常文本。
+
+本纵切只证明本地 STDIO 连接、初始化和关闭，尚未实现 `list_tools`、`call_tool`、Schema/RBAC 映射或 TypeScript Server 端到端；这些分别由 M9-T2 和 M9-T3 验收。
+
 ## 计划验证命令
 
 ```powershell

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -86,7 +88,17 @@ def create_app(
     conversation_memory = resolved_container.memory
     token_authenticator = resolved_container.authenticator
     demo_document_chunk_count = knowledge.add(DEMO_COURSE_DOCUMENT)
-    app = FastAPI(title="AI Agent Learning API", version="0.5.0")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        async with resolved_container.mcp_clients.lifespan():
+            yield
+
+    app = FastAPI(
+        title="AI Agent Learning API",
+        version="0.5.0",
+        lifespan=lifespan,
+    )
     app.state.container = resolved_container
 
     def current_principal(

@@ -7,6 +7,11 @@ from types import MappingProxyType
 from backend.app.agent import AgentRuntime, ManualRuntime
 from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.domain.run import RuntimeName
+from backend.app.integrations.mcp import (
+    McpClientManager,
+    McpServerConfig,
+    default_mcp_server_configs,
+)
 from backend.app.knowledge import InMemoryKnowledgeBase, KnowledgeBase
 from backend.app.memory import ConversationMemory
 from backend.app.security import StaticTokenAuthenticator
@@ -39,6 +44,7 @@ class ApplicationContainer:
     event_store: EventStore
     runtimes: Mapping[RuntimeName | str, AgentRuntime]
     run_coordinator: RunCoordinator
+    mcp_clients: McpClientManager
     knowledge_base: KnowledgeBase
     memory: ConversationMemory
     authenticator: StaticTokenAuthenticator
@@ -52,12 +58,18 @@ class ApplicationContainer:
         run_store: RunStore | None = None,
         event_store: EventStore | None = None,
         runtimes: Mapping[RuntimeName | str, AgentRuntime] | None = None,
+        mcp_clients: McpClientManager | None = None,
+        mcp_server_configs: Mapping[str, McpServerConfig] | None = None,
         knowledge_base: KnowledgeBase | None = None,
         memory: ConversationMemory | None = None,
         authenticator: StaticTokenAuthenticator | None = None,
     ) -> ApplicationContainer:
         if (run_store is None) != (event_store is None):
             raise ValueError("run_store and event_store must be provided together")
+        if mcp_clients is not None and mcp_server_configs is not None:
+            raise ValueError(
+                "mcp_clients and mcp_server_configs cannot be provided together"
+            )
         resolved_settings = (
             settings if settings is not None else Settings.from_environment()
         )
@@ -105,6 +117,18 @@ class ApplicationContainer:
             runtimes=resolved_runtimes,
             run_timeout_ms=resolved_settings.budget.run_timeout_ms,
         )
+        resolved_mcp_clients = (
+            mcp_clients
+            if mcp_clients is not None
+            else McpClientManager(
+                settings=resolved_settings.mcp,
+                allowed_servers=(
+                    mcp_server_configs
+                    if mcp_server_configs is not None
+                    else default_mcp_server_configs()
+                ),
+            )
+        )
         return cls(
             settings=resolved_settings,
             run_service=(
@@ -114,6 +138,7 @@ class ApplicationContainer:
             event_store=resolved_event_store,
             runtimes=resolved_runtimes,
             run_coordinator=run_coordinator,
+            mcp_clients=resolved_mcp_clients,
             knowledge_base=(
                 knowledge_base
                 if knowledge_base is not None
