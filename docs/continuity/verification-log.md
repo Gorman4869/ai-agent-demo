@@ -475,3 +475,23 @@
 - `M8-T6` 达到 `code_complete`：独立脚本、双重授权门、低预算策略、安全摘要和离线测试已落盘；真实在线 E4 未授权且未执行，因此不得标为 `verified`。
 - `KI-019` 的提交事实漂移由本条记录 `e03f8d6` 后关闭；`KI-001` 保持 mitigated，等待一次新的明确授权完成线上 E4。
 - 下一任务可进入 `M8-T7` 里程碑跟练与验收汇总，并明确引用 M8-T6 的 `code_complete / online not authorized` 状态；不得把在线缺口包装成通过。
+
+## V-20260717-002：M8-T6 实现提交后恢复锚点
+
+- 任务：`M8-T6`
+- 时间：2026-07-17 10:08，Asia/Shanghai
+- 验证目标：实现提交 `bd6c09a`（`feat: add guarded online smoke runner`）
+- 模式：offline；没有读取真实 API Key、访问模型服务或执行付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` | 0 | 实现提交后工作区干净 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_online_smoke -q` | 0 | 提交后最小恢复集 12 项全部通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、51 个 Markdown 文件通过 |
+
+### 结论
+
+- M8-T6 实现提交固定为 `bd6c09a`；`V-20260717-001` 的 102 项定向回归、零费用边界与 `code_complete` 结论不变。
+- 当前任务保持 `M8-T7 / planned`；真实在线 E4 仍需用户新的单次明确授权。
