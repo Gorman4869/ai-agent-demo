@@ -906,3 +906,25 @@
 - `M9-T6` 达到 `verified`：完整跟练、MCP/Function Calling/Skill 对照、roots 安全边界、三类考核、一页速查、费曼任务、30 项映射和里程碑离线全量门均有可复现证据。
 - M9 工程与课程达到 `verified`；该状态只代表当前本地 E3 与课程门，不代表远程或生产 E4，也不代表学习者个人已经通关。
 - 下一任务进入 `M10-T1 / planned`；只实现可持久 StateGraph 与 Checkpointer，不修改已验证 M9 Runtime，不提前实现 M10-T2 interrupt/resume。
+
+## V-20260720-010：M9-T6 课程提交后恢复锚点
+
+- 任务：`M9-T6`
+- 时间：2026-07-20 14:45，Asia/Shanghai
+- 验证目标：课程提交 `fdeb9b5`（`docs: complete M9 course acceptance`）
+- 模式：offline；只构建并启动本地 Python/Node STDIO 路径、读取仓库 Skill，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 课程提交后工作区干净；`fdeb9b5` 位于 M9-T5 锚点 `19b5596` 之后 |
+| `npm.cmd run build --prefix mcp-servers/knowledge-server` | 0 | 提交后 TypeScript `tsc` build 通过，没有安装依赖 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_lifecycle backend.tests.test_mcp_tool_adapter backend.tests.test_mcp_client_e2e backend.tests.test_skill_catalog backend.tests.test_skill_context -q` | 0 | M9 提交后恢复集 40 项通过，无 ResourceWarning；只有既有 Starlette/httpx 弃用提示 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.skill_context` | 0 | 固定评测 2/2；触发 3153 字节/启发式 789 Token，不触发为 0；Provider usage 不可用、费用 `null` |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、62 个 Markdown 文件通过 |
+
+### 结论
+
+- M9-T6 课程提交固定为 `fdeb9b5`；`V-20260720-009` 的 40 项聚焦、后端 294 项、全量构建/配置门、首次沙箱失败和 E3 边界不变。
+- 当前任务为 `M10-T1 / planned`；不重做 M9，不提前实现 M10-T2 interrupt/resume，不把共享内存 checkpointer 描述成进程重启持久化。
