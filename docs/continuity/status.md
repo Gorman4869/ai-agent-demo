@@ -3,7 +3,7 @@
 - 更新时间：2026-07-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`a6ff518`
+- 最近已确认实现提交：`b6dfa0b`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -18,7 +18,7 @@
 - M9-T4 验证基线提交：`83a5234`；实现提交：`de8a63d`
 - M9-T5 验证基线提交：`c820c7e`；实现提交：`a6ff518`
 - M9-T6 验证基线提交：`19b5596`；课程提交：`fdeb9b5`
-- M10-T1 验证基线提交：`c4d4efe`；实现提交：待本地 commit 固定
+- M10-T1 验证基线提交：`c4d4efe`；实现提交：`b6dfa0b`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -32,7 +32,7 @@
 | 设计依据 | `docs/stages/10-durable-langgraph.md`、实施计划 M10-T2、`ADR-0011`、既有 ToolApproval/Runtime/Coordinator 契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M10-T1 已完成独立 checkpoint Runtime、服务端 owner/thread 摘要、版本 1 state、共享 `InMemorySaver`、跨 Runtime invocation 恢复、隔离、失败恢复和 10 项专项；现有简单 LangGraph 与默认 Container 未切换 |
-| 前置证据 | `V-20260720-011`、`ADR-0011`、`V-20260720-009` |
+| 前置证据 | `V-20260720-012`、`V-20260720-011`、`ADR-0011` |
 | 下一动作 | 只读审阅 M10-T2、现有 ToolApproval/ToolExecution/RuntimeResult 与 LangGraph interrupt 公共 API，先固定服务端审批状态、resume payload、单次消费和 M10/M11 重启证据边界；不提前实现 M10-T3 重规划 |
 
 ## 里程碑状态
@@ -76,4 +76,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m10-t1-checkpointed-langgraph.md`，再核对 `V-20260720-011`、`ADR-0011`、实施计划 M10-T2 和 `docs/stages/10-durable-langgraph.md`。若 M10-T1 专项 10 项与连续性检查仍一致，不要重做 checkpoint 纵切；下一步只读审阅 ToolApproval、ToolExecution、RuntimeResult 与 LangGraph interrupt/resume 公共 API，先解决 M10-T2 审批单次消费和 M11 重启边界，不提前进入 M10-T3。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m10-t1-checkpointed-langgraph.md`，再核对 `V-20260720-012`、`V-20260720-011`、`ADR-0011`、实施计划 M10-T2 和 `docs/stages/10-durable-langgraph.md`。若 M10-T1 专项 10 项与连续性检查仍一致，不要重做 checkpoint 纵切；下一步只读审阅 ToolApproval、ToolExecution、RuntimeResult 与 LangGraph interrupt/resume 公共 API，先解决 M10-T2 审批单次消费和 M11 重启边界，不提前进入 M10-T3。没有用户新的单次授权，不得读取 Key 或执行真实模型。

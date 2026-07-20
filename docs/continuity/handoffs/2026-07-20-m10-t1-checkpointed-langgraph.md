@@ -5,8 +5,8 @@
 - 完成状态：`verified`
 - 下一任务：`M10-T2 / planned`
 - 验证基线 HEAD：`c4d4efe`
-- M10-T1 实现提交：待本地 commit 固定
-- 验证记录：`V-20260720-011`
+- M10-T1 实现提交：`b6dfa0b`
+- 验证记录：`V-20260720-011`、`V-20260720-012`
 - 关联决策：`ADR-0011`
 - 分支：`main`
 - 任务等级：A 类共享 Runtime/Coordinator 契约变更，时间盒 2–4 小时
@@ -72,7 +72,7 @@
 
 ## 未提交改动
 
-M10-T1 代码、测试、ADR、阶段说明、verification、known issues、status 与本 handoff 都属于当前任务，尚待一个本地实现提交固定。没有任务外改动，也没有远程 Git 操作。
+M10-T1 代码、测试、ADR、阶段说明和首轮连续性记录已提交为 `b6dfa0b`。提交后只修改 verification、status 与本 handoff 以固定实现提交和恢复证据；这些记录由后续本地文档提交闭环。没有任务外改动，也没有远程 Git 操作。
 
 ## 下一条原子动作
 

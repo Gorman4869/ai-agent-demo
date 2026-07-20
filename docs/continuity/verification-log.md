@@ -980,3 +980,24 @@
 
 - `M10-T1` 达到 `verified`：稳定 graph state、服务端 owner/thread 绑定、共享内存 checkpointer、版本拒绝边界、跨 Runtime invocation 恢复、隔离和失败恢复均有真实 LangGraph 自动化证据。
 - 下一任务进入 `M10-T2 / planned`，只设计并实现 interrupt/审批 resume 与重复恢复幂等；不得把本次内存证据描述成进程重启持久化，也不得提前进入 M10-T3 重规划。
+
+## V-20260720-012：M10-T1 实现提交后恢复锚点
+
+- 任务：`M10-T1`
+- 时间：2026-07-20 15:22，Asia/Shanghai
+- 验证目标：实现提交 `b6dfa0b`（`feat: add versioned LangGraph checkpoints`）
+- 模式：offline；只执行本地 LangGraph、Skill 与标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交后工作区干净；`b6dfa0b` 位于 M9-T6 验证锚点 `c4d4efe` 之后 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_checkpointing backend.tests.test_skill_context -q` | 0 | handoff 最小恢复集 20 项通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，LangGraph 模块仍未污染顶层导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、64 个 Markdown 文件通过 |
+
+### 结论
+
+- M10-T1 实现提交固定为 `b6dfa0b`；`V-20260720-011` 的 10 项专项、73 项定向回归、后端 304 项全量门、失败尝试和同进程证据边界不变。
+- 当前任务为 `M10-T2 / planned`；不重做 checkpoint 纵切，不把 `InMemorySaver` 描述成进程重启持久化，不提前进入 M10-T3。
