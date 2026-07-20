@@ -13,7 +13,7 @@
 - M8-T7 验证基线提交：`6e86e1e`
 - M8-T7 课程文档提交：`ba7adf9`
 - M9-T1 验证基线提交：`ba7adf9`；实现提交：`f8b59d2`
-- M9-T2 验证基线提交：`f8b59d2`；实现提交待本轮本地 commit 固定
+- M9-T2 验证基线提交：`f8b59d2`；实现提交：`40b1257`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -27,7 +27,7 @@
 | 设计依据 | `docs/stages/09-mcp-client-skills.md`、实施计划 M9-T3、`ADR-0009`、M9-T2 共同 `ToolDefinition` 适配边界 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M9-T2 已完成策略 allowlist、Schema 规范化、分页发现、名称冲突、角色过滤、调用超时和安全结果适配；7 项新增关键测试与 126 项定向回归通过，状态为 `verified` |
-| 前置证据 | `V-20260720-001`、`V-20260717-004`、`ADR-0009` |
+| 前置证据 | `V-20260720-001`、`V-20260720-002`、`V-20260717-004`、`ADR-0009` |
 | 下一动作 | 按 B 类协议只读审阅 M9-T3、现有 TypeScript Knowledge Server 与构建脚本；重跑 Server 构建后新增 Python Client 对该 Server 的真实 STDIO E2E，不提前实现 Skill 或 M10 |
 
 ## 里程碑状态
@@ -64,4 +64,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t2-mcp-tool-adapter.md`，再核对 `V-20260720-001`、`ADR-0009`、实施计划 M9-T3 和 `docs/stages/09-mcp-client-skills.md`。若 7 项 MCP 工具适配测试、126 项定向回归和连续性检查仍一致，不要重做 M9-T1/M9-T2；下一步只实现 TypeScript Knowledge Server 的真实 STDIO E2E，不提前执行 Skill 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t2-mcp-tool-adapter.md`，再核对 `V-20260720-001`、`V-20260720-002`、`ADR-0009`、实施计划 M9-T3 和 `docs/stages/09-mcp-client-skills.md`。若 7 项 MCP 工具适配测试、126 项定向回归和连续性检查仍一致，不要重做 M9-T1/M9-T2；下一步只实现 TypeScript Knowledge Server 的真实 STDIO E2E，不提前执行 Skill 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。

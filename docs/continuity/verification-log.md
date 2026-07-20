@@ -631,3 +631,24 @@
 
 - `M9-T2` 达到 `verified`：真实工具发现、可信映射、共同 Registry、三 Runtime 调用、RBAC、冲突、超时和安全结果均有离线可复现证据。
 - `KI-002` 保持 open，但 Python Client 发现/调用部分已完成；下一任务进入 `M9-T3 / planned`，只补 TypeScript Knowledge Server 协议 E2E，不提前执行 Skill 或 M10。
+
+## V-20260720-002：M9-T2 实现提交后恢复锚点
+
+- 任务：`M9-T2`
+- 时间：2026-07-20 10:25，Asia/Shanghai
+- 验证目标：实现提交 `40b1257`（`feat: add MCP tool adapter`）
+- 模式：offline；只启动本地 Python MCP STDIO Server，没有读取真实 API Key、访问网络服务或执行付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` | 0 | 实现提交后工作区干净 |
+| `git log -3 --oneline` | 0 | `40b1257` 位于 `f8b59d2` 之后，提交边界正确 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_tool_adapter -q` | 0 | 提交后最小恢复集 7 项通过，无 ResourceWarning；仅有 Windows asyncio 慢任务调试行 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、56 个 Markdown 文件通过 |
+
+### 结论
+
+- M9-T2 实现提交固定为 `40b1257`；`V-20260720-001` 的 126 项定向回归、E3 边界与 `verified` 结论不变。
+- 当前任务为 `M9-T3 / planned`；只补 TypeScript Knowledge Server 协议 E2E，不重做 M9-T1/M9-T2，不提前进入 Skill 或 M10。
