@@ -45,8 +45,8 @@
 | 04 前端基础 | M12-T4、M12-T5 | 类型化状态机与前端测试 |
 | 05 LLM 推理机制 | M8-T4、M8-T6 | 真实流式、usage 与在线证据 |
 | 06 Function Calling | M8-T4、M8-T5 | 跨 Runtime 工具契约 |
-| 07 MCP 协议 | M9-T1–M9-T3 | Client 发现和调用 |
-| 08 Agent Skill | M9-T4、M9-T5 | 安全加载、触发和效果评测 |
+| 07 MCP 协议 | M9-T1–M9-T3、M9-T6 | Client 发现、调用与课程验收 |
+| 08 Agent Skill | M9-T4–M9-T6 | 安全加载、触发、效果评测与课程验收 |
 | 09 Agent 架构 | M8-T1–M8-T5 | Container、Coordinator 和适配器 |
 | 10 LangChain | M8-T5 | 实际对照实验 |
 | 11 LangGraph | M10-T1–M10-T5、M11-T1 | checkpoint、审批与进程恢复 |

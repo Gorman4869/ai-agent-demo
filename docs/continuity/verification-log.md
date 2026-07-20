@@ -853,3 +853,56 @@
 
 - M9-T5 实现提交固定为 `a6ff518`；`V-20260720-007` 的 151 项定向回归、后端 294 项、构建/配置门、失败尝试和 E3 证据边界不变。
 - 当前任务为 `M9-T6 / planned`；只盘点并汇总 M9 跟练与里程碑验收，不重做 M9-T1–M9-T5，不提前进入 M10。
+
+## V-20260720-009：M9-T6 课程与里程碑验收
+
+- 任务：`M9-T6`
+- 时间：2026-07-20 14:40，Asia/Shanghai
+- 验证目标：HEAD `19b5596` 上的 M9-T6 课程工作区；课程提交由后续本地 commit 固定
+- 任务等级：B 类里程碑课程验收，时间盒 60-90 分钟；没有修改 Runtime、测试代码、依赖或公共契约
+- 模式：offline；只读取仓库 Skill、启动本地 Python/Node STDIO 进程并执行本地构建，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；沿用现有 Python 3.12.10、Node/npm、MCP SDK、LangGraph、Vue 和 Docker CLI 环境
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净；M9-T5 实现 `a6ff518` 与验证锚点 `19b5596` 存在 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_context -q` | 0 | handoff 最小恢复集 10 项通过 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.skill_context`（恢复） | 0 | 固定评测 2/2；触发上下文 3153 字节/启发式 789 Token，不触发为 0；Provider usage 不可用、费用 `null` |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（恢复） | 0 | 52 个稳定任务、60 个 Markdown 文件通过，代码与记录无漂移 |
+| `npm.cmd run build --prefix mcp-servers/knowledge-server` | 0 | 使用现有依赖完成 TypeScript `tsc` build，没有安装依赖 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_lifecycle backend.tests.test_mcp_tool_adapter backend.tests.test_mcp_client_e2e backend.tests.test_skill_catalog backend.tests.test_skill_context -v` | 0 | M9 聚焦 40 项全部通过；真实启动本地 Python/Node STDIO Server，覆盖 initialize、发现、调用、关闭、路径与上下文边界，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.skill_context`（里程碑） | 0 | 固定 LangGraph 离线评测再次 2/2；数值与恢复证据一致 |
+| `rg` 检查 M9-T6 必需章节与一页速查表结构 | 0 | 对照、roots、四次跟练、三类题库、速查、费曼、30 项映射、最终清单和速查表八个章节均存在 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（沙箱内首轮） | 1 | 后端 294 项中 293 项通过、1 项既有 Windows symlink 能力跳过；Code Agent Demo 与 `pip check` 通过，随后 Vue 无法写 `tsconfig.app.tsbuildinfo`，以 `EPERM` 中断 |
+| 同一 `scripts/verify.ps1` 经工作区构建权限批准后在沙箱外重跑 | 0 | 后端 294 项结果一致；Code Agent Demo、`pip check`、Vue 18 模块 production build、MCP TypeScript build 与 Docker Compose 配置门全部通过 |
+| `git diff --check` / `scripts/check-continuity.ps1`（课程与连续性记录后） | 0 | 阶段/速查材料后为 52 个稳定任务、61 个 Markdown；最终 status/handoff 落盘后为 52/62，相对链接与映射通过；无空白错误，只有既有 LF/CRLF 转换提示 |
+| `rg -n "TBD\|TODO\|PLACEHOLDER\|待补\|待定\|计划命令\|npm install" ...` | 1 | 预期无匹配；M9-T6 课程、速查、映射、status 和 handoff 不含占位符或安装指令 |
+
+### 课程与验收证据
+
+- 阶段 09 现按 M9-T1 至 M9-T5 串成四次、共 8-12 小时的跟练，包含真实工作映射、产物、通关标准和故障注入，不重复改写已验证 Runtime。
+- 独立协议练习明确先构建 TypeScript Server，再由 Python `McpClientManager` 从服务端目录拉起 Node 进程，分别执行 discovery 和 call 测试；没有用直接 import 或依赖存在代替协议执行。
+- MCP、Function Calling 与 Skill 对照表区分结构化调用、跨进程协议和任务上下文；共同 `ToolDefinition`/Registry 的安全复用与不负责范围均有说明。
+- roots 章节明确声明本仓库当前未协商 roots，并说明 roots 是协议协调信息而非 OS 权限或沙箱；实际文件边界仍依赖服务端固定配置、canonical path、symlink 检查和最小 OS 权限。
+- 新增独立一页速查表，包含两条主链、选择规则、信任边界、E1-E4、稳定错误、精确命令和五问自检。
+- 题库包含 5 道概念题、4 道实操题、4 道工作场景题和 100 分评分规则；80 分通关，并设置 import 伪证据、roots 沙箱、信任远端数据、无幂等重试、Skill 执行和虚构 usage/cost 等安全红线。
+- 费曼任务要求讲清完整协议链、三者差异、roots 边界和 E3 上限；阶段映射引用全局 30 项真相源，并把 M9-T6 纳入主题 07/08 的静态任务索引。
+
+### 失败、警告与未验证范围
+
+- ADR-0010 首次按摘要猜测的文件名读取失败；列出实际目录后使用 `ADR-0010-bounded-skill-runtime-context.md` 重读，内容与状态一致。ADR-0009 首次读取使用 PowerShell 默认编码而失真，改用 UTF-8 后正常；两者均未产生仓库修改。
+- 最终状态复核发现 `status.md` 的“未验证范围”仍保留 M9-T4 时期“尚未注入 Runtime”的旧句，与 M9-T5 代码和 `V-20260720-007` 冲突；按可复现证据优先登记后在本任务状态闭环中删除该陈旧项。
+- 全量首轮只因沙箱拒绝写工作区内 Vue `tsbuildinfo` 失败；没有把该退出 1 改写成成功。相同完整脚本在获准的沙箱外环境退出 0，不需要拆分推断。
+- 全量仍有 1 项既有 Code Agent Windows symlink 能力测试跳过；M9-T4 的实际路径逃逸测试和受控 symlink 分支证据不变，不能宣称当前 OS 已完成真实 symlink 实测。
+- 聚焦与全量输出有既有 Starlette/httpx 弃用提示、预期 notifier warning 和 Windows asyncio debug 进程诊断；没有 ResourceWarning 或失败，不安装提示中的新依赖。
+- Compose 只验证配置展开，没有启动 Docker Engine、镜像、容器、远程 MCP 或生产 transport；没有验证 Linux/macOS、断线重连、健康恢复、调用幂等、副作用恢复或生产容量。
+- Skill 评测仍使用确定性离线 fixture；没有真实模型指令遵循、Provider tokenizer/usage、定价或账单，`KI-018` 保持 open。
+- 学习者个人尚未完成题库、速查练习或费曼复述；课程工程验收不会代替 `docs/progress.md` 中的个人勾选。
+
+### 结论
+
+- `M9-T6` 达到 `verified`：完整跟练、MCP/Function Calling/Skill 对照、roots 安全边界、三类考核、一页速查、费曼任务、30 项映射和里程碑离线全量门均有可复现证据。
+- M9 工程与课程达到 `verified`；该状态只代表当前本地 E3 与课程门，不代表远程或生产 E4，也不代表学习者个人已经通关。
+- 下一任务进入 `M10-T1 / planned`；只实现可持久 StateGraph 与 Checkpointer，不修改已验证 M9 Runtime，不提前实现 M10-T2 interrupt/resume。
