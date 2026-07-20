@@ -693,3 +693,25 @@
 
 - `M9-T3` 达到 `verified`：现有 TypeScript Knowledge Server 构建、初始化、发现、有效/无效调用和关闭均有真实 STDIO 可复现证据。
 - `KI-002` 达到关闭条件并标记 `closed`；下一任务进入 `M9-T4 / planned`，只实现只读 Skill Catalog/Resolver，不提前执行上下文注入评测或 M10。
+
+## V-20260720-004：M9-T3 实现提交后恢复锚点
+
+- 任务：`M9-T3`
+- 时间：2026-07-20 10:58，Asia/Shanghai
+- 验证目标：实现提交 `5aba130`（`test: add TypeScript MCP protocol e2e`）
+- 模式：offline；只构建并启动本地 TypeScript MCP STDIO Server，没有读取真实 API Key、访问网络服务或执行付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` | 0 | 实现提交后工作区干净 |
+| `git log -3 --oneline` | 0 | `5aba130` 位于 M9-T2 验证锚点 `c3972b6` 之后，提交边界正确 |
+| `npm.cmd run build --prefix mcp-servers/knowledge-server` | 0 | 提交后 TypeScript build 通过，没有安装依赖或留下 Git 改动 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_e2e -q` | 0 | 提交后最小恢复集 4 项通过，无 ResourceWarning |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、57 个 Markdown 文件通过 |
+
+### 结论
+
+- M9-T3 实现提交固定为 `5aba130`；`V-20260720-003` 的 67 项定向回归、本地 STDIO E3 与 `KI-002 closed` 结论不变。
+- 当前任务为 `M9-T4 / planned`；只实现只读 Skill Catalog/Resolver，不重做 MCP Client，不提前执行 M9-T5 或 M10。

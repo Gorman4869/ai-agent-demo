@@ -3,7 +3,7 @@
 - 更新时间：2026-07-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`40b1257`
+- 最近已确认实现提交：`5aba130`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -14,7 +14,7 @@
 - M8-T7 课程文档提交：`ba7adf9`
 - M9-T1 验证基线提交：`ba7adf9`；实现提交：`f8b59d2`
 - M9-T2 验证基线提交：`f8b59d2`；实现提交：`40b1257`
-- M9-T3 验证基线提交：`c3972b6`；实现提交待本轮本地 commit 固定
+- M9-T3 验证基线提交：`c3972b6`；实现提交：`5aba130`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -28,7 +28,7 @@
 | 设计依据 | `docs/stages/09-mcp-client-skills.md`、实施计划 M9-T4、现有 `skills/research-summary` 与安全路径边界 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M9-T3 已将构建后的 TypeScript Knowledge Server 纳入服务端目录，并通过真实 Node/Python STDIO 覆盖 initialize、发现、有效/无效调用和关闭；4 项 E2E 与 67 项定向回归通过，状态为 `verified` |
-| 前置证据 | `V-20260720-003`、`V-20260720-001`、`ADR-0009` |
+| 前置证据 | `V-20260720-003`、`V-20260720-004`、`V-20260720-001`、`ADR-0009` |
 | 下一动作 | 按 B 类协议只读审阅 M9-T4、`skills/research-summary`、现有路径安全与缓存风格；先定义只读元数据和固定根目录解析，不提前实现 M9-T5 上下文注入或 M10 |
 
 ## 里程碑状态
@@ -65,4 +65,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t3-typescript-mcp-e2e.md`，再核对 `V-20260720-003`、实施计划 M9-T4 和 `docs/stages/09-mcp-client-skills.md`。若 TypeScript build、4 项 MCP E2E、67 项定向回归和连续性检查仍一致，不要重做 M9-T1–M9-T3；下一步只设计固定根目录的只读 Skill Catalog/Resolver，不提前执行 M9-T5 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t3-typescript-mcp-e2e.md`，再核对 `V-20260720-003`、`V-20260720-004`、实施计划 M9-T4 和 `docs/stages/09-mcp-client-skills.md`。若 TypeScript build、4 项 MCP E2E、67 项定向回归和连续性检查仍一致，不要重做 M9-T1–M9-T3；下一步只设计固定根目录的只读 Skill Catalog/Resolver，不提前执行 M9-T5 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。
