@@ -69,6 +69,16 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 
 聚焦测试覆盖服务端固定 command/cwd/policy、Schema 归一化、已知和未知概念文本结果、服务端 Zod 类型拒绝、客户端 allowlist 和清理。Server stdout 专用于 JSON-RPC，普通运行日志只能写 stderr；Client 不把 stderr 或远端校验文本带入公共错误。该纵切证明 Windows 本地 Node/Python STDIO 互操作 E3，不证明远程 transport、跨平台兼容、重连、幂等或生产容量。
 
+## M9-T4 最小纵切：只读 Skill Catalog 与 Resolver
+
+`default_skill_catalog()` 只扫描仓库固定的 `skills` 根目录。Catalog 使用严格的 `name`/`description` 标量 frontmatter 子集，不执行通用 YAML 标签；只读取 `SKILL.md` 和正文显式链接的 `references/*.md`，`agents/`、脚本和其他文件不会被加载或执行。路径解析拒绝逃逸与符号链接组件，文件、引用数量、总字节和查询长度均有上限。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_catalog -v
+```
+
+Resolver 对 `$research-summary` 使用显式触发；未显式指定时，查询必须包含 Skill 名称的全部词元，例如 `research summary`。Catalog 首次加载后返回不可变缓存快照，只有可信应用显式调用 `refresh()` 才重新读盘。测试真实加载现有 `research-summary` 和 `references/output-contract.md`，并覆盖缓存、错误 frontmatter、缺失/逃逸引用、超限、非 UTF-8、符号链接拒绝分支和禁止执行无关脚本。该任务尚未把 Skill 注入 Runtime，也没有效果或成本评测；这些由 M9-T5 完成。
+
 ## 计划验证命令
 
 ```powershell

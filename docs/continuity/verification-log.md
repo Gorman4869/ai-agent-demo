@@ -715,3 +715,45 @@
 
 - M9-T3 实现提交固定为 `5aba130`；`V-20260720-003` 的 67 项定向回归、本地 STDIO E3 与 `KI-002 closed` 结论不变。
 - 当前任务为 `M9-T4 / planned`；只实现只读 Skill Catalog/Resolver，不重做 MCP Client，不提前执行 M9-T5 或 M10。
+
+## V-20260720-005：M9-T4 只读 Skill Catalog 与 Resolver
+
+- 任务：`M9-T4`
+- 时间：2026-07-20 11:16，Asia/Shanghai
+- 验证目标：HEAD `83a5234` 上的 M9-T4 工作区；提交由后续本地 commit 固定
+- 模式：offline；只读取仓库 Skill 与测试临时目录，没有读取真实 API Key、访问网络服务、执行 Skill 脚本或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；只使用 Python 3.12.10 标准库与现有 unittest 环境
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净；M9-T3 实现 `5aba130` 与验证锚点 `83a5234` 存在 |
+| M9-T3 handoff 最小恢复命令 | 0 | TypeScript build、4 项 MCP E2E 与 52 个稳定任务/57 个 Markdown 连续性检查通过，无 ResourceWarning 或漂移 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_catalog -v`（首轮） | 0 | 9 项通过、1 项因 Windows 无法创建 symlink 跳过；该轮不作为最终符号链接拒绝分支证据 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_catalog -v`（最终） | 0 | 10 项全部通过；真实加载现有 Skill/reference，并覆盖触发、缓存、frontmatter、逃逸、超限、UTF-8、symlink 拒绝分支和禁止脚本执行 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_catalog backend.tests.test_code_agent -q` | 0 | 共运行 17 项：16 项通过、1 项既有 Code Agent Windows symlink 能力测试跳过；无失败 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、58 个 Markdown 文件；状态、链接和新增 handoff 通过 |
+| `git diff --check` / 新增文件尾随空白 `rg` | 0 | 无空白错误；tracked 文件只有既有 LF/CRLF 转换提示 |
+
+### 实现与安全证据
+
+- `default_skill_catalog()` 固定扫描仓库 `skills` 根目录；可注入 root 的构造函数只供服务端装配与临时目录测试，不进入 HTTP、模型参数或 Skill 元数据。
+- Catalog 使用严格的两字段标量 frontmatter 子集，不调用通用 YAML loader；标签、集合、未知/重复字段、目录名不一致、控制字符和超限内容均稳定拒绝。
+- 只读取 `SKILL.md` 与正文显式引用的 `references/*.md`；现有 `research-summary` 和 `output-contract.md` 已真实加载，`agents/openai.yaml` 与测试 Python 文件未加载或执行。
+- 文件读取在 canonical root 下逐组件拒绝 symlink，拒绝绝对/反斜杠/百分号/查询/`..` 引用，并限制 Skill 数、单文件、引用数、总字节和查询长度。
+- 冻结 Skill/reference dataclass 与 tuple 构成不可变缓存快照；`load()` 重用快照，`refresh()` 才重新扫描。Resolver 支持 `$name` 显式触发和全部名称词元自动匹配，未知显式名 fail closed。
+- 所有 Catalog/Resolver 异常只暴露稳定 code，不包含原始路径、查询、文件内容或解析异常。
+
+### 失败尝试、警告与未验证范围
+
+- 首次创建 `backend/app/skills` 被工作区沙箱拒绝；取得仅该目录创建授权后成功，没有写入工作区外文件。
+- 当前 Windows 环境对测试临时文件 `symlink_to()` 返回 errno 22。最终测试保留真实创建尝试，并在环境不支持时受控覆盖同一 `Path.is_symlink()` 拒绝分支；真实 `../` 和嵌套路径逃逸仍由实际文件系统验证。
+- 定向回归的 1 项 skip 来自既有 Code Agent symlink 能力测试；不是 M9-T4 新测试。不得把本轮证据描述为 Windows OS 级符号链接实测通过。
+- 未执行 `scripts/verify.ps1` 全量门：没有依赖/锁文件、公共 Runtime 契约、HTTP Schema、前端或跨模块接口变化，10 项聚焦和 17 项路径安全定向集覆盖本任务边界。
+- 未实现 Skill Runtime 上下文注入、触发效果/成本对照、热更新监听、跨进程缓存、文件变更原子快照或管理员写入流程；M9-T5 只接管上下文与评测，其余不属于当前课程纵切。
+
+### 结论
+
+- `M9-T4` 达到 `verified`：现有 Skill 真实加载、严格元数据、引用边界、缓存、显式/自动触发和稳定错误均有离线可复现证据。
+- 下一任务进入 `M9-T5 / planned`，只实现有界 SkillContext 注入与固定效果/成本评测，不提前执行 M9-T6 里程碑验收或 M10。

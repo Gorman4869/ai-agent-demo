@@ -154,3 +154,13 @@
 - Each remote call has a separately configured timeout and no automatic retry. Return structured JSON when available, accept only bounded text fallback, and map remote errors without raw result or exception leakage.
 - M9-T3 proves the same Client adapter against the built TypeScript Knowledge Server over real local STDIO. The TypeScript process remains a server-owned catalog entry; tests must exercise initialize, discovery, valid and invalid calls, and close without importing Server functions directly.
 - Local Python and TypeScript STDIO evidence is E3, not remote or production E4. Reconnect, invocation idempotency, production capacity, and Skill behavior remain later work.
+
+## 17. Read-Only Skill Catalog
+
+- The default Skill root is server-owned and fixed to the repository `skills` directory. Request or model input may select only loaded Skill names; it must never supply a root or file path.
+- M9-T4 accepts a strict frontmatter subset containing only scalar `name` and `description`. It is not a general YAML loader and must reject tags, collections, duplicate or unknown keys, mismatched directory names, controls, and oversized metadata.
+- Load only `SKILL.md` plus bounded UTF-8 Markdown files explicitly linked below `references/`. Do not load or execute `agents/`, Python, shell, binaries, arbitrary local links, percent-encoded paths, or query-bearing references.
+- Resolve every file under the canonical fixed root, reject symlink components and traversal, cap Skill count, files, references, total bytes, query length, and frontmatter lines, and expose only stable error codes without raw paths or content.
+- Catalog snapshots contain frozen dataclasses and tuples. `load()` reuses one immutable snapshot; only the trusted application may call `refresh()` to replace it.
+- Resolver behavior is deterministic and offline: `$skill-name` is an explicit trigger; automatic matching requires every hyphen-separated Skill name token as a complete query word. An unknown explicit name fails closed.
+- M9-T4 only discovers and resolves Skill content. Runtime context injection, effect/cost evaluation, and permission interaction belong to M9-T5.

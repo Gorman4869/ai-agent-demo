@@ -15,6 +15,7 @@
 - M9-T1 验证基线提交：`ba7adf9`；实现提交：`f8b59d2`
 - M9-T2 验证基线提交：`f8b59d2`；实现提交：`40b1257`
 - M9-T3 验证基线提交：`c3972b6`；实现提交：`5aba130`
+- M9-T4 验证基线提交：`83a5234`；实现提交待本轮本地 commit 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -22,14 +23,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M9-T4` |
+| 任务 ID | `M9-T5` |
 | 状态 | `planned` |
-| 目标 | 实现固定根目录、只读且有界的 Skill Catalog 与 Resolver，覆盖元数据、触发匹配、引用加载、缓存和稳定错误 |
-| 设计依据 | `docs/stages/09-mcp-client-skills.md`、实施计划 M9-T4、现有 `skills/research-summary` 与安全路径边界 |
+| 目标 | 将受控 Skill 片段注入 Runtime 上下文，以固定触发/不触发样例评测效果和成本，并证明不绕过权限、审批或工具 Schema |
+| 设计依据 | `docs/stages/09-mcp-client-skills.md`、实施计划 M9-T5、M9-T4 `SkillCatalog`/`SkillResolver`、现有 Runtime 请求与离线评测边界 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M9-T3 已将构建后的 TypeScript Knowledge Server 纳入服务端目录，并通过真实 Node/Python STDIO 覆盖 initialize、发现、有效/无效调用和关闭；4 项 E2E 与 67 项定向回归通过，状态为 `verified` |
-| 前置证据 | `V-20260720-003`、`V-20260720-004`、`V-20260720-001`、`ADR-0009` |
-| 下一动作 | 按 B 类协议只读审阅 M9-T4、`skills/research-summary`、现有路径安全与缓存风格；先定义只读元数据和固定根目录解析，不提前实现 M9-T5 上下文注入或 M10 |
+| 当前修改 | M9-T4 已实现固定根目录、严格 frontmatter、有界 reference、不可变缓存、显式/自动触发和稳定错误；10 项新增测试与 17 项路径安全定向集通过，状态为 `verified` |
+| 前置证据 | `V-20260720-005`、`V-20260720-003` |
+| 下一动作 | 按 B 类协议只读审阅 M9-T5、Runtime 请求/模型输入和离线 eval 风格；先定义有界 SkillContext 片段与固定触发/不触发对照，不提前执行 M9-T6 里程碑教程或 M10 |
 
 ## 里程碑状态
 
@@ -38,7 +39,7 @@
 | M0–M7 历史基线 | `code_complete` | 现有产物已落盘但审计后仅部分覆盖；未满足项由 M8–M14 接管，旧链暂不标记 `superseded` |
 | C0 连续性基线 | `verified` | 计划基线 `6f8490a`；验证见 `V-20260716-001`、`V-20260716-002` |
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
-| M9 MCP Client 与 Skill | `in_progress` | M9-T1–M9-T3 verified，`KI-002` closed；当前任务 M9-T4，Skill Catalog/Resolver 与上下文评测尚未完成 |
+| M9 MCP Client 与 Skill | `in_progress` | M9-T1–M9-T4 verified，`KI-002` closed；当前任务 M9-T5，Skill 上下文注入与效果/成本评测尚未完成 |
 | M10 LangGraph 持久工作流 | `planned` | 依赖 M8、M9 |
 | M11 上下文、记忆与真实 RAG | `planned` | 依赖 M10 状态和 Store 协议 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
@@ -53,9 +54,10 @@
 
 ## 未验证范围
 
-- M9-T3 见 `V-20260720-003`：现有 TypeScript build 通过，4 项 E2E 覆盖 8 个关键行为，67 项定向回归通过；真实 Node/Python STDIO 完成 initialize、list_tools、有效/无效 call_tool 与关闭，`KI-002` closed。
-- M9-T3 只证明当前 Windows 本地构建与 STDIO E3；没有验证远程 transport、跨平台兼容、断线重连、调用幂等、副作用恢复或生产容量。
-- M9-T3 没有修改依赖/锁文件、TypeScript 业务逻辑、共享 ToolDefinition 公共契约、HTTP Schema 或前端，因此按 B 类协议只运行构建和定向回归，没有重复执行 `scripts/verify.ps1` 全量门。
+- M9-T4 见 `V-20260720-005`：10 项新增测试全部通过；与 Code Agent 路径边界合并的 17 项定向集为 16 项通过、1 项既有 Windows symlink 能力跳过。
+- M9-T4 在当前 Windows 环境无法创建真实测试 symlink；实际 `../`/嵌套逃逸已由文件系统测试拒绝，符号链接拒绝只完成受控分支覆盖，不能描述为 OS 级 symlink 实证。
+- M9-T4 尚未把 Skill 注入 Manual/SDK/LangGraph Runtime，也未执行触发效果、成本或权限不变性评测；这些由 M9-T5 接管。
+- M9-T4 没有修改依赖/锁文件、公共 Runtime 契约、HTTP Schema 或前端，因此按 B 类协议只运行 Skill/路径安全定向回归，没有重复执行 `scripts/verify.ps1` 全量门。
 - M8-T7 课程验收见 `V-20260717-003`：Provider 故障命令 1 项、框架对照 12 项和全量后端 252 项通过，1 项既有 Windows symlink 跳过；Vue、MCP 与 Compose 配置门通过。
 - M8-T6 工作区验证见 `V-20260717-001`，实现提交 `bd6c09a` 的恢复锚点见 `V-20260717-002`：12 项新增关键测试与 102 项定向回归通过，Fake Runtime 经实际 Store/Coordinator 纵切；这只是 E3，不是在线 Provider 证据。
 - 没有用户新的单次授权，因此没有读取真实 Key、运行带 `-Authorized` 的脚本、访问模型服务或产生费用；Provider strict schema、真实 streaming、工具调用、usage、模型质量、费用和资源清理仍无 E4 证据。
@@ -65,4 +67,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t3-typescript-mcp-e2e.md`，再核对 `V-20260720-003`、`V-20260720-004`、实施计划 M9-T4 和 `docs/stages/09-mcp-client-skills.md`。若 TypeScript build、4 项 MCP E2E、67 项定向回归和连续性检查仍一致，不要重做 M9-T1–M9-T3；下一步只设计固定根目录的只读 Skill Catalog/Resolver，不提前执行 M9-T5 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t4-skill-catalog-resolver.md`，再核对 `V-20260720-005`、实施计划 M9-T5 和 `docs/stages/09-mcp-client-skills.md`。若 10 项 Skill 测试、17 项路径安全定向集和连续性检查仍一致，不要重做 M9-T1–M9-T4；下一步只设计有界 SkillContext 注入与固定离线评测，不提前执行 M9-T6 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。
