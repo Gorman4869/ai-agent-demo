@@ -590,3 +590,44 @@
 
 - `M9-T1` 达到 `verified`：服务端允许配置、真实 SDK STDIO 初始化、FastAPI lifespan、稳定失败、正常关闭、取消和部分回滚均有离线可复现证据。
 - `KI-002` 保持 open 但已完成 Client 生命周期部分；下一任务进入 `M9-T2 / planned`，只实现工具发现与共同 ToolDefinition 映射，不提前执行 M9-T3 TypeScript E2E 或 Skill。
+
+## V-20260720-001：M9-T2 工具发现与共同 ToolDefinition 映射
+
+- 任务：`M9-T2`
+- 时间：2026-07-20 10:15，Asia/Shanghai
+- 验证目标：HEAD `f8b59d2` 上的 M9-T2 工作区；提交由后续本地 commit 固定
+- 模式：offline；只启动本地 Python MCP STDIO Server，没有读取真实 API Key、访问网络服务或执行付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用已锁定 Python 3.12.10、`mcp==1.28.1`、`openai-agents==0.18.2` 与 LangGraph 环境
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净且 M9-T1 实现提交 `f8b59d2` 存在；窗口恢复时 9 个 M9-T2 工作区文件与记录一致 |
+| M9-T1 handoff 最小恢复命令 | 0 | 9 项生命周期测试通过且无 ResourceWarning；连续性为 52 个稳定任务、55 个 Markdown 文件，未发现漂移 |
+| 本地 MCP SDK `list_tools` / `call_tool` 探针 | 0 | 确认 `mcp==1.28.1` 公开分页与调用 API；真实结果含 SDK 生成的 title 元数据、TextContent 与 structuredContent，适配器据此归一化 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_tool_adapter -v` | 0 | 7 项 M9-T2 聚焦测试通过：可信映射、非法/重复/缺失发现、真实调用、三 Runtime、RBAC、超时、错误/上限、allowlist 与冲突 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_tool_adapter backend.tests.test_mcp_client_lifecycle backend.tests.test_settings backend.tests.test_tool_security backend.tests.test_manual_agent_loop backend.tests.test_runtime_comparison backend.tests.test_openai_agents_runtime backend.tests.test_framework_runtimes backend.tests.test_container backend.tests.test_api -q` | 0 | 126 项定向回归通过；覆盖 MCP 生命周期、设置、工具安全、Manual、Agents SDK、LangGraph、容器与 API，无 ResourceWarning |
+| `git diff --check` | 0 | 无空白错误；只有既有 LF/CRLF 转换提示 |
+
+### 实现与安全证据
+
+- 冻结 `McpToolPolicy` 由服务端配置独占本地名称、可信描述、角色、风险、副作用与审批策略；远端描述、title、默认值和示例不进入共同工具提示。
+- 连接 worker 在拥有 SDK context 的同一 Task 中分页执行 `list_tools` 和 `call_tool`；发现最多 8 页/256 工具，游标、Schema、参数和结果都有结构与字节上限。
+- 只映射策略 allowlist 中的远端工具；重复远端名称、缺失配置工具、非法 Schema、跨 Server 本地名称冲突和直接调用未列入工具均稳定失败。
+- 归一化后的共同 `ToolDefinition` 沿用 Registry 的参数校验、RBAC 和审批边界；同一定义已实际通过 ManualAgentLoop、OpenAI Agents SDK FunctionTool 与 LangGraphRuntime 执行。
+- 调用超时独立配置为 100–30000 ms，默认 5000 ms，不自动重试；结构化结果优先，只接受有界文本回退，远端异常、原始参数和超限结果不进入公共错误。
+- 证据等级为本地 Python MCP STDIO 协议与三 Runtime 集成 E3，不是 TypeScript Server E2E 或远程/生产 E4。
+
+### 失败尝试、警告与未验证范围
+
+- 初版专项 6 项测试通过后，代码审阅发现公开 `call_tool` 可绕过映射层直调未列入策略的远端工具；新增边界校验和第 7 项真实 STDIO 用例后复验通过，未接受初版作为最终证据。
+- 一次按常见 `pyproject.toml`/requirements 通配路径搜索格式化配置失败；随后从实际文件清单确认仓库没有该配置，未安装或引入格式化工具。
+- 测试输出有既有 Starlette/httpx 弃用警告与 Windows asyncio debug 慢任务信息；没有 ResourceWarning、失败或资源泄漏证据，未升级依赖。
+- 未执行 `scripts/verify.ps1` 全量门：没有依赖/锁文件、共享 ToolDefinition 公共契约、HTTP Schema、前端或跨前后端接口变化，126 项定向回归覆盖本任务边界。
+- 未构建或执行 TypeScript Knowledge Server E2E，也未验证远程 transport、断线重连、健康检查、调用幂等、副作用恢复或生产容量；这些不能由 Python fixture 证据替代。
+
+### 结论
+
+- `M9-T2` 达到 `verified`：真实工具发现、可信映射、共同 Registry、三 Runtime 调用、RBAC、冲突、超时和安全结果均有离线可复现证据。
+- `KI-002` 保持 open，但 Python Client 发现/调用部分已完成；下一任务进入 `M9-T3 / planned`，只补 TypeScript Knowledge Server 协议 E2E，不提前执行 Skill 或 M10。

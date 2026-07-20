@@ -67,6 +67,7 @@ class McpClientSettings(BaseModel):
 
     server_ids: tuple[str, ...] = ()
     startup_timeout_ms: int = Field(default=5_000, ge=100, le=30_000)
+    request_timeout_ms: int = Field(default=5_000, ge=100, le=30_000)
 
     @field_validator("server_ids")
     @classmethod
@@ -253,6 +254,11 @@ class Settings(BaseModel):
                     startup_timeout_ms=_read_int(
                         values,
                         "AI_AGENT_MCP_STARTUP_TIMEOUT_MS",
+                        5_000,
+                    ),
+                    request_timeout_ms=_read_int(
+                        values,
+                        "AI_AGENT_MCP_REQUEST_TIMEOUT_MS",
                         5_000,
                     ),
                 ),

@@ -30,12 +30,14 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(2, settings.budget.max_model_retries)
         self.assertEqual((), settings.mcp.server_ids)
         self.assertEqual(5_000, settings.mcp.startup_timeout_ms)
+        self.assertEqual(5_000, settings.mcp.request_timeout_ms)
 
     def test_mcp_server_selectors_and_timeout_are_parsed(self) -> None:
         settings = Settings.from_environment(
             {
                 "AI_AGENT_MCP_SERVERS": "python-knowledge, team-readonly",
                 "AI_AGENT_MCP_STARTUP_TIMEOUT_MS": "7500",
+                "AI_AGENT_MCP_REQUEST_TIMEOUT_MS": "9000",
             }
         )
 
@@ -44,6 +46,7 @@ class SettingsTest(unittest.TestCase):
             settings.mcp.server_ids,
         )
         self.assertEqual(7_500, settings.mcp.startup_timeout_ms)
+        self.assertEqual(9_000, settings.mcp.request_timeout_ms)
 
     def test_invalid_mcp_settings_fail_closed(self) -> None:
         environments = (
@@ -53,6 +56,8 @@ class SettingsTest(unittest.TestCase):
             {"AI_AGENT_MCP_SERVERS": "a,b,c,d,e,f,g,h,i"},
             {"AI_AGENT_MCP_STARTUP_TIMEOUT_MS": "99"},
             {"AI_AGENT_MCP_STARTUP_TIMEOUT_MS": "30001"},
+            {"AI_AGENT_MCP_REQUEST_TIMEOUT_MS": "99"},
+            {"AI_AGENT_MCP_REQUEST_TIMEOUT_MS": "30001"},
         )
 
         for environment in environments:
@@ -295,6 +300,7 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("AI_AGENT_TRACE_INCLUDE_SENSITIVE=false", content)
         self.assertIn("\nAI_AGENT_MCP_SERVERS=\n", content)
         self.assertIn("\nAI_AGENT_MCP_STARTUP_TIMEOUT_MS=5000\n", content)
+        self.assertIn("\nAI_AGENT_MCP_REQUEST_TIMEOUT_MS=5000\n", content)
         self.assertIn("\nOPENAI_API_KEY=\n", content)
         self.assertIn("\nOPENAI_MODEL=\n", content)
 

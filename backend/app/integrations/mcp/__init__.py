@@ -6,7 +6,12 @@ from backend.app.integrations.mcp.client import (
 )
 from backend.app.integrations.mcp.config import (
     McpServerConfig,
+    McpToolPolicy,
     default_mcp_server_configs,
+)
+from backend.app.integrations.mcp.tools import (
+    McpToolInvocationError,
+    McpToolMappingError,
 )
 
 __all__ = [
@@ -15,5 +20,8 @@ __all__ = [
     "McpClientManager",
     "McpClientState",
     "McpServerConfig",
+    "McpToolInvocationError",
+    "McpToolMappingError",
+    "McpToolPolicy",
     "default_mcp_server_configs",
 ]

@@ -140,11 +140,16 @@
 - Unknown cost stays `None` with `cost_source=unknown`; never report zero, guess a value, or hard-code unversioned pricing. `max_turns` is a Run-loop bound and configured output tokens are a per-model-request bound, while model-call and input-token checks are aggregate post-run or approximate. The HTTP client timeout is not a strict whole-workflow wall clock, and `max_cost_usd` is not yet enforced. Code and teaching material must disclose KI-018 instead of claiming hard budget guarantees.
 - Offline construction and fake-Runner contract tests establish only code-complete evidence. Do not claim online verification; M8-T6 owns the separately authorized real-provider streaming and tool-call smoke test.
 
-## 16. MCP Client Lifecycle
+## 16. MCP Client Lifecycle and Tool Adapter
 
 - `Settings.mcp` selects only stable IDs from a server-owned `McpServerConfig` catalog. HTTP or model input must never provide an executable, arguments, working directory, environment, or transport policy.
 - The default MCP selection is empty and must not start a process. Enabling a local Server remains offline evidence and must not be described as a remote or production MCP deployment.
 - Each STDIO connection enters `stdio_client`, enters `ClientSession`, initializes, and exits in one worker task. Manager timeout and cancellation signal that worker and await cleanup instead of exiting anyio cancel scopes from another task.
 - FastAPI lifespan owns Manager start and close. Startup is all-or-nothing; a partial set of initialized Servers is closed before a stable startup failure leaves the boundary.
 - Public diagnostics expose only the reviewed lifecycle code and safe Server ID. Raw commands, arguments, stderr, invalid protocol lines, and exception text do not enter logs or errors.
-- M9-T1 does not expose Session discovery or invocation. Tool listing, Schema normalization, permission filtering, namespace conflicts, timeout policy, and call adaptation belong to M9-T2.
+- `list_tools` and `call_tool` requests run through the same connection worker that owns the SDK contexts. A `ClientSession` must not be used from a manager task or leaked as a public object.
+- Treat discovery metadata as untrusted. Local names, descriptions, roles, risk, side-effect, and approval policy come only from the server-owned `McpToolPolicy`; an unlisted remote tool is neither mapped nor directly callable.
+- Normalize only the reviewed object-schema subset, remove remote prompt text, force `additionalProperties=false`, and reject unknown keywords or structural limits. Bound schemas, arguments, results, pages, cursors, depth, node count, and byte size.
+- Expose mapped tools through the existing shared `ToolDefinition` and `ToolRegistry` so Manual, Agents SDK, and LangGraph retain the same validation and authorization boundary. Cross-Server local-name conflicts fail closed.
+- Each remote call has a separately configured timeout and no automatic retry. Return structured JSON when available, accept only bounded text fallback, and map remote errors without raw result or exception leakage.
+- M9-T2 proves the Python Client adapter against a local Python STDIO fixture. TypeScript Server protocol E2E, reconnect, invocation idempotency, and Skill behavior remain M9-T3 or later work.

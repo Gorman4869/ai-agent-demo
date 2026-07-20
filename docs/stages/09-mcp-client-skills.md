@@ -45,6 +45,19 @@ Remove-Item Env:AI_AGENT_MCP_STARTUP_TIMEOUT_MS
 
 本纵切只证明本地 STDIO 连接、初始化和关闭，尚未实现 `list_tools`、`call_tool`、Schema/RBAC 映射或 TypeScript Server 端到端；这些分别由 M9-T2 和 M9-T3 验收。
 
+## M9-T2 最小纵切：发现、可信映射与调用
+
+`McpClientManager.discover_tool_definitions()` 在拥有 SDK context 的连接 worker 中分页执行 `list_tools`，再按服务端维护的 `McpToolPolicy` 生成共同 `ToolDefinition`。远端 description、title、默认值和示例不进入模型提示；未列入策略的工具会被隔离，重复远端名称、缺失配置工具、非法 Schema 和跨 Server 本地名称冲突均稳定失败。
+
+共同 Registry 继续负责参数校验、角色过滤和审批策略。handler 通过线程安全桥接回 Client owner loop，在原连接 worker 中执行 `call_tool`；调用有单独的 100–30000 ms 超时，不自动重试。结构化结果优先，文本回退、参数和结果均有大小与结构上限，远端错误和原始内容不会进入公共 `ToolResult`。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_tool_adapter -v
+.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_tool_adapter backend.tests.test_mcp_client_lifecycle backend.tests.test_settings backend.tests.test_tool_security backend.tests.test_manual_agent_loop backend.tests.test_runtime_comparison backend.tests.test_openai_agents_runtime backend.tests.test_framework_runtimes backend.tests.test_container backend.tests.test_api -q
+```
+
+第一条命令实际启动本地 Python MCP STDIO Server，覆盖发现、调用、角色拒绝、超时、远端失败、结果上限、allowlist 和命名冲突；第二条验证相同 `ToolDefinition` 能被 Manual、Agents SDK 与 LangGraph 共同边界使用。该证据是本地协议 E3，不是 M9-T3 的 TypeScript Server E2E，也不证明断线重连、副作用幂等或生产部署。
+
 ## 计划验证命令
 
 ```powershell
