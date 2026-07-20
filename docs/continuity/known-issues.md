@@ -5,13 +5,13 @@
 | ID | 严重度 | 状态 | 归属 | 问题 | 关闭证据 |
 | --- | --- | --- | --- | --- | --- |
 | KI-001 | blocker | mitigated | M8 | M8-T4/M8-T5 已完成 SDK 适配与共享契约，M8-T6 已完成双重授权门和 E3 离线纵切，M8-T7 已完成课程材料与全量离线门；没有新的单次授权，真实线上流式、工具与 usage 仍未执行 | M8-T4/M8-T5 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
-| KI-002 | blocker | open | M9 | M9-T1/M9-T2 已完成真实 SDK 生命周期、`list_tools`、可信 Schema/RBAC/命名映射和 `call_tool` 共同适配；本地 Python STDIO 达到 E3，仍缺 TypeScript Server 协议 E2E | MCP STDIO 端到端测试通过 |
+| KI-002 | blocker | closed | M9 | M9-T1–T3 已完成真实 SDK 生命周期、可信工具映射，并对构建后的 TypeScript Knowledge Server 执行 initialize、list_tools、有效/无效 call_tool 与关闭 | `V-20260720-003`：TypeScript MCP STDIO 构建、4 项 E2E 与 67 项定向回归通过 |
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
 | KI-004 | high | open | M10 | LangGraph 没有 checkpoint、interrupt、resume 和恢复测试 | 中断、审批、重启恢复测试通过 |
 | KI-005 | high | open | M10–M11 | 上下文选择、记忆注入和动态重规划未进入主 Run | 长对话、记忆纠错与失败重规划评测通过 |
 | KI-006 | high | open | M11 | pgvector 只有 Fake Connection，没有真实数据库、Embedding 与检索指标 | PostgreSQL/pgvector 集成和固定评测集通过 |
 | KI-007 | high | open | M12 | SSE 在 Run 完成后回放；前端再次调用 Research API 覆盖答案 | 单 Run 真流式、续传和刷新恢复 E2E 通过 |
-| KI-008 | high | open | M12–M13 | 缺少前端、MCP 协议和真实数据库自动化测试 | 分层测试进入统一验证和 CI |
+| KI-008 | high | open | M12–M13 | M9-T3 已补 TypeScript MCP STDIO 协议自动化；仍缺前端和真实数据库自动化测试及统一分层门 | 分层测试进入统一验证和 CI |
 | KI-009 | medium | open | M13 | Compose 仅配置通过，镜像和容器健康未验证 | Docker 构建、健康和 Nginx SSE 验证通过 |
 | KI-010 | high | open | M14 | 浏览器审批未绑定完整 URL/计划，且缺少私网、DNS 与重定向防护 | 真实浏览器安全和 SSRF 测试通过 |
 | KI-011 | high | open | M13–M14 | 代码 Agent 在截断前完整缓冲输出，超时未证明清理进程树 | 有界流式输出和进程树测试通过 |

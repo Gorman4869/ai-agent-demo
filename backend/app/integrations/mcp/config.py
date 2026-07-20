@@ -103,6 +103,9 @@ def default_mcp_server_configs() -> Mapping[str, McpServerConfig]:
     """Return the immutable server catalog available to Settings selectors."""
 
     project_root = Path(__file__).resolve().parents[4]
+    typescript_knowledge_root = (
+        project_root / "mcp-servers" / "knowledge-server"
+    )
     python_knowledge = McpServerConfig(
         server_id="python-knowledge",
         command=sys.executable,
@@ -115,7 +118,27 @@ def default_mcp_server_configs() -> Mapping[str, McpServerConfig]:
             )
         },
     )
-    return MappingProxyType({python_knowledge.server_id: python_knowledge})
+    typescript_knowledge = McpServerConfig(
+        server_id="typescript-knowledge",
+        command="node",
+        args=("build/index.js",),
+        cwd=typescript_knowledge_root,
+        tool_policies={
+            "lookup_concept": McpToolPolicy(
+                local_name="mcp_typescript_knowledge_lookup_concept",
+                description=(
+                    "Look up one approved AI Agent course concept in the "
+                    "TypeScript MCP server."
+                ),
+            )
+        },
+    )
+    return MappingProxyType(
+        {
+            python_knowledge.server_id: python_knowledge,
+            typescript_knowledge.server_id: typescript_knowledge,
+        }
+    )
 
 
 def _contains_control(value: str) -> bool:

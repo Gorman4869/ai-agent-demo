@@ -652,3 +652,44 @@
 
 - M9-T2 实现提交固定为 `40b1257`；`V-20260720-001` 的 126 项定向回归、E3 边界与 `verified` 结论不变。
 - 当前任务为 `M9-T3 / planned`；只补 TypeScript Knowledge Server 协议 E2E，不重做 M9-T1/M9-T2，不提前进入 Skill 或 M10。
+
+## V-20260720-003：M9-T3 TypeScript Server 协议端到端
+
+- 任务：`M9-T3`
+- 时间：2026-07-20 10:53，Asia/Shanghai
+- 验证目标：HEAD `c3972b6` 上的 M9-T3 工作区；提交由后续本地 commit 固定
+- 模式：offline；只启动本地 TypeScript MCP STDIO Server，没有读取真实 API Key、访问网络服务或执行付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；沿用锁定的 Python 3.12.10、`mcp==1.28.1`、Node 环境、`@modelcontextprotocol/sdk==1.29.0`、Zod 3.25.76 与 TypeScript 7.0.2
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净；M9-T2 实现 `40b1257` 与验证锚点 `c3972b6` 存在 |
+| M9-T2 handoff 最小恢复命令 | 0 | 7 项 MCP 工具适配测试通过且无 ResourceWarning；连续性为 52 个稳定任务、56 个 Markdown 文件，未发现漂移 |
+| `npm.cmd run build --prefix mcp-servers/knowledge-server` | 0 | 使用现有 node_modules 与锁文件执行 `tsc`，构建 TypeScript Knowledge Server；没有安装依赖或留下 Git 改动 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_e2e -v` | 0 | 4 项真实 STDIO E2E 通过，覆盖 8 个关键行为：目录策略、initialize/list_tools、Schema、已知/未知调用、非法参数、allowlist 和关闭 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_e2e backend.tests.test_mcp_tool_adapter backend.tests.test_mcp_client_lifecycle backend.tests.test_settings backend.tests.test_container backend.tests.test_api -q` | 0 | 67 项定向回归通过；覆盖 TypeScript/Python MCP、生命周期、设置、Container/FastAPI 与 API，无 ResourceWarning |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、57 个 Markdown 文件；状态、链接和新增 handoff 通过 |
+| `git diff --check` | 0 | 无空白错误；只有既有 LF/CRLF 转换提示 |
+
+### 实现与协议证据
+
+- 默认服务端目录新增 `typescript-knowledge`，固定执行 `node build/index.js`、Knowledge Server 绝对 cwd 和可信 `lookup_concept` 策略；默认 MCP 选择仍为空。
+- E2E 真实启动构建后的 Node 子进程，通过 Python MCP SDK 完成 initialize、list_tools、共同 ToolDefinition 映射、call_tool 和 context 关闭，没有 import TypeScript 源码或直接调用知识字典。
+- 已知 `mcp` 与未知概念均通过共同 ToolRegistry 返回有界 TextContent；远端 description/schema 提示元数据不进入可信定义。
+- `{name: 42}` 实际送入 TypeScript Server 并由 Zod 拒绝；Client 只暴露 `remote_tool_error`。未列入策略的工具在调用前以 `tool_not_allowed` 拒绝，错误不含远端校验文本。
+- 证据等级为当前 Windows 本地 Node/Python STDIO 互操作 E3，不是远程 transport、跨平台或生产 E4。
+
+### 失败尝试、警告与未验证范围
+
+- 两次组合 `rg` 搜索因 PowerShell 引号处理产生未闭合正则或错误文件参数；随后使用实际文件清单和逐文件读取完成审阅，没有修改文件或依赖。
+- 测试输出有既有 Starlette/httpx 弃用警告与 Windows asyncio debug 慢任务信息；没有 ResourceWarning、测试失败或资源泄漏证据，未升级依赖。
+- `status.md` 顶部“最近已确认实现提交”仍停在 M8 的 `bd6c09a`，但下方 M9-T1/T2 锚点正确；本轮按可复现提交证据将该动态字段修正为 `40b1257`。
+- 未执行 `scripts/verify.ps1` 全量门：没有依赖/锁文件、构建配置、TypeScript 业务逻辑、共享 ToolDefinition 公共契约、HTTP Schema 或前端变化，67 项定向回归覆盖本任务边界。
+- 未验证远程 MCP、HTTP/SSE transport、Linux/macOS、断线重连、健康检查、调用幂等、副作用恢复或生产容量；本地 Node 进程不能替代这些证据。
+
+### 结论
+
+- `M9-T3` 达到 `verified`：现有 TypeScript Knowledge Server 构建、初始化、发现、有效/无效调用和关闭均有真实 STDIO 可复现证据。
+- `KI-002` 达到关闭条件并标记 `closed`；下一任务进入 `M9-T4 / planned`，只实现只读 Skill Catalog/Resolver，不提前执行上下文注入评测或 M10。

@@ -152,4 +152,5 @@
 - Normalize only the reviewed object-schema subset, remove remote prompt text, force `additionalProperties=false`, and reject unknown keywords or structural limits. Bound schemas, arguments, results, pages, cursors, depth, node count, and byte size.
 - Expose mapped tools through the existing shared `ToolDefinition` and `ToolRegistry` so Manual, Agents SDK, and LangGraph retain the same validation and authorization boundary. Cross-Server local-name conflicts fail closed.
 - Each remote call has a separately configured timeout and no automatic retry. Return structured JSON when available, accept only bounded text fallback, and map remote errors without raw result or exception leakage.
-- M9-T2 proves the Python Client adapter against a local Python STDIO fixture. TypeScript Server protocol E2E, reconnect, invocation idempotency, and Skill behavior remain M9-T3 or later work.
+- M9-T3 proves the same Client adapter against the built TypeScript Knowledge Server over real local STDIO. The TypeScript process remains a server-owned catalog entry; tests must exercise initialize, discovery, valid and invalid calls, and close without importing Server functions directly.
+- Local Python and TypeScript STDIO evidence is E3, not remote or production E4. Reconnect, invocation idempotency, production capacity, and Skill behavior remain later work.

@@ -58,6 +58,17 @@ Remove-Item Env:AI_AGENT_MCP_STARTUP_TIMEOUT_MS
 
 第一条命令实际启动本地 Python MCP STDIO Server，覆盖发现、调用、角色拒绝、超时、远端失败、结果上限、allowlist 和命名冲突；第二条验证相同 `ToolDefinition` 能被 Manual、Agents SDK 与 LangGraph 共同边界使用。该证据是本地协议 E3，不是 M9-T3 的 TypeScript Server E2E，也不证明断线重连、副作用幂等或生产部署。
 
+## M9-T3 最小纵切：TypeScript Server 协议 E2E
+
+先使用锁文件中已有依赖构建 TypeScript Server，再由 Python `McpClientManager` 选择服务端目录中的 `typescript-knowledge`。测试进程真实执行 `node build/index.js`，依次完成 initialize、list_tools、共同 `ToolDefinition` 调用、协议级非法参数和关闭；不得直接 import `src/index.ts` 或调用知识字典冒充协议测试。
+
+```powershell
+npm.cmd run build --prefix mcp-servers/knowledge-server
+.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_mcp_client_e2e -v
+```
+
+聚焦测试覆盖服务端固定 command/cwd/policy、Schema 归一化、已知和未知概念文本结果、服务端 Zod 类型拒绝、客户端 allowlist 和清理。Server stdout 专用于 JSON-RPC，普通运行日志只能写 stderr；Client 不把 stderr 或远端校验文本带入公共错误。该纵切证明 Windows 本地 Node/Python STDIO 互操作 E3，不证明远程 transport、跨平台兼容、重连、幂等或生产容量。
+
 ## 计划验证命令
 
 ```powershell
