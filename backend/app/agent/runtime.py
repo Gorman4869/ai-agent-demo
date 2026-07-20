@@ -5,7 +5,9 @@ import hmac
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Protocol
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 from backend.app.agent.cancellation import CancellationToken
 from backend.app.domain.run import RunFailure, RunStatus
@@ -21,6 +23,7 @@ _TERMINAL_STATUSES = frozenset(
 _MAX_PROMPT_CONTEXT_BYTES = 32_000
 _CHECKPOINT_OWNER_PATTERN = re.compile(r"runtime-owner-v1-[0-9a-f]{64}")
 _CHECKPOINT_THREAD_PATTERN = re.compile(r"runtime-thread-v1-[0-9a-f]{64}")
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 def _require_runtime_identifier(value: str, *, field_name: str) -> str:
@@ -225,6 +228,83 @@ class RuntimeResult:
         object.__setattr__(self, "status", status)
 
 
+class RuntimeApprovalDecision(StrEnum):
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+@dataclass(frozen=True)
+class RuntimeApprovalPause:
+    """Safe metadata for one server-owned approval interrupt."""
+
+    approval_id: str
+    tool_call_id: str
+    tool_name: str
+    arguments_digest: str = field(repr=False)
+    expires_at: datetime | None = None
+    step: int = 0
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.approval_id, "approval_id"),
+            (self.tool_call_id, "tool_call_id"),
+            (self.tool_name, "tool_name"),
+        ):
+            _require_runtime_identifier(value, field_name=field_name)
+        if (
+            not isinstance(self.arguments_digest, str)
+            or _SHA256_PATTERN.fullmatch(self.arguments_digest) is None
+        ):
+            raise ValueError("arguments_digest has an invalid format")
+        if self.expires_at is not None and (
+            not isinstance(self.expires_at, datetime)
+            or self.expires_at.tzinfo is None
+            or self.expires_at.utcoffset() is None
+        ):
+            raise ValueError("expires_at must be timezone-aware")
+        if (
+            not isinstance(self.step, int)
+            or isinstance(self.step, bool)
+            or self.step < 0
+        ):
+            raise ValueError("approval pause step must be a non-negative integer")
+        if self.expires_at is not None:
+            object.__setattr__(self, "expires_at", self.expires_at.astimezone(UTC))
+
+
+@dataclass(frozen=True)
+class RuntimeApprovalResume:
+    """Server-resolved decision passed to a resumable Runtime."""
+
+    approval_id: str
+    tool_call_id: str
+    tool_name: str
+    arguments_digest: str = field(repr=False)
+    decision: RuntimeApprovalDecision
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.approval_id, "approval_id"),
+            (self.tool_call_id, "tool_call_id"),
+            (self.tool_name, "tool_name"),
+        ):
+            _require_runtime_identifier(value, field_name=field_name)
+        if (
+            not isinstance(self.arguments_digest, str)
+            or _SHA256_PATTERN.fullmatch(self.arguments_digest) is None
+        ):
+            raise ValueError("arguments_digest has an invalid format")
+        try:
+            decision = RuntimeApprovalDecision(self.decision)
+        except (TypeError, ValueError):
+            raise ValueError("approval decision is not supported") from None
+        object.__setattr__(self, "decision", decision)
+
+
+RuntimeOutcome = RuntimeResult | RuntimeApprovalPause
+
+
 class RuntimeEventSink(Protocol):
     async def __call__(self, event: RuntimeEvent) -> None:
         ...
@@ -237,16 +317,34 @@ class AgentRuntime(Protocol):
         *,
         emit: RuntimeEventSink,
         control: RuntimeControl,
-    ) -> RuntimeResult:
+    ) -> RuntimeOutcome:
+        ...
+
+
+@runtime_checkable
+class ApprovalResumableRuntime(AgentRuntime, Protocol):
+    async def resume(
+        self,
+        request: RuntimeRequest,
+        *,
+        approval: RuntimeApprovalResume,
+        emit: RuntimeEventSink,
+        control: RuntimeControl,
+    ) -> RuntimeOutcome:
         ...
 
 
 __all__ = [
     "AgentRuntime",
+    "ApprovalResumableRuntime",
+    "RuntimeApprovalDecision",
+    "RuntimeApprovalPause",
+    "RuntimeApprovalResume",
     "RuntimeCheckpointContext",
     "RuntimeControl",
     "RuntimeEvent",
     "RuntimeEventSink",
+    "RuntimeOutcome",
     "RuntimeRequest",
     "RuntimeResult",
 ]

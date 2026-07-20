@@ -51,13 +51,20 @@ stored owner + run
 
 `RuntimeRequest`、Skill prompt、事件 sink 和取消对象只走本次 invocation context，不进入 checkpoint。`state_version=1` 是当前唯一接受版本；未知版本 fail closed，等后续有迁移 fixture 和显式 migrator 后再升级。
 
-本纵切的“跨实例恢复”是两个 Runtime 对象共享同一内存 saver，不是操作系统进程重启。M10-T2 才增加 interrupt/审批 resume；M11 才把 saver 替换为 PostgreSQL 并验证真正重启恢复。
+本纵切的“跨实例恢复”是两个 Runtime 对象共享同一内存 saver，不是操作系统进程重启。M10-T2 已增加 interrupt/审批 resume；M11 才把 saver 替换为 PostgreSQL 并验证真正重启恢复。
 
 ### 第 2 次：人工审批
 
-- 高风险工具先写 ApprovalRequest，再 interrupt。
-- 分别演示批准、拒绝、过期、篡改和重复 resume。
-- 统计副作用实际执行次数。
+- `ApprovalLangGraphRuntime` 的 `prepare` 节点先把服务端规划的调用写成 ApprovalRequest，`execute` 节点再调用 `interrupt()`；恢复不会重新规划工具参数。
+- 从 `run.waiting_approval` 事件取得审批 ID、call、tool 和参数摘要，只向 `RunCoordinator.resume_approval()` 提交 `approve` 或 `reject`。客户端裸 `approved=true`、错摘要、错 call 或错 tool 均不能恢复执行。
+- 批准后仍由 `ToolRegistry` 消费绑定 Run 的单次 approval；拒绝、过期、篡改和并发重复 resume 的 handler 调用数都必须为 0 或 1。
+- 用以下离线命令复现本次纵切：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_approval_resume backend.tests.test_run_store_contract -v
+```
+
+新 Runtime 实例必须复用同一 `InMemorySaver` 和服务端内存 Store 才能恢复。该证据最高为同进程 E3；进程退出、结果未知和 PostgreSQL 恢复不在本次结论内。
 
 ### 第 3 次：计划与重规划
 

@@ -478,6 +478,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：批准、拒绝、过期、重复使用、参数被篡改、重启后恢复。
 - 验收：客户端裸 `approved=true` 不能恢复工具执行。
 
+#### M10-T2 离线实现结果与恢复边界
+
+- 已实现：`RuntimeApprovalPause`/`RuntimeApprovalResume`、真实 LangGraph `interrupt()`/`Command(resume=...)`、Run 绑定 ApprovalRequest，以及 `PauseCommit`/`ResumeCommit` 原子生命周期事件。
+- 已实现：审批绑定 Run、principal、call、tool 和参数摘要；原始参数只在服务端内存 Store 中保存，批准后仍由共享 `ToolRegistry` 单次消费。拒绝、过期、篡改、布尔 decision 和重复 resume 均不重复执行 handler。
+- 离线证据：专项测试实际暂停 graph，再由新 Runtime/Coordinator 实例复用同一 saver/store 恢复；这属于同进程 E3，不是操作系统进程重启或 PostgreSQL 证据。
+- 未实现：默认 Container/HTTP 审批端点属于 M12；结果未知的副作用故障注入属于 M10-T5；持久私有参数、进程重启和多进程事务属于 M11。
+
 ### M10-T3：动态计划、失败诊断与重规划
 
 - 依赖：M10-T1。

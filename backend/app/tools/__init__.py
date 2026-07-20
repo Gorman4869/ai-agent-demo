@@ -1,7 +1,12 @@
 from .registry import (
     ApprovalDecision,
+    ApprovalResolutionError,
+    ApprovalResolutionStatus,
+    ApprovalResponse,
     InMemoryApprovalStore,
     ToolApproval,
+    ToolApprovalRequest,
+    ToolApprovalResolution,
     ToolDefinition,
     ToolExecutionContext,
     ToolRegistry,
@@ -12,8 +17,13 @@ from .registry import (
 
 __all__ = [
     "ApprovalDecision",
+    "ApprovalResolutionError",
+    "ApprovalResolutionStatus",
+    "ApprovalResponse",
     "InMemoryApprovalStore",
     "ToolApproval",
+    "ToolApprovalRequest",
+    "ToolApprovalResolution",
     "ToolDefinition",
     "ToolExecutionContext",
     "ToolRegistry",

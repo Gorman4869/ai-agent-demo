@@ -102,6 +102,61 @@ class RunStartCommitter(Protocol):
 
 
 @dataclass(frozen=True)
+class PauseCommit:
+    """One retryable running-to-waiting approval lifecycle commit."""
+
+    run_id: str
+    owner_id: str
+    expected_version: int
+    event_id: str
+    event_data: Mapping[str, object] = field(repr=False)
+    step: int = 0
+
+    def __post_init__(self) -> None:
+        _validate_nonterminal_command(self, label="pause")
+
+    @property
+    def event_type(self) -> str:
+        return "run.waiting_approval"
+
+
+@dataclass(frozen=True)
+class ResumeCommit:
+    """One retryable waiting-to-running approval lifecycle commit."""
+
+    run_id: str
+    owner_id: str
+    expected_version: int
+    event_id: str
+    event_data: Mapping[str, object] = field(repr=False)
+    step: int = 0
+
+    def __post_init__(self) -> None:
+        _validate_nonterminal_command(self, label="resume")
+
+    @property
+    def event_type(self) -> str:
+        return "run.resumed"
+
+
+@dataclass(frozen=True)
+class LifecycleCommitResult:
+    record: RunRecord
+    event: StoredRunEvent
+    created: bool
+
+
+class ApprovalLifecycleCommitter(Protocol):
+    async def commit_pause(self, command: PauseCommit) -> LifecycleCommitResult:
+        """Commit running-to-waiting and its approval event atomically."""
+        ...
+
+    async def commit_resume(self, command: ResumeCommit) -> LifecycleCommitResult:
+        """Commit waiting-to-running and its resume event atomically."""
+        ...
+
+
+@dataclass(frozen=True)
 class TerminalCommit:
     """One retryable command for atomically settling a durable Run."""
 
@@ -216,7 +271,12 @@ class RunStore(Protocol):
         ...
 
 
-class EventStore(RunStartCommitter, TerminalRunCommitter, Protocol):
+class EventStore(
+    RunStartCommitter,
+    ApprovalLifecycleCommitter,
+    TerminalRunCommitter,
+    Protocol,
+):
     """Append-only event contract; sequence and time belong to the Store.
 
     An Event ID replay with identical content returns the original event.
@@ -267,3 +327,26 @@ def _require_expected_version(value: object) -> None:
         or value < 0
     ):
         raise ValueError("expected_version must be a non-negative integer")
+
+
+def _validate_nonterminal_command(
+    command: PauseCommit | ResumeCommit,
+    *,
+    label: str,
+) -> None:
+    for value, field_name in (
+        (command.run_id, "run_id"),
+        (command.owner_id, "owner_id"),
+        (command.event_id, "event_id"),
+    ):
+        _require_command_identifier(value, field_name)
+    _require_expected_version(command.expected_version)
+    if (
+        not isinstance(command.step, int)
+        or isinstance(command.step, bool)
+        or command.step < 0
+    ):
+        raise ValueError(f"{label} event step must be a non-negative integer")
+    if not isinstance(command.event_data, Mapping):
+        raise ValueError(f"{label} event data must be a mapping")
+    object.__setattr__(command, "event_data", dict(command.event_data))

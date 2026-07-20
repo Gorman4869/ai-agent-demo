@@ -19,6 +19,9 @@ from backend.app.stores.base import (
     EventConflictError,
     IdempotencyConflictError,
     InvalidRunTransitionError,
+    LifecycleCommitResult,
+    PauseCommit,
+    ResumeCommit,
     RunConflictError,
     RunNotFoundError,
     StartCommit,
@@ -172,6 +175,10 @@ class InMemoryEventStore:
             raise ValueError("run.started requires commit_start")
         if event_type in {"run.completed", "run.failed", "run.cancelled"}:
             raise ValueError("terminal lifecycle events require commit_terminal")
+        if event_type == "run.waiting_approval":
+            raise ValueError("run.waiting_approval requires commit_pause")
+        if event_type == "run.resumed":
+            raise ValueError("run.resumed requires commit_resume")
 
         candidate = StoredRunEvent(
             id=event_id,
@@ -359,6 +366,90 @@ class InMemoryEventStore:
                     created=True,
                 )
 
+    async def commit_pause(self, command: PauseCommit) -> LifecycleCommitResult:
+        return await self._commit_nonterminal(
+            command,
+            target_status=RunStatus.WAITING_APPROVAL,
+            before_publish=self._before_pause_publish,
+        )
+
+    async def commit_resume(self, command: ResumeCommit) -> LifecycleCommitResult:
+        return await self._commit_nonterminal(
+            command,
+            target_status=RunStatus.RUNNING,
+            before_publish=self._before_resume_publish,
+        )
+
+    async def _commit_nonterminal(
+        self,
+        command: PauseCommit | ResumeCommit,
+        *,
+        target_status: RunStatus,
+        before_publish: Callable[[], None],
+    ) -> LifecycleCommitResult:
+        candidate = StoredRunEvent(
+            id=command.event_id,
+            run_id=command.run_id,
+            sequence=1,
+            type=command.event_type,
+            data=dict(command.event_data),
+            step=command.step,
+            created_at=self._clock(),
+        )
+        event_key = (command.run_id, command.event_id)
+        async with self._run_store._lock:
+            current = self._run_store._get_owned_unlocked(
+                command.run_id,
+                owner_id=command.owner_id,
+            )
+            if current is None:
+                raise RunNotFoundError()
+            async with self._lock:
+                existing = self._event_ids.get(event_key)
+                if existing is not None:
+                    if not _nonterminal_replay_matches(
+                        command,
+                        current=current,
+                        existing=existing,
+                        candidate=candidate,
+                    ):
+                        raise EventConflictError()
+                    return LifecycleCommitResult(
+                        record=current,
+                        event=existing.snapshot(),
+                        created=False,
+                    )
+                if current.version != command.expected_version:
+                    raise ConcurrentWriteError()
+                try:
+                    updated = current.transition_to(
+                        target_status,
+                        at=candidate.created_at,
+                    )
+                except InvalidRunTransition:
+                    raise InvalidRunTransitionError() from None
+
+                sequence = self._next_sequence.get(command.run_id, 1)
+                stored = StoredRunEvent(
+                    id=candidate.id,
+                    run_id=candidate.run_id,
+                    sequence=sequence,
+                    type=candidate.type,
+                    data=candidate.data,
+                    step=candidate.step,
+                    created_at=candidate.created_at,
+                )
+                before_publish()
+                self._run_store._runs[command.run_id] = updated
+                self._events.setdefault(command.run_id, []).append(stored)
+                self._event_ids[event_key] = stored
+                self._next_sequence[command.run_id] = sequence + 1
+                return LifecycleCommitResult(
+                    record=updated,
+                    event=stored.snapshot(),
+                    created=True,
+                )
+
     async def list_for_run(
         self,
         run_id: str,
@@ -402,6 +493,12 @@ class InMemoryEventStore:
     def _before_start_publish(self) -> None:
         """Fault-injection seam called before any start mutation."""
 
+    def _before_pause_publish(self) -> None:
+        """Fault-injection seam called before any approval pause mutation."""
+
+    def _before_resume_publish(self) -> None:
+        """Fault-injection seam called before any approval resume mutation."""
+
 
 def _start_replay_matches(
     command: StartCommit,
@@ -435,4 +532,19 @@ def _terminal_replay_matches(
         and current.version == command.expected_version + 1
         and current.answer == command.answer
         and current.failure == command.failure
+    )
+
+
+def _nonterminal_replay_matches(
+    command: PauseCommit | ResumeCommit,
+    *,
+    current: RunRecord,
+    existing: StoredRunEvent,
+    candidate: StoredRunEvent,
+) -> bool:
+    return (
+        existing.type == candidate.type
+        and existing.step == candidate.step
+        and existing.data == candidate.data
+        and current.version >= command.expected_version + 1
     )

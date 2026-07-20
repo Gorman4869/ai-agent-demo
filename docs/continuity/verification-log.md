@@ -1001,3 +1001,66 @@
 
 - M10-T1 实现提交固定为 `b6dfa0b`；`V-20260720-011` 的 10 项专项、73 项定向回归、后端 304 项全量门、失败尝试和同进程证据边界不变。
 - 当前任务为 `M10-T2 / planned`；不重做 checkpoint 纵切，不把 `InMemorySaver` 描述成进程重启持久化，不提前进入 M10-T3。
+
+## V-20260720-013：M10-T2 服务端审批 Interrupt 与 Resume
+
+- 任务：`M10-T2`
+- 时间：2026-07-20 16:06，Asia/Shanghai
+- 验证目标：HEAD `cdc9436` 上的 M10-T2 工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类共享 Runtime/EventStore/Coordinator 契约变更，时间盒 2–4 小时
+- 模式：offline；只执行本地 LangGraph、Mock、内存 Store、构建和配置路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用仓库现有 LangGraph 1.2.9 与 langgraph-checkpoint 4.1.1
+
+### 恢复与设计核对
+
+- 开始时 `git status --short` 干净；最近提交为 `cdc9436`、`b6dfa0b`、`c4d4efe`、`fdeb9b5`、`19b5596`、`a6ff518`，未重做 M10-T1。
+- 按顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M10-T2/M10-T3、Stage 10、ADR-0003/0006/0007/0011、最新 handoff、V-011/V-012 和后端规约；实际代码与记录一致，无需登记漂移。
+- handoff 恢复集通过：Checkpoint/Skill 20 项、禁用 `site-packages` 的 M1 7 项、52 个稳定任务/64 个 Markdown；无 ResourceWarning。
+- 只读核对已安装公共 API：`interrupt(value)` 和 `Command(resume=...)`；实际最小图证明首次返回 interrupt、snapshot 处于待执行节点，resume 后节点只执行一次，终态再次 resume 不重复执行。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，当前基线 `cdc9436`，提交边界正确 |
+| handoff 的 Checkpoint/Skill、M1 与连续性恢复命令 | 0 | 20 项、7 项、52 个任务/64 个 Markdown 通过，代码与记录无漂移 |
+| `python -m unittest ...` | 1 | PATH 命中 WindowsApps `python.exe`，报“指定的登录会话不存在”；测试未启动，改用仓库 `.venv`，未改全局配置 |
+| `.\.venv\Scripts\python.exe -m py_compile ...` | 1 | 沙箱拒绝写既有 `__pycache__` 临时 pyc；随后统一使用 `-B` 的真实 import/unittest 验证，不把该次记为通过 |
+| `.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_langgraph_approval_resume backend.tests.test_run_store_contract`（首轮） | 1 | 40 项中 39 项通过；跨 Coordinator 重复 resume 的后到者读到 `running` 后误报非法转换，修复为等待持久终态 |
+| 同一审批与 Store 专项重跑 | 0 | 40 项通过；增加 resume 重放和 pause/resume 故障原子性后最终为 41 项通过 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_approval_resume backend.tests.test_run_store_contract backend.tests.test_tool_security backend.tests.test_run_coordinator backend.tests.test_langgraph_checkpointing -q` | 0 | 83 项定向回归通过，无 ResourceWarning；三条 notifier 日志来自既有负向用例 |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q`（初轮） | 1 | 新审批 Runtime 曾从 `backend.app.agent` 顶层导出，禁用 site-packages 后因找不到 LangGraph 导入失败；移除顶层导出后重跑通过 |
+| 同一 M1 隔离命令（修复后） | 0 | 手写 Loop 7 项通过，专用审批 Runtime 继续显式导入 |
+| `.\.venv\Scripts\python.exe -B -W always::ResourceWarning -m unittest discover -s backend/tests -p "test_*.py"` | 0 | 文档前后端全量前的后端快照 314 项通过、1 项既有 Windows symlink 条件跳过；新增 Store 故障用例后统一脚本最终为 315 项通过、1 项跳过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（沙箱首轮） | 1 | 后端 315 项、Code Agent Demo 与 `pip check` 通过；Vue 写 `tsconfig.app.tsbuildinfo` 被沙箱以 `EPERM` 拒绝，脚本真实退出 1 |
+| 同一 `scripts/verify.ps1` 经工作区构建权限批准后重跑（通知竞态补丁前） | 0 | 后端 315 项通过、1 项既有 symlink 跳过；Code Agent Demo、依赖、Vue 18 模块 production build、MCP TypeScript build 与 Docker Compose 配置门全部通过 |
+| 提交前通知竞态专项与 5 模块定向回归 | 0 | 新增“waiting 通知后立即 resume”用例；审批/Store 42 项、定向 85 项通过，无 ResourceWarning |
+| 通知竞态补丁后再次受控运行同一 `scripts/verify.ps1` | 0 | 后端 316 项通过、1 项既有 symlink 跳过；Code Agent Demo、依赖、Vue、MCP TypeScript 与 Compose 配置门全部通过 |
+| 普通 Runtime 上下文兼容性收口后的最终 `scripts/verify.ps1` | 0 | 只对审批 Runtime 绑定 Run；后端仍为 316 项通过、1 项既有 symlink 跳过，其余离线构建与配置门全部通过 |
+| 最终专项、M1 与 `scripts/check-continuity.ps1` 恢复检查 | 0 | 审批/Store 42 项、M1 7 项、52 个稳定任务/66 个 Markdown 通过，无 ResourceWarning |
+
+### 实现与安全证据
+
+- `RuntimeResult` 保持终态；`RuntimeApprovalPause`、`RuntimeApprovalResume` 和 `ApprovalResumableRuntime` 显式扩展暂停/恢复契约。现有 Runtime 无需伪装 waiting 结果。
+- `PauseCommit` 与 `ResumeCommit` 在固定 Run→Event 锁顺序下原子提交 `waiting_approval`/`running` 与对应生命周期事件；普通 append 拒绝绕过入口，故障注入证明发布前失败时两边均不改变。
+- `ApprovalLangGraphRuntime` 真实执行 `prepare -> interrupt -> Command(resume) -> execute`。prepare 在暂停前固定服务端工具调用；恢复不会重新运行 planner，新 Runtime/Coordinator 实例复用同一 saver/store 后可继续。
+- ApprovalRequest 绑定 Run、principal、call、tool 和规范参数摘要；原始参数只存服务端私有内存。checkpoint、Run 事件和 repr 脱敏测试均未出现测试 secret。
+- `approve` 生成精确 Run-bound grant，最终仍由 `ToolRegistry` 消费一次；`reject`、服务端过期、错 call/tool/digest、Python 布尔 decision、并发跨 Coordinator 重复 resume 和终态重放均不重复调用 handler。
+- 只有 `commit_resume(created=true)` 的赢家调用 Runtime；后到执行者等待持久终态。等待审批 Run 可以取消且不会执行工具。
+- 新 LangGraph 模块只支持显式导入；修复后 `python -S` 的 M1 学习路径继续无第三方依赖运行。默认 Container、旧 HTTP/SSE、简单 LangGraph 和 Agents SDK Runtime 未迁移。
+
+### 失败、警告与未验证范围
+
+- 两个早期多行 API 探针分别因 PowerShell 引号产生 `SyntaxError: unterminated string literal` 和 `SyntaxError: invalid syntax`；最终用临时完整脚本执行真实图后删除临时文件，结论由专项自动化测试继续固定。
+- 一次读取假定存在的 `backend/app/agent/base.py` 失败，随后用 `rg --files` 按真实结构定位到 `runtime.py`；一次 Windows wildcard `rg` 路径展开失败，改为真实文件路径，没有据此修改代码。
+- 首个大补丁因导入上下文与实际文件不符被 `apply_patch` 整体拒绝；另一次导出补丁把名称落到 `__all__` 结束括号外，立即通过只读检查发现并修正，未进入测试或提交。
+- 提交前审查发现 waiting 事件已通知、execute task 尚未退出时，立即 resume 会误共享旧 task 并只返回 waiting。为 active task 增加 execute/resume 阶段标记，resume 等待 execute 收尾后自动继续；新增通知窗口用例后专项、定向和全量均重跑通过。
+- 全量首轮只因沙箱拒绝 Vue build info 写入而失败；保留退出 1，相同完整脚本经批准在沙箱外退出 0。既有 Starlette/httpx 弃用提示、notifier 负向日志和 Windows asyncio 调试诊断不影响退出码，没有安装提示中的依赖。
+- 当前 saver、审批请求、私有参数和 Store 全是同进程内存对象。新 Runtime 实例恢复不是操作系统进程重启；没有 PostgreSQL、多进程、加密、容量、清理或持久私有参数证据。
+- 自动化证明正常路径、拒绝路径和并发重复 resume 下 handler 最多执行一次；没有证明进程在工具副作用完成但 terminal commit 结果未知时的跨崩溃恰好一次。持久 ToolExecution 幂等、lease 与故障恢复由 M10-T5/M11 验收。
+- 没有实现 M10-T3 动态重规划、M12 HTTP 审批端点、默认 Container 迁移、真实 Provider 或在线调用；这些不属于 M10-T2。
+
+### 结论
+
+- `M10-T2` 达到 `verified`：审批请求、真实 interrupt、服务端绑定决议、公开 Command resume、批准/拒绝/过期/篡改/重复恢复、Run 生命周期原子提交和同进程新实例恢复均有可复现 E3 证据。
+- 下一任务进入 `M10-T3 / planned`，只实现动态计划、失败诊断与有界重规划；不得把 M10-T2 内存证据描述为进程重启，也不得提前进入 M10-T4 多 Agent。

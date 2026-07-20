@@ -13,6 +13,9 @@ from backend.app.stores import (
     InMemoryEventStore,
     InMemoryRunStore,
     InvalidRunTransitionError,
+    LifecycleCommitResult,
+    PauseCommit,
+    ResumeCommit,
     RunConflictError,
     RunNotFoundError,
     RunStore,
@@ -342,6 +345,55 @@ class RunStoreContract:
         self.assertEqual(["run.completed"], [event.type for event in events])
         self.assertEqual(result.record, stored_run)
         self.assertEqual(result.event, events[-1])
+
+    async def test_pause_and_resume_commit_state_with_matching_events(self) -> None:
+        run = _new_run()
+        await self.run_store.create(run)
+        started = await self.event_store.commit_start(
+            StartCommit(
+                run_id=run.id,
+                owner_id=run.owner_id,
+                expected_version=run.version,
+                event_id="lifecycle-started",
+                event_data={"status": "running"},
+            )
+        )
+        pause_command = PauseCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=started.record.version,
+            event_id="lifecycle-waiting",
+            event_data={"status": "waiting_approval", "approval_id": "approval-1"},
+            step=1,
+        )
+
+        paused = await self.event_store.commit_pause(pause_command)
+        pause_replay = await self.event_store.commit_pause(pause_command)
+        resume_command = ResumeCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=paused.record.version,
+            event_id="lifecycle-resumed",
+            event_data={"status": "running", "approval_id": "approval-1"},
+            step=1,
+        )
+        resumed = await self.event_store.commit_resume(resume_command)
+        resume_replay = await self.event_store.commit_resume(resume_command)
+        events = await self.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertIsInstance(paused, LifecycleCommitResult)
+        self.assertEqual(RunStatus.WAITING_APPROVAL, paused.record.status)
+        self.assertTrue(paused.created)
+        self.assertFalse(pause_replay.created)
+        self.assertEqual(RunStatus.RUNNING, resumed.record.status)
+        self.assertFalse(resume_replay.created)
+        self.assertEqual(
+            ["run.started", "run.waiting_approval", "run.resumed"],
+            [event.type for event in events],
+        )
 
     async def test_terminal_commit_exact_replay_is_idempotent(self) -> None:
         run = _new_run()
@@ -676,6 +728,8 @@ class RunStoreContract:
 
         for event_type in (
             "run.started",
+            "run.waiting_approval",
+            "run.resumed",
             "run.completed",
             "run.failed",
             "run.cancelled",
@@ -871,6 +925,85 @@ class InMemoryRunStoreContractTest(
         self.assertEqual(
             (),
             await event_store.list_for_run(run.id, owner_id=run.owner_id),
+        )
+
+    async def test_memory_approval_faults_change_neither_store(self) -> None:
+        class FaultingEventStore(InMemoryEventStore):
+            fail_phase: str | None = None
+
+            def _before_pause_publish(self) -> None:
+                if self.fail_phase == "pause":
+                    raise StoreUnavailableError()
+
+            def _before_resume_publish(self) -> None:
+                if self.fail_phase == "resume":
+                    raise StoreUnavailableError()
+
+        run_store = InMemoryRunStore(clock=lambda: STORE_NOW)
+        event_store = FaultingEventStore(run_store, clock=lambda: STORE_NOW)
+        run = _new_run()
+        await run_store.create(run)
+        started = await event_store.commit_start(
+            StartCommit(
+                run_id=run.id,
+                owner_id=run.owner_id,
+                expected_version=run.version,
+                event_id="lifecycle-started",
+                event_data={"status": "running"},
+            )
+        )
+        pause_command = PauseCommit(
+            run_id=run.id,
+            owner_id=run.owner_id,
+            expected_version=started.record.version,
+            event_id="lifecycle-waiting",
+            event_data={"status": "waiting_approval"},
+        )
+
+        event_store.fail_phase = "pause"
+        with self.assertRaises(StoreUnavailableError):
+            await event_store.commit_pause(pause_command)
+        self.assertEqual(
+            RunStatus.RUNNING,
+            (await run_store.get(run.id, owner_id=run.owner_id)).status,
+        )
+        self.assertEqual(
+            ["run.started"],
+            [
+                event.type
+                for event in await event_store.list_for_run(
+                    run.id,
+                    owner_id=run.owner_id,
+                )
+            ],
+        )
+
+        event_store.fail_phase = None
+        paused = await event_store.commit_pause(pause_command)
+        event_store.fail_phase = "resume"
+        with self.assertRaises(StoreUnavailableError):
+            await event_store.commit_resume(
+                ResumeCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=paused.record.version,
+                    event_id="lifecycle-resumed",
+                    event_data={"status": "running"},
+                )
+            )
+        self.assertEqual(
+            RunStatus.WAITING_APPROVAL,
+            (await run_store.get(run.id, owner_id=run.owner_id)).status,
+        )
+        self.assertEqual(
+            ["run.started", "run.waiting_approval"],
+            [
+                event.type
+                for event in await event_store.list_for_run(
+                    run.id,
+                    owner_id=run.owner_id,
+                )
+            ],
         )
 
     async def test_memory_start_fault_before_publish_changes_neither_store(

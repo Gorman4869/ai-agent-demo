@@ -1,11 +1,15 @@
 from .base import (
     AppendEventResult,
+    ApprovalLifecycleCommitter,
     ConcurrentWriteError,
     CreateRunResult,
     EventConflictError,
     EventStore,
     IdempotencyConflictError,
     InvalidRunTransitionError,
+    LifecycleCommitResult,
+    PauseCommit,
+    ResumeCommit,
     RunConflictError,
     RunNotFoundError,
     RunStore,
@@ -22,6 +26,7 @@ from .memory import InMemoryEventStore, InMemoryRunStore
 
 __all__ = [
     "AppendEventResult",
+    "ApprovalLifecycleCommitter",
     "ConcurrentWriteError",
     "CreateRunResult",
     "EventConflictError",
@@ -30,6 +35,9 @@ __all__ = [
     "InMemoryEventStore",
     "InMemoryRunStore",
     "InvalidRunTransitionError",
+    "LifecycleCommitResult",
+    "PauseCommit",
+    "ResumeCommit",
     "RunConflictError",
     "RunNotFoundError",
     "RunStore",

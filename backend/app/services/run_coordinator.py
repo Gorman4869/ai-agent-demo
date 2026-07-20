@@ -9,7 +9,11 @@ from typing import Protocol
 
 from backend.app.agent import (
     AgentRuntime,
+    ApprovalResumableRuntime,
     CancellationToken,
+    RuntimeApprovalDecision,
+    RuntimeApprovalPause,
+    RuntimeApprovalResume,
     RuntimeCheckpointContext,
     RuntimeControl,
     RuntimeEvent,
@@ -28,13 +32,18 @@ from backend.app.stores import (
     ConcurrentWriteError,
     EventStore,
     InvalidRunTransitionError,
+    PauseCommit,
+    ResumeCommit,
     RunNotFoundError,
     RunStore,
     StartCommit,
     StoreError,
     TerminalCommit,
 )
-from backend.app.tools import ToolExecutionContext
+from backend.app.tools import (
+    ApprovalResponse,
+    ToolExecutionContext,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -122,6 +131,7 @@ class PersistentEventEmitter:
 
 @dataclass(frozen=True)
 class _ActiveRun:
+    kind: str
     control: RuntimeControl
     task: asyncio.Task[RunRecord]
 
@@ -181,17 +191,16 @@ class RunCoordinator:
         owner_id: str,
         execution_context: ToolExecutionContext | None = None,
     ) -> RunRecord:
-        if (
-            execution_context is not None
-            and execution_context.principal_id != owner_id
-        ):
-            raise ValueError(
-                "execution context principal must match the run owner"
-            )
+        execution_context = _bind_execution_context(
+            run_id,
+            owner_id=owner_id,
+            execution_context=execution_context,
+            bind_run=False,
+        )
         key = (owner_id, run_id)
         async with self._active_lock:
             active = self._active.get(key)
-            if active is None:
+            if active is None or active.task.done():
                 deadline = (
                     asyncio.get_running_loop().time()
                     + self._run_timeout_ms / 1_000
@@ -208,7 +217,7 @@ class RunCoordinator:
                         deadline=deadline,
                     )
                 )
-                active = _ActiveRun(control=control, task=task)
+                active = _ActiveRun(kind="execute", control=control, task=task)
                 self._active[key] = active
                 task.add_done_callback(
                     lambda completed, run_key=key: asyncio.create_task(
@@ -216,6 +225,75 @@ class RunCoordinator:
                     )
                 )
         return await asyncio.shield(active.task)
+
+    async def resume_approval(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        approval_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments_digest: str,
+        decision: ApprovalResponse | str,
+        execution_context: ToolExecutionContext,
+    ) -> RunRecord:
+        bound_context = _bind_execution_context(
+            run_id,
+            owner_id=owner_id,
+            execution_context=execution_context,
+        )
+        if bound_context is None or bound_context.approval_store is None:
+            raise ValueError("approval store is required to resume a run")
+
+        key = (owner_id, run_id)
+        while True:
+            finishing_execute: asyncio.Task[RunRecord] | None = None
+            async with self._active_lock:
+                active = self._active.get(key)
+                if (
+                    active is not None
+                    and not active.task.done()
+                    and active.kind == "execute"
+                ):
+                    finishing_execute = active.task
+                elif active is None or active.task.done():
+                    deadline = (
+                        asyncio.get_running_loop().time()
+                        + self._run_timeout_ms / 1_000
+                    )
+                    control = RuntimeControl(
+                        CancellationToken(timeout_ms=self._run_timeout_ms)
+                    )
+                    task = asyncio.create_task(
+                        self._resume_once(
+                            run_id,
+                            owner_id=owner_id,
+                            approval_id=approval_id,
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            arguments_digest=arguments_digest,
+                            decision=decision,
+                            execution_context=bound_context,
+                            control=control,
+                            deadline=deadline,
+                        )
+                    )
+                    active = _ActiveRun(
+                        kind="resume",
+                        control=control,
+                        task=task,
+                    )
+                    self._active[key] = active
+                    task.add_done_callback(
+                        lambda completed, run_key=key: asyncio.create_task(
+                            self._remove_active(run_key, completed)
+                        )
+                    )
+            if finishing_execute is not None:
+                await asyncio.shield(finishing_execute)
+                continue
+            return await asyncio.shield(active.task)
 
     async def cancel(self, run_id: str, *, owner_id: str) -> bool:
         current = await self._run_store.get(run_id, owner_id=owner_id)
@@ -230,7 +308,10 @@ class RunCoordinator:
         active_execution = active is not None and not active.task.done()
         if active_execution:
             active.control.cancellation_token.cancel("cancelled_by_user")
-        elif current.status is not RunStatus.QUEUED:
+        elif current.status not in {
+            RunStatus.QUEUED,
+            RunStatus.WAITING_APPROVAL,
+        }:
             return False
 
         failure = _cancelled_failure("cancelled_by_user")
@@ -238,7 +319,11 @@ class RunCoordinator:
         for _ in range(2):
             if current.status.is_terminal:
                 return current.status is RunStatus.CANCELLED
-            if current.status not in {RunStatus.QUEUED, RunStatus.RUNNING}:
+            if current.status not in {
+                RunStatus.QUEUED,
+                RunStatus.RUNNING,
+                RunStatus.WAITING_APPROVAL,
+            }:
                 return False
             try:
                 committed = await self._event_store.commit_terminal(
@@ -342,7 +427,131 @@ class RunCoordinator:
                 )
             except _DurableWinner as winner:
                 return winner.record
+        if isinstance(result, RuntimeApprovalPause):
+            return await self._pause(running, pause=result, emitter=emitter)
         return await self._settle(running, result=result, emitter=emitter)
+
+    async def _resume_once(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        approval_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments_digest: str,
+        decision: ApprovalResponse | str,
+        execution_context: ToolExecutionContext,
+        control: RuntimeControl,
+        deadline: float,
+    ) -> RunRecord:
+        current = await self._run_store.get(run_id, owner_id=owner_id)
+        if current is None:
+            raise RunNotFoundError()
+        if current.status.is_terminal:
+            return current
+        if current.status is RunStatus.RUNNING:
+            return await self._wait_for_terminal(
+                run_id,
+                owner_id=owner_id,
+                deadline=deadline,
+            )
+        if current.status is not RunStatus.WAITING_APPROVAL:
+            raise InvalidRunTransitionError()
+
+        runtime = self._runtimes.get(current.runtime)
+        emitter = self._emitter(run_id, owner_id=owner_id)
+        if runtime is None or not isinstance(runtime, ApprovalResumableRuntime):
+            return await self._settle(
+                current,
+                result=_failed_result(
+                    code="runtime_resume_not_supported",
+                    category="configuration",
+                    public_message="Requested runtime cannot resume approvals",
+                ),
+                emitter=emitter,
+            )
+
+        resolution = execution_context.approval_store.resolve(
+            approval_id=approval_id,
+            run_id=run_id,
+            principal_id=owner_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            arguments_digest=arguments_digest,
+            decision=decision,
+        )
+        approval = RuntimeApprovalResume(
+            approval_id=resolution.request.id,
+            tool_call_id=resolution.request.tool_call_id,
+            tool_name=resolution.request.tool_name,
+            arguments_digest=resolution.request.arguments_digest,
+            decision=RuntimeApprovalDecision(resolution.status.value),
+        )
+        try:
+            resumed = await self._event_store.commit_resume(
+                ResumeCommit(
+                    run_id=run_id,
+                    owner_id=owner_id,
+                    expected_version=current.version,
+                    event_id=_lifecycle_event_id(
+                        run_id,
+                        f"resumed:{approval.approval_id}",
+                    ),
+                    event_data={
+                        "status": RunStatus.RUNNING.value,
+                        "approval_id": approval.approval_id,
+                        "decision": approval.decision.value,
+                    },
+                    step=1,
+                )
+            )
+        except ConcurrentWriteError:
+            winner = await self._run_store.get(run_id, owner_id=owner_id)
+            if winner is None:
+                raise RunNotFoundError()
+            if winner.status.is_terminal:
+                return winner
+            if winner.status is RunStatus.RUNNING:
+                return await self._wait_for_terminal(
+                    run_id,
+                    owner_id=owner_id,
+                    deadline=deadline,
+                )
+            raise
+        await emitter.notify_committed(resumed.event, created=resumed.created)
+        if not resumed.created:
+            if resumed.record.status.is_terminal:
+                return resumed.record
+            return await self._wait_for_terminal(
+                run_id,
+                owner_id=owner_id,
+                deadline=deadline,
+            )
+
+        try:
+            result = await self._run_runtime(
+                runtime,
+                resumed.record,
+                execution_context=execution_context,
+                control=control,
+                emitter=emitter,
+                deadline=deadline,
+                approval=approval,
+            )
+        except _DurableWinner as winner:
+            return winner.record
+        if isinstance(result, RuntimeApprovalPause):
+            return await self._pause(
+                resumed.record,
+                pause=result,
+                emitter=emitter,
+            )
+        return await self._settle(
+            resumed.record,
+            result=result,
+            emitter=emitter,
+        )
 
     async def _run_runtime(
         self,
@@ -353,7 +562,8 @@ class RunCoordinator:
         control: RuntimeControl,
         emitter: PersistentEventEmitter,
         deadline: float,
-    ) -> RuntimeResult:
+        approval: RuntimeApprovalResume | None = None,
+    ) -> RuntimeResult | RuntimeApprovalPause:
         async def emit(event: RuntimeEvent) -> None:
             if control.cancellation_token.is_cancelled:
                 raise _RuntimeStopped()
@@ -365,19 +575,39 @@ class RunCoordinator:
                 control.cancellation_token.cancel("deadline_exceeded")
                 return _timeout_result()
             async with asyncio.timeout(remaining_seconds):
-                result = await runtime.run(
-                    RuntimeRequest(
-                        run_id=running.id,
-                        input_text=running.input_text,
-                        execution_context=execution_context,
-                        checkpoint_context=RuntimeCheckpointContext.for_run(
-                            run_id=running.id,
-                            owner_id=running.owner_id,
-                        ),
+                runtime_request = RuntimeRequest(
+                    run_id=running.id,
+                    input_text=running.input_text,
+                    execution_context=(
+                        execution_context.for_run(running.id)
+                        if execution_context is not None
+                        and isinstance(runtime, ApprovalResumableRuntime)
+                        else execution_context
                     ),
-                    emit=emit,
-                    control=control,
+                    checkpoint_context=RuntimeCheckpointContext.for_run(
+                        run_id=running.id,
+                        owner_id=running.owner_id,
+                    ),
                 )
+                if approval is None:
+                    result = await runtime.run(
+                        runtime_request,
+                        emit=emit,
+                        control=control,
+                    )
+                else:
+                    if not isinstance(runtime, ApprovalResumableRuntime):
+                        return _failed_result(
+                            code="runtime_resume_not_supported",
+                            category="configuration",
+                            public_message="Requested runtime cannot resume approvals",
+                        )
+                    result = await runtime.resume(
+                        runtime_request,
+                        approval=approval,
+                        emit=emit,
+                        control=control,
+                    )
         except TimeoutError:
             control.cancellation_token.cancel("deadline_exceeded")
             return _timeout_result()
@@ -403,7 +633,7 @@ class RunCoordinator:
                 public_message="Runtime execution failed",
             )
 
-        if not isinstance(result, RuntimeResult):
+        if not isinstance(result, (RuntimeResult, RuntimeApprovalPause)):
             return _failed_result(
                 code="runtime_contract_error",
                 category="runtime",
@@ -424,10 +654,76 @@ class RunCoordinator:
             current = await self._run_store.get(run_id, owner_id=owner_id)
             if current is None:
                 raise RunNotFoundError()
+            if current.status.is_terminal or current.status is RunStatus.WAITING_APPROVAL:
+                return current
+            await asyncio.sleep(0.01)
+        raise ConcurrentWriteError()
+
+    async def _wait_for_terminal(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        deadline: float,
+    ) -> RunRecord:
+        while asyncio.get_running_loop().time() < deadline:
+            current = await self._run_store.get(run_id, owner_id=owner_id)
+            if current is None:
+                raise RunNotFoundError()
             if current.status.is_terminal:
                 return current
             await asyncio.sleep(0.01)
         raise ConcurrentWriteError()
+
+    async def _pause(
+        self,
+        running: RunRecord,
+        *,
+        pause: RuntimeApprovalPause,
+        emitter: PersistentEventEmitter,
+    ) -> RunRecord:
+        event_data: dict[str, object] = {
+            "status": RunStatus.WAITING_APPROVAL.value,
+            "approval_id": pause.approval_id,
+            "tool_call_id": pause.tool_call_id,
+            "tool_name": pause.tool_name,
+            "arguments_digest": pause.arguments_digest,
+            "expires_at": (
+                pause.expires_at.isoformat()
+                if pause.expires_at is not None
+                else None
+            ),
+        }
+        try:
+            committed = await self._event_store.commit_pause(
+                PauseCommit(
+                    run_id=running.id,
+                    owner_id=running.owner_id,
+                    expected_version=running.version,
+                    event_id=_lifecycle_event_id(
+                        running.id,
+                        f"waiting:{pause.approval_id}",
+                    ),
+                    event_data=event_data,
+                    step=pause.step,
+                )
+            )
+        except ConcurrentWriteError:
+            winner = await self._run_store.get(
+                running.id,
+                owner_id=running.owner_id,
+            )
+            if winner is not None and (
+                winner.status.is_terminal
+                or winner.status is RunStatus.WAITING_APPROVAL
+            ):
+                return winner
+            raise
+        await emitter.notify_committed(
+            committed.event,
+            created=committed.created,
+        )
+        return committed.record
 
     async def _settle(
         self,
@@ -490,6 +786,22 @@ class RunCoordinator:
 def _lifecycle_event_id(run_id: str, phase: str) -> str:
     digest = hashlib.sha256(f"{run_id}|lifecycle|{phase}".encode("utf-8")).hexdigest()
     return f"lifecycle-{digest}"
+
+
+def _bind_execution_context(
+    run_id: str,
+    *,
+    owner_id: str,
+    execution_context: ToolExecutionContext | None,
+    bind_run: bool = True,
+) -> ToolExecutionContext | None:
+    if execution_context is None:
+        return None
+    if execution_context.principal_id != owner_id:
+        raise ValueError("execution context principal must match the run owner")
+    if execution_context.run_id not in {None, run_id}:
+        raise ValueError("execution context run_id does not match")
+    return execution_context.for_run(run_id) if bind_run else execution_context
 
 
 def _terminal_event_id(run_id: str, status: RunStatus) -> str:

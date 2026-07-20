@@ -6,8 +6,8 @@ import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from enum import Enum
+from datetime import UTC, datetime, timedelta
+from enum import Enum, StrEnum
 from threading import Lock
 from typing import Any
 from uuid import uuid4
@@ -31,6 +31,7 @@ class ToolApproval:
     tool_name: str
     arguments_digest: str
     expires_at: datetime | None = None
+    run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,19 +40,61 @@ class ApprovalDecision:
     reason: str
 
 
+class ApprovalResponse(StrEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+
+
+class ApprovalResolutionStatus(StrEnum):
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+class ApprovalResolutionError(RuntimeError):
+    """Stable approval failure without request or argument disclosure."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ToolApprovalRequest:
+    id: str
+    run_id: str
+    principal_id: str
+    tool_call_id: str
+    tool_name: str
+    arguments_digest: str = field(repr=False)
+    expires_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ToolApprovalResolution:
+    request: ToolApprovalRequest
+    status: ApprovalResolutionStatus
+
+
 class InMemoryApprovalStore:
-    """Consume exact, single-use approvals for the teaching runtime."""
+    """Own exact approval requests, decisions, and single-use grants."""
 
     def __init__(self, *, clock: ApprovalClock | None = None) -> None:
         self._clock = clock or (lambda: datetime.now(UTC))
-        self._approvals: dict[tuple[str, str, str, str], ToolApproval] = {}
+        self._approvals: dict[tuple[str, str, str, str, str], ToolApproval] = {}
         self._consumed: set[str] = set()
+        self._requests: dict[str, ToolApprovalRequest] = {}
+        self._request_keys: dict[tuple[str, str, str, str, str], str] = {}
+        self._request_arguments: dict[str, dict[str, Any]] = {}
+        self._resolutions: dict[str, ToolApprovalResolution] = {}
+        self._responses: dict[str, ApprovalResponse] = {}
         self._lock = Lock()
 
     def grant(
         self,
         *,
         principal_id: str,
+        run_id: str | None = None,
         tool_call_id: str,
         tool_name: str,
         arguments: Mapping[str, Any],
@@ -65,6 +108,11 @@ class InMemoryApprovalStore:
         approval = ToolApproval(
             id=str(uuid4()),
             principal_id=_required_name(principal_id, "principal_id"),
+            run_id=(
+                _required_name(run_id, "run_id")
+                if run_id is not None
+                else None
+            ),
             tool_call_id=_required_name(tool_call_id, "tool_call_id"),
             tool_name=_required_name(tool_name, "tool_name"),
             arguments_digest=tool_arguments_digest(arguments),
@@ -77,16 +125,155 @@ class InMemoryApprovalStore:
             self._approvals[key] = approval
         return approval
 
+    def request(
+        self,
+        *,
+        run_id: str,
+        principal_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        expires_in: timedelta | None = None,
+    ) -> ToolApprovalRequest:
+        if expires_in is not None and (
+            not isinstance(expires_in, timedelta)
+            or expires_in <= timedelta(0)
+        ):
+            raise ValueError("approval expires_in must be positive")
+        checked_run_id = _required_name(run_id, "run_id")
+        checked_principal_id = _required_name(principal_id, "principal_id")
+        checked_call_id = _required_name(tool_call_id, "tool_call_id")
+        checked_tool_name = _required_name(tool_name, "tool_name")
+        detached_arguments = _detached_arguments(arguments)
+        arguments_digest = tool_arguments_digest(detached_arguments)
+        request_key = (
+            checked_run_id,
+            checked_principal_id,
+            checked_call_id,
+            checked_tool_name,
+            arguments_digest,
+        )
+        with self._lock:
+            existing_id = self._request_keys.get(request_key)
+            if existing_id is not None:
+                return self._requests[existing_id]
+            now = _aware_utc(self._clock())
+            request = ToolApprovalRequest(
+                id=str(uuid4()),
+                run_id=checked_run_id,
+                principal_id=checked_principal_id,
+                tool_call_id=checked_call_id,
+                tool_name=checked_tool_name,
+                arguments_digest=arguments_digest,
+                expires_at=(now + expires_in if expires_in is not None else None),
+            )
+            self._requests[request.id] = request
+            self._request_keys[request_key] = request.id
+            self._request_arguments[request.id] = detached_arguments
+            return request
+
+    def resolve(
+        self,
+        *,
+        approval_id: str,
+        run_id: str,
+        principal_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments_digest: str,
+        decision: ApprovalResponse | str,
+    ) -> ToolApprovalResolution:
+        response = _approval_response(decision)
+        checked_id = _required_name(approval_id, "approval_id")
+        binding = (
+            _required_name(run_id, "run_id"),
+            _required_name(principal_id, "principal_id"),
+            _required_name(tool_call_id, "tool_call_id"),
+            _required_name(tool_name, "tool_name"),
+            arguments_digest,
+        )
+        with self._lock:
+            request = self._requests.get(checked_id)
+            if request is None or request.principal_id != binding[1]:
+                raise ApprovalResolutionError("approval_request_not_found")
+            if _request_key(request) != binding:
+                raise ApprovalResolutionError("approval_binding_mismatch")
+            existing = self._resolutions.get(checked_id)
+            if existing is not None:
+                if self._responses[checked_id] is not response:
+                    raise ApprovalResolutionError("approval_decision_conflict")
+                return existing
+
+            status = (
+                ApprovalResolutionStatus.EXPIRED
+                if request.expires_at is not None
+                and _aware_utc(self._clock()) >= request.expires_at
+                else (
+                    ApprovalResolutionStatus.APPROVED
+                    if response is ApprovalResponse.APPROVE
+                    else ApprovalResolutionStatus.REJECTED
+                )
+            )
+            resolution = ToolApprovalResolution(request=request, status=status)
+            self._resolutions[checked_id] = resolution
+            self._responses[checked_id] = response
+            if status is ApprovalResolutionStatus.APPROVED:
+                approval = ToolApproval(
+                    id=request.id,
+                    principal_id=request.principal_id,
+                    run_id=request.run_id,
+                    tool_call_id=request.tool_call_id,
+                    tool_name=request.tool_name,
+                    arguments_digest=request.arguments_digest,
+                    expires_at=request.expires_at,
+                )
+                self._approvals[_approval_key(approval)] = approval
+            return resolution
+
+    def get_resolution(
+        self,
+        *,
+        approval_id: str,
+        run_id: str,
+        principal_id: str,
+    ) -> ToolApprovalResolution | None:
+        with self._lock:
+            resolution = self._resolutions.get(approval_id)
+            if (
+                resolution is None
+                or resolution.request.run_id != run_id
+                or resolution.request.principal_id != principal_id
+            ):
+                return None
+            return resolution
+
+    def approved_arguments(
+        self,
+        resolution: ToolApprovalResolution,
+    ) -> dict[str, Any]:
+        if resolution.status is not ApprovalResolutionStatus.APPROVED:
+            raise ApprovalResolutionError("approval_not_approved")
+        with self._lock:
+            stored = self._resolutions.get(resolution.request.id)
+            if stored != resolution:
+                raise ApprovalResolutionError("approval_resolution_mismatch")
+            arguments = self._request_arguments.get(resolution.request.id)
+            if arguments is None:
+                raise ApprovalResolutionError("approval_arguments_unavailable")
+            return _detached_arguments(arguments)
+
     def consume(
         self,
         *,
         principal_id: str,
+        run_id: str | None = None,
         tool_call_id: str,
         tool_name: str,
         arguments: Mapping[str, Any],
     ) -> ApprovalDecision:
         key = (
             principal_id,
+            run_id or "",
             tool_call_id,
             tool_name,
             tool_arguments_digest(arguments),
@@ -118,6 +305,7 @@ class ToolExecutionContext:
         repr=False,
         compare=False,
     )
+    run_id: str | None = None
 
     def __post_init__(self) -> None:
         principal_id = self.principal_id.strip()
@@ -125,6 +313,19 @@ class ToolExecutionContext:
             raise ValueError("principal_id must not be empty")
         object.__setattr__(self, "principal_id", principal_id)
         object.__setattr__(self, "roles", _normalize_names(self.roles, "role"))
+        if self.run_id is not None:
+            object.__setattr__(self, "run_id", _required_name(self.run_id, "run_id"))
+
+    def for_run(self, run_id: str) -> ToolExecutionContext:
+        checked_run_id = _required_name(run_id, "run_id")
+        if self.run_id is not None and self.run_id != checked_run_id:
+            raise ValueError("execution context run_id does not match")
+        return ToolExecutionContext(
+            principal_id=self.principal_id,
+            roles=self.roles,
+            run_id=checked_run_id,
+            approval_store=self.approval_store,
+        )
 
 
 @dataclass(frozen=True)
@@ -278,6 +479,7 @@ def _authorize(
         try:
             decision = context.approval_store.consume(
                 principal_id=context.principal_id,
+                run_id=context.run_id,
                 tool_call_id=call_id,
                 tool_name=tool.name,
                 arguments=arguments,
@@ -373,16 +575,69 @@ def tool_arguments_digest(arguments: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _approval_key(approval: ToolApproval) -> tuple[str, str, str, str]:
+def _approval_key(approval: ToolApproval) -> tuple[str, str, str, str, str]:
     return (
         approval.principal_id,
+        approval.run_id or "",
         approval.tool_call_id,
         approval.tool_name,
         approval.arguments_digest,
     )
 
 
+def _request_key(
+    request: ToolApprovalRequest,
+) -> tuple[str, str, str, str, str]:
+    return (
+        request.run_id,
+        request.principal_id,
+        request.tool_call_id,
+        request.tool_name,
+        request.arguments_digest,
+    )
+
+
+def _approval_response(value: ApprovalResponse | str) -> ApprovalResponse:
+    if isinstance(value, bool):
+        raise ValueError("approval decision must be approve or reject")
+    try:
+        return ApprovalResponse(value)
+    except (TypeError, ValueError):
+        raise ValueError("approval decision must be approve or reject") from None
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise ValueError("approval clock must return a timezone-aware datetime")
+    return value.astimezone(UTC)
+
+
+def _detached_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(arguments, Mapping):
+        raise ValueError("tool arguments must be a mapping")
+    try:
+        payload = json.dumps(
+            dict(arguments),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        detached = json.loads(payload)
+    except (TypeError, ValueError) as error:
+        raise ValueError("tool arguments must be JSON serializable") from error
+    if not isinstance(detached, dict):
+        raise ValueError("tool arguments must be an object")
+    return detached
+
+
 def _required_name(value: str, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{label} must not be empty")
