@@ -831,3 +831,25 @@
 
 - `M9-T5` 达到 `verified`：受控 Skill 上下文已进入默认三 Runtime 的真实应用路径，固定触发/不触发效果与提示开销可离线复现，权限、审批和工具 Schema 不变性有自动化证据。
 - 下一任务进入 `M9-T6 / planned`，只汇总 M9 跟练、速查、自测、费曼材料和里程碑验收；不得提前进入 M10，也不得把本次离线 fixture 描述为真实模型证据。
+
+## V-20260720-008：M9-T5 实现提交后恢复锚点
+
+- 任务：`M9-T5`
+- 时间：2026-07-20 14:22，Asia/Shanghai
+- 验证目标：实现提交 `a6ff518`（`feat: inject bounded skill runtime context`）
+- 模式：offline；只读取仓库 Skill 并执行本地 Python/LangGraph 路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` | 0 | 实现提交后工作区干净 |
+| `git log -3 --oneline` | 0 | `a6ff518` 位于 M9-T4 验证锚点 `c820c7e` 之后，提交边界正确 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_skill_context -q` | 0 | 提交后最小恢复集 10 项通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.skill_context` | 0 | 固定评测 2/2 通过；触发 3153 字节/启发式 789 Token，不触发增加 0；Provider usage 不可用、美元成本 `null` |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、60 个 Markdown 文件通过 |
+
+### 结论
+
+- M9-T5 实现提交固定为 `a6ff518`；`V-20260720-007` 的 151 项定向回归、后端 294 项、构建/配置门、失败尝试和 E3 证据边界不变。
+- 当前任务为 `M9-T6 / planned`；只盘点并汇总 M9 跟练与里程碑验收，不重做 M9-T1–M9-T5，不提前进入 M10。
