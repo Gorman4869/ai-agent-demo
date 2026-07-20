@@ -9,7 +9,6 @@ from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
-from backend.app.agent import ManualRuntime
 from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.agent.sdk_runtime import OpenAIAgentsRuntime
 from backend.app.container import ApplicationContainer
@@ -22,6 +21,7 @@ from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import InMemoryRunService, RunCoordinator
 from backend.app.settings import Settings
 from backend.app.settings import SettingsError
+from backend.app.skills import SkillAwareRuntime
 from backend.app.stores import InMemoryEventStore, InMemoryRunStore
 
 
@@ -54,7 +54,7 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIsInstance(container.run_service, InMemoryRunService)
         self.assertIsInstance(container.run_store, InMemoryRunStore)
         self.assertIsInstance(container.event_store, InMemoryEventStore)
-        self.assertIsInstance(container.runtimes["manual"], ManualRuntime)
+        self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
         self.assertNotIn("agents_sdk", container.runtimes)
         self.assertIsInstance(container.run_coordinator, RunCoordinator)
         self.assertEqual(McpClientState.CREATED, container.mcp_clients.state)
@@ -127,7 +127,7 @@ class ApplicationContainerTest(unittest.TestCase):
 
         self.assertIs(settings, app.state.container.settings)
         self.assertIsInstance(
-            app.state.container.runtimes["langgraph"],
+            app.state.container.runtimes["langgraph"].delegate,
             LangGraphRuntime,
         )
 
@@ -183,10 +183,10 @@ class ApplicationContainerTest(unittest.TestCase):
         openai_client.assert_not_called()
         self.assertNotIn(secret, repr(container))
         self.assertIsInstance(
-            container.runtimes["agents_sdk"],
+            container.runtimes["agents_sdk"].delegate,
             OpenAIAgentsRuntime,
         )
-        self.assertIsInstance(container.runtimes["manual"], ManualRuntime)
+        self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
 
     def test_container_cannot_be_mixed_with_legacy_overrides(self) -> None:
         container = ApplicationContainer.create(

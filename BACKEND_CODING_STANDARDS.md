@@ -164,3 +164,12 @@
 - Catalog snapshots contain frozen dataclasses and tuples. `load()` reuses one immutable snapshot; only the trusted application may call `refresh()` to replace it.
 - Resolver behavior is deterministic and offline: `$skill-name` is an explicit trigger; automatic matching requires every hyphen-separated Skill name token as a complete query word. An unknown explicit name fails closed.
 - M9-T4 only discovers and resolves Skill content. Runtime context injection, effect/cost evaluation, and permission interaction belong to M9-T5.
+
+## 18. Skill Runtime Context
+
+- Keep Skill guidance separate from `RuntimeRequest.input_text` and `ToolExecutionContext`. `prompt_context` is application-owned, hidden from repr, bounded to 32,000 UTF-8 bytes, and added after existing positional fields for compatibility.
+- Build context only from an immutable M9-T4 Resolver snapshot. Inject at most four Skills and 24,000 UTF-8 bytes, use deterministic JSON, embed reviewed reference content without its source path, and fail closed with stable errors.
+- The default Container wraps only its built-in Runtime map with `SkillAwareRuntime`. Explicitly injected Runtime objects remain unchanged so dependency injection is predictable; callers opt in by composing the wrapper themselves.
+- Manual and LangGraph use a system message while the Agents SDK default factory uses agent instructions. Every path keeps the original user input unchanged and must never derive identity, roles, approvals, tools, or Schema from Skill text.
+- Tool visibility and execution continue through the shared `ToolRegistry`. Tests must prove malicious Skill wording cannot bypass role checks, exact approvals, or argument validation and that denied handlers do not run.
+- Offline Skill cost reports may record exact UTF-8 bytes and a clearly labeled `ceil(bytes / 4)` heuristic. Provider usage remains unavailable and financial cost remains `None`; this comparison is not a tokenizer, billing, or online-model claim and does not close `KI-018`.

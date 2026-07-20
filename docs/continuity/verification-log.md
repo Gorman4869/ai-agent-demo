@@ -778,3 +778,56 @@
 
 - M9-T4 实现提交固定为 `de8a63d`；`V-20260720-005` 的 17 项定向集、symlink 证据边界与 `verified` 结论不变。
 - 当前任务为 `M9-T5 / planned`；只实现有界 SkillContext 注入与固定离线评测，不重做 Catalog/Resolver，不提前执行 M9-T6 或 M10。
+
+## V-20260720-007：M9-T5 Skill Runtime 上下文与离线评测
+
+- 任务：`M9-T5`
+- 时间：2026-07-20 14:12，Asia/Shanghai
+- 验证目标：HEAD `c820c7e` 上的 M9-T5 工作区；提交由后续本地 commit 固定
+- 任务等级：开始时按 handoff 预估为 B；只读设计发现需要扩展共享 `RuntimeRequest` 并接入三 Runtime 后，按协议上调为 A，时间盒 2–4 小时
+- 模式：offline；只读取仓库 Skill、启动本地测试进程和执行本地构建，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用 Python 3.12.10、现有 LangGraph/OpenAI Agents SDK、Node/npm、Docker CLI 与仓库锁定依赖
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净；M9-T4 实现 `de8a63d` 与验证锚点 `c820c7e` 存在 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_catalog -q` | 0 | M9-T4 恢复集 10 项通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（恢复） | 0 | 52 个稳定任务、58 个 Markdown 文件通过，无漂移 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_context -v` | 0 | 10 项新增关键测试全部通过；覆盖上下文上限、路径脱敏、触发、三 Runtime、权限/审批/Schema 与固定评测 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.skill_context` | 0 | 固定 LangGraph 离线评测 2/2 通过；触发上下文 3153 字节、启发式 789 Token，不触发增加 0 字节；Provider usage 不可用、美元成本 `null` |
+| 12 模块 Runtime/Skill/Container/工具安全定向回归 | 0 | 151 项全部通过；只有既有 Starlette/httpx 弃用提示、测试预期 notifier 日志和一次 asyncio 慢回调诊断 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（首轮） | 1 | 后端 294 项中 292 项通过、1 项既有 Windows symlink 能力跳过、1 项 TypeScript MCP E2E 在 `manager.start()` 命中 `startup_timeout`；脚本按 fail-fast 停在后端门 |
+| 单独重跑失败的 `test_calls_known_and_unknown_concepts_through_registry` | 0 | 1 项通过，真实本地 Node STDIO 进程正常初始化、调用和关闭，未修改代码或超时配置 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（第二轮） | 0 | 后端 294 项中 293 项通过、1 项既有 Windows symlink 能力跳过；Code Agent Demo、`pip check`、Vue production build、MCP TypeScript build 与 Docker Compose 配置门全部通过 |
+| 最终边界收紧后的 Skill/Runtime/Manual/SDK/Container 定向回归 | 0 | 75 项全部通过；直接调用 Manual/SDK helper 也复用 32,000 字节与控制字符校验 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（最终工作区） | 1 | 后端 294 项中 293 项通过、1 项既有 symlink skip；Code Agent Demo 与 `pip check` 通过，随后沙箱拒绝写 `frontend/tsconfig.app.tsbuildinfo`，Vue 门以 `EPERM` 中断 |
+| `npm.cmd run build`（`frontend`，仅为绕过工作区构建产物写权限而经批准在沙箱外重跑） | 0 | `vue-tsc -b && vite build` 通过，18 个模块完成生产构建；没有安装依赖 |
+| `npm.cmd run build`（`mcp-servers/knowledge-server`） | 0 | TypeScript `tsc` build 通过 |
+| `docker compose -f deploy/compose.yaml config --quiet` | 0 | Compose 配置通过；沙箱无法读取用户目录 Docker `config.json`，打印 access denied warning，但未连接 Engine |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（ADR/阶段文档后） | 0 | 52 个稳定任务、59 个 Markdown 文件通过 |
+| `git diff --check` / 新增文件尾随空白 `rg` | 0 | 无空白错误；tracked 文件只有既有 LF/CRLF 转换提示 |
+
+### 实现与安全证据
+
+- `SkillContextBuilder` 从冻结 Resolver 快照生成确定性 JSON，最多 4 个 Skill、24,000 UTF-8 字节；reference 内容内嵌但源路径替换为稳定编号，片段明确不能改变身份、角色、审批、工具或 Schema。
+- `RuntimeRequest.prompt_context` 隐藏 repr、最大 32,000 字节，并放在既有 `execution_context` 位置参数之后；兼容测试证明旧第三位置参数仍绑定可信工具上下文。
+- 默认 Container 用 `SkillAwareRuntime` 包装内建 Manual、Agents SDK 与 LangGraph；无匹配时原请求对象原样传递，未知显式 Skill fail closed 且不调用 delegate。
+- Manual 和 LangGraph 使用独立 system message，SDK 默认 factory 使用 agent instructions；三条路径都保留原始用户输入，工具定义对照不变。
+- 恶意测试 Skill 明示要求绕过控制时，共同 Registry 仍分别返回 `permission_denied`、`approval_required` 和 `invalid_arguments`，三个 handler 均未执行。
+- 固定效果评测真实执行 LangGraph `ainvoke()` Runtime 路径，但模型是确定性离线 fixture；证据等级为 E3 应用契约，不是 Provider E4。
+
+### 失败、警告与未验证范围
+
+- 全量首轮的 TypeScript MCP `startup_timeout` 在不改代码、不提高超时的单项重跑和全量重跑中均通过，判定为本地进程启动时序波动；保留首轮失败事实，不登记为稳定代码漂移。
+- 最终工作区全量脚本的 Vue 步骤因沙箱拒绝写 TypeScript build info 而失败；相同 `npm.cmd run build` 经批准在沙箱外退出 0，后续 MCP build 和 Compose 配置也分别退出 0。不得把脚本退出 1 改写成单次完整通过。
+- 全量仍有 1 项既有 Code Agent symlink 测试因 Windows 能力跳过；M9-T4 的 symlink 证据边界不变。
+- Starlette/httpx 弃用提示、测试主动触发的 notifier warning 和 asyncio debug 慢回调不影响退出码；没有安装提示中的新依赖。
+- 3153 字节和 789 Token 仅对应当前固定 `research-summary` 片段；Token 是 `ceil(UTF-8 bytes / 4)` 启发式。没有 Provider tokenizer、真实 usage、定价或账单证据，`KI-018` 保持 open。
+- 没有执行真实模型，未验证在线指令遵循、Provider strict schema/streaming/usage、真实质量、费用或资源清理；没有实现 Skill 写接口、自动刷新、审批恢复、热加载或持久成本账本。
+
+### 结论
+
+- `M9-T5` 达到 `verified`：受控 Skill 上下文已进入默认三 Runtime 的真实应用路径，固定触发/不触发效果与提示开销可离线复现，权限、审批和工具 Schema 不变性有自动化证据。
+- 下一任务进入 `M9-T6 / planned`，只汇总 M9 跟练、速查、自测、费曼材料和里程碑验收；不得提前进入 M10，也不得把本次离线 fixture 描述为真实模型证据。

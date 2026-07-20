@@ -122,9 +122,15 @@ class LangGraphRuntime:
             emit=emit,
             control=control,
         )
+        messages: list[Message] = []
+        if request.prompt_context is not None:
+            messages.append(
+                Message(role="system", content=request.prompt_context)
+            )
+        messages.append(Message(role="user", content=request.input_text))
         final_state = await graph.ainvoke(
             _RuntimeState(
-                messages=[Message(role="user", content=request.input_text)],
+                messages=messages,
                 decision=None,
                 result=None,
                 step=0,

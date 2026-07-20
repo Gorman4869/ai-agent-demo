@@ -40,6 +40,7 @@ from backend.app.agent.runtime import (
     RuntimeEventSink,
     RuntimeRequest,
     RuntimeResult,
+    _validate_prompt_context,
 )
 from backend.app.agent.sdk_tools import (
     OpenAIAgentsRunContext,
@@ -95,15 +96,20 @@ def add_numbers(a: float, b: float) -> float:
 def create_openai_learning_agent(
     *,
     tools: tuple[FunctionTool, ...] | list[FunctionTool] | None = None,
+    prompt_context: str | None = None,
 ) -> Agent[OpenAIAgentsRunContext]:
     """Construct an SDK Agent without starting a model request."""
+    instructions = (
+        "Explain Agent concepts concisely. Use tools for arithmetic or "
+        "approved actions. Never claim a tool ran unless a tool result is "
+        "present. Return the answer in the required structured output."
+    )
+    if prompt_context is not None:
+        _validate_prompt_context(prompt_context)
+        instructions = f"{instructions}\n\n{prompt_context}"
     return Agent(
         name="Learning Assistant",
-        instructions=(
-            "Explain Agent concepts concisely. Use tools for arithmetic or "
-            "approved actions. Never claim a tool ran unless a tool result is "
-            "present. Return the answer in the required structured output."
-        ),
+        instructions=instructions,
         tools=list(tools) if tools is not None else [],
         output_type=OpenAIAgentOutput,
     )

@@ -21,6 +21,7 @@ from backend.app.services.run_service import (
     create_learning_model,
 )
 from backend.app.settings import Settings
+from backend.app.skills import SkillAwareRuntime, default_skill_context_builder
 from backend.app.stores import (
     EventStore,
     InMemoryEventStore,
@@ -93,6 +94,7 @@ class ApplicationContainer:
                     max_model_retries=(
                         resolved_settings.budget.max_model_retries
                     ),
+                    prompt_context=request.prompt_context,
                 )
             )
             runtime_map: dict[RuntimeName | str, AgentRuntime] = {
@@ -106,8 +108,17 @@ class ApplicationContainer:
                 runtime_map["langgraph"] = _create_langgraph_runtime(
                     resolved_settings
                 )
+            skill_context_builder = default_skill_context_builder()
             resolved_runtimes: Mapping[RuntimeName | str, AgentRuntime] = (
-                MappingProxyType(runtime_map)
+                MappingProxyType(
+                    {
+                        name: SkillAwareRuntime(
+                            runtime,
+                            builder=skill_context_builder,
+                        )
+                        for name, runtime in runtime_map.items()
+                    }
+                )
             )
         else:
             resolved_runtimes = MappingProxyType(dict(runtimes))
@@ -179,7 +190,8 @@ def _create_agents_sdk_runtime(settings: Settings) -> AgentRuntime:
             tools=build_sdk_tools(
                 create_default_registry(),
                 run_context=run_context,
-            )
+            ),
+            prompt_context=_request.prompt_context,
         )
 
     return OpenAIAgentsRuntime(

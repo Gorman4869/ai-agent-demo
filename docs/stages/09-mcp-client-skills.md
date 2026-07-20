@@ -79,6 +79,19 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 
 Resolver 对 `$research-summary` 使用显式触发；未显式指定时，查询必须包含 Skill 名称的全部词元，例如 `research summary`。Catalog 首次加载后返回不可变缓存快照，只有可信应用显式调用 `refresh()` 才重新读盘。测试真实加载现有 `research-summary` 和 `references/output-contract.md`，并覆盖缓存、错误 frontmatter、缺失/逃逸引用、超限、非 UTF-8、符号链接拒绝分支和禁止执行无关脚本。该任务尚未把 Skill 注入 Runtime，也没有效果或成本评测；这些由 M9-T5 完成。
 
+## M9-T5 最小纵切：Skill Runtime 上下文与离线评测
+
+默认 `ApplicationContainer` 用 `SkillAwareRuntime` 包装内建 Runtime。Resolver 仍只根据原始用户输入选择 Skill，但注入后保留原始 `input_text` 和服务端构造的 `ToolExecutionContext`；Manual 与 LangGraph 使用独立 system message，Agents SDK 默认 factory 使用 agent instructions。Skill 片段最多 4 个 Skill、24,000 UTF-8 字节，`RuntimeRequest` 再执行 32,000 字节上限。片段不会暴露 reference 源路径，也不会改变角色、审批、工具清单或 Schema。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.skill_context
+.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_skill_context -v
+```
+
+固定离线评测真实执行 LangGraph Runtime API：显式 `$research-summary` 样例产生带来源和限制的答案，不触发样例保持通用答案。当前仓库 Skill 的触发片段为 3153 UTF-8 字节，`ceil(bytes / 4)` 启发式估算为 789 输入 Token；不触发样例增加 0 字节。该模型是确定性离线 fixture，报告中的 Provider usage 为不可用、美元费用为 `null`，不能描述成真实模型质量、Provider tokenizer 或账单证据。
+
+权限回归让带有“绕过角色、审批和 Schema”字样的测试 Skill 驱动模型尝试调用工具，实际 Registry 仍分别返回 `permission_denied`、`approval_required` 和 `invalid_arguments`，handler 均未执行。显式注入的自定义 Runtime 不会被 Container 自动包装，需要调用方主动组合 `SkillAwareRuntime`；本任务不增加 Skill 写接口、审批恢复、Provider 成本账本或在线调用。
+
 ## 计划验证命令
 
 ```powershell
@@ -86,7 +99,7 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_mcp_client_e2e -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_mcp_tool_adapter -v
 $env:PYTHONUTF8='1'
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_skill_catalog backend.tests.test_skill_resolver -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_skill_catalog backend.tests.test_skill_context -v
 ```
 
 ## 常见错误与排查

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from time import perf_counter
 
 from backend.app.agent.cancellation import CancellationToken, RunCancelled
+from backend.app.agent.runtime import _validate_prompt_context
 from backend.app.domain import AgentEvent, AgentRunResult, Message
 from backend.app.models import ChatModel, RetryableModelError
 from backend.app.tools import ToolExecutionContext, ToolRegistry
@@ -24,11 +25,13 @@ class ManualAgentLoop:
         clock: Clock = perf_counter,
         cancellation_token: CancellationToken | None = None,
         max_model_retries: int = 2,
+        prompt_context: str | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
         if max_model_retries < 0:
             raise ValueError("max_model_retries must not be negative")
+        _validate_prompt_context(prompt_context)
         self._model = model
         self._tools = tools
         self._max_steps = max_steps
@@ -36,9 +39,13 @@ class ManualAgentLoop:
         self._clock = clock
         self._cancellation_token = cancellation_token or CancellationToken()
         self._max_model_retries = max_model_retries
+        self._prompt_context = prompt_context
 
     def run(self, user_input: str) -> AgentRunResult:
-        messages = [Message(role="user", content=user_input)]
+        messages = []
+        if self._prompt_context is not None:
+            messages.append(Message(role="system", content=self._prompt_context))
+        messages.append(Message(role="user", content=user_input))
         events = [AgentEvent(type="run.started", step=0, data={})]
 
         for step in range(1, self._max_steps + 1):

@@ -16,6 +16,23 @@ _EVENT_TYPE_PATTERN = re.compile(
 _TERMINAL_STATUSES = frozenset(
     {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 )
+_MAX_PROMPT_CONTEXT_BYTES = 32_000
+
+
+def _validate_prompt_context(prompt_context: str | None) -> str | None:
+    if prompt_context is None:
+        return None
+    if (
+        not isinstance(prompt_context, str)
+        or not prompt_context.strip()
+        or len(prompt_context.encode("utf-8")) > _MAX_PROMPT_CONTEXT_BYTES
+        or any(
+            not character.isprintable() and character not in "\r\n\t"
+            for character in prompt_context
+        )
+    ):
+        raise ValueError("prompt_context has an invalid format")
+    return prompt_context
 
 
 @dataclass(frozen=True)
@@ -25,6 +42,11 @@ class RuntimeRequest:
     run_id: str
     input_text: str = field(repr=False)
     execution_context: ToolExecutionContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    prompt_context: str | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -40,6 +62,7 @@ class RuntimeRequest:
             raise ValueError("run_id has an invalid format")
         if not isinstance(self.input_text, str) or not self.input_text.strip():
             raise ValueError("input_text must not be empty")
+        _validate_prompt_context(self.prompt_context)
 
 
 @dataclass(frozen=True)
