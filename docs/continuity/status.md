@@ -3,7 +3,7 @@
 - 更新时间：2026-07-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`b6dfa0b`
+- 最近已确认实现提交：`eba696b`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -19,7 +19,7 @@
 - M9-T5 验证基线提交：`c820c7e`；实现提交：`a6ff518`
 - M9-T6 验证基线提交：`19b5596`；课程提交：`fdeb9b5`
 - M10-T1 验证基线提交：`c4d4efe`；实现提交：`b6dfa0b`
-- M10-T2 验证基线提交：`cdc9436`；实现提交：待本地提交固定
+- M10-T2 验证基线提交：`cdc9436`；实现提交：`eba696b`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -33,7 +33,7 @@
 | 设计依据 | `docs/stages/10-durable-langgraph.md`、实施计划 M10-T3、`ADR-0011`、`ADR-0012`、既有 RunFailure/ToolResult/Runtime 契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M10-T2 已完成真实 interrupt/Command resume、服务端 Run 绑定审批、批准/拒绝/过期/篡改/重复恢复、Pause/Resume 生命周期原子提交、单次消费和同进程新 Runtime 实例恢复；默认 Container/HTTP 未迁移 |
-| 前置证据 | `V-20260720-013`、`ADR-0012`、`V-20260720-012`、`ADR-0011` |
+| 前置证据 | `V-20260720-014`、`V-20260720-013`、`ADR-0012`、`V-20260720-012`、`ADR-0011` |
 | 下一动作 | 只读审阅 M10-T3、现有 graph state、RunFailure/ToolResult 分类和计划节点，先固定计划 Schema、重规划错误白名单、最大次数与副作用禁重放边界；不提前实现 M10-T4 多 Agent |
 
 ## 里程碑状态
@@ -81,4 +81,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m10-t2-approval-resume.md`，再核对 `V-20260720-013`、`ADR-0012`、`V-20260720-012`、实施计划 M10-T3 和 `docs/stages/10-durable-langgraph.md`。若审批/Store 专项 42 项、M1 7 项与连续性检查仍一致，不要重做 checkpoint 或审批 resume；下一步只读审阅 graph state、RunFailure/ToolResult 分类和计划节点，先固定 M10-T3 动态计划 Schema、重规划白名单与副作用禁重放边界，不提前进入 M10-T4。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m10-t2-approval-resume.md`，再核对 `V-20260720-014`、`V-20260720-013`、`ADR-0012`、`V-20260720-012`、实施计划 M10-T3 和 `docs/stages/10-durable-langgraph.md`。若审批/Store 专项 42 项、M1 7 项与连续性检查仍一致，不要重做 checkpoint 或审批 resume；下一步只读审阅 graph state、RunFailure/ToolResult 分类和计划节点，先固定 M10-T3 动态计划 Schema、重规划白名单与副作用禁重放边界，不提前进入 M10-T4。没有用户新的单次授权，不得读取 Key 或执行真实模型。

@@ -1064,3 +1064,28 @@
 
 - `M10-T2` 达到 `verified`：审批请求、真实 interrupt、服务端绑定决议、公开 Command resume、批准/拒绝/过期/篡改/重复恢复、Run 生命周期原子提交和同进程新实例恢复均有可复现 E3 证据。
 - 下一任务进入 `M10-T3 / planned`，只实现动态计划、失败诊断与有界重规划；不得把 M10-T2 内存证据描述为进程重启，也不得提前进入 M10-T4 多 Agent。
+
+## V-20260720-014：M10-T2 实现提交后恢复锚点
+
+- 任务：`M10-T2`
+- 时间：2026-07-20，Asia/Shanghai
+- 验证目标：实现提交 `eba696b`（`feat: add server-bound approval resume`）
+- 模式：offline；只执行本地 LangGraph、Store 与标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交后工作区干净；`eba696b` 位于 M10-T1 验证锚点 `cdc9436` 之后 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_approval_resume backend.tests.test_run_store_contract -q` | 0 | handoff 最小恢复集 42 项通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，审批 Runtime 未污染顶层导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、66 个 Markdown 文件通过 |
+
+### 失败尝试
+
+- 提交后对照旧 handoff 格式时首次猜测文件名为 `2026-07-20-m10-t1-checkpointing.md`，`rg` 因文件不存在退出 1；随后用 `rg --files` 定位实际文件 `2026-07-20-m10-t1-checkpointed-langgraph.md` 并完成只读核对，没有修改结论。
+
+### 结论
+
+- M10-T2 实现提交固定为 `eba696b`；`V-20260720-013` 的审批/Store 42 项、定向 85 项、后端 316 项全量门、失败尝试和同进程证据边界不变。
+- 当前任务为 `M10-T3 / planned`；不重做 checkpoint 或审批 resume，不把内存恢复描述成进程重启，不提前进入 M10-T4。
