@@ -7,6 +7,7 @@ from backend.app.agent import (
     CancellationToken,
     ManualAgentLoop,
     ManualRuntime,
+    RuntimeCheckpointContext,
     RuntimeControl,
     RuntimeRequest,
     RuntimeResult,
@@ -124,10 +125,15 @@ class SkillAwareRuntimeTest(unittest.IsolatedAsyncioTestCase):
             principal_id="operator-1",
             roles=frozenset({"viewer"}),
         )
+        checkpoint_context = RuntimeCheckpointContext.for_run(
+            run_id="triggered",
+            owner_id="operator-1",
+        )
         triggered = RuntimeRequest(
             run_id="triggered",
             input_text="Use $research-summary for this evidence.",
             execution_context=execution_context,
+            checkpoint_context=checkpoint_context,
         )
 
         result = await runtime.run(
@@ -140,6 +146,7 @@ class SkillAwareRuntimeTest(unittest.IsolatedAsyncioTestCase):
         prepared = delegate.requests[0]
         self.assertEqual(triggered.input_text, prepared.input_text)
         self.assertIs(execution_context, prepared.execution_context)
+        self.assertIs(checkpoint_context, prepared.checkpoint_context)
         self.assertIsNotNone(prepared.prompt_context)
 
         unmatched = RuntimeRequest(

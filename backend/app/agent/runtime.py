@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -17,6 +19,28 @@ _TERMINAL_STATUSES = frozenset(
     {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 )
 _MAX_PROMPT_CONTEXT_BYTES = 32_000
+_CHECKPOINT_OWNER_PATTERN = re.compile(r"runtime-owner-v1-[0-9a-f]{64}")
+_CHECKPOINT_THREAD_PATTERN = re.compile(r"runtime-thread-v1-[0-9a-f]{64}")
+
+
+def _require_runtime_identifier(value: str, *, field_name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > 200
+    ):
+        raise ValueError(f"{field_name} has an invalid format")
+    return value
+
+
+def _checkpoint_digest(*parts: str) -> str:
+    digest = hashlib.sha256()
+    for part in parts:
+        encoded = part.encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, byteorder="big"))
+        digest.update(encoded)
+    return digest.hexdigest()
 
 
 def _validate_prompt_context(prompt_context: str | None) -> str | None:
@@ -36,6 +60,66 @@ def _validate_prompt_context(prompt_context: str | None) -> str | None:
 
 
 @dataclass(frozen=True)
+class RuntimeCheckpointContext:
+    """Trusted owner and thread binding for one checkpointed run."""
+
+    owner_scope: str = field(repr=False)
+    thread_id: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.owner_scope, str)
+            or _CHECKPOINT_OWNER_PATTERN.fullmatch(self.owner_scope) is None
+        ):
+            raise ValueError("owner_scope has an invalid format")
+        if (
+            not isinstance(self.thread_id, str)
+            or _CHECKPOINT_THREAD_PATTERN.fullmatch(self.thread_id) is None
+        ):
+            raise ValueError("thread_id has an invalid format")
+
+    @classmethod
+    def for_run(cls, *, run_id: str, owner_id: str) -> RuntimeCheckpointContext:
+        checked_run_id = _require_runtime_identifier(
+            run_id,
+            field_name="run_id",
+        )
+        checked_owner_id = _require_runtime_identifier(
+            owner_id,
+            field_name="owner_id",
+        )
+        owner_digest = _checkpoint_digest(
+            "runtime-owner-v1",
+            checked_owner_id,
+        )
+        owner_scope = f"runtime-owner-v1-{owner_digest}"
+        thread_digest = _checkpoint_digest(
+            "runtime-thread-v1",
+            owner_scope,
+            checked_run_id,
+        )
+        return cls(
+            owner_scope=owner_scope,
+            thread_id=f"runtime-thread-v1-{thread_digest}",
+        )
+
+    def belongs_to(self, run_id: str) -> bool:
+        checked_run_id = _require_runtime_identifier(
+            run_id,
+            field_name="run_id",
+        )
+        expected_digest = _checkpoint_digest(
+            "runtime-thread-v1",
+            self.owner_scope,
+            checked_run_id,
+        )
+        return hmac.compare_digest(
+            self.thread_id,
+            f"runtime-thread-v1-{expected_digest}",
+        )
+
+
+@dataclass(frozen=True)
 class RuntimeRequest:
     """One content-bearing command passed from the coordinator to a Runtime."""
 
@@ -51,18 +135,25 @@ class RuntimeRequest:
         repr=False,
         compare=False,
     )
+    checkpoint_context: RuntimeCheckpointContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.run_id, str)
-            or not self.run_id
-            or self.run_id != self.run_id.strip()
-            or len(self.run_id) > 200
-        ):
-            raise ValueError("run_id has an invalid format")
+        _require_runtime_identifier(self.run_id, field_name="run_id")
         if not isinstance(self.input_text, str) or not self.input_text.strip():
             raise ValueError("input_text must not be empty")
         _validate_prompt_context(self.prompt_context)
+        if self.checkpoint_context is not None:
+            if not isinstance(
+                self.checkpoint_context,
+                RuntimeCheckpointContext,
+            ):
+                raise ValueError("checkpoint_context has an invalid format")
+            if not self.checkpoint_context.belongs_to(self.run_id):
+                raise ValueError("checkpoint_context does not belong to run_id")
 
 
 @dataclass(frozen=True)
@@ -152,6 +243,7 @@ class AgentRuntime(Protocol):
 
 __all__ = [
     "AgentRuntime",
+    "RuntimeCheckpointContext",
     "RuntimeControl",
     "RuntimeEvent",
     "RuntimeEventSink",

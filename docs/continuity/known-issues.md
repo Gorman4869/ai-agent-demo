@@ -7,7 +7,7 @@
 | KI-001 | blocker | mitigated | M8 | M8-T4/M8-T5 已完成 SDK 适配与共享契约，M8-T6 已完成双重授权门和 E3 离线纵切，M8-T7 已完成课程材料与全量离线门；没有新的单次授权，真实线上流式、工具与 usage 仍未执行 | M8-T4/M8-T5 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
 | KI-002 | blocker | closed | M9 | M9-T1–T3 已完成真实 SDK 生命周期、可信工具映射，并对构建后的 TypeScript Knowledge Server 执行 initialize、list_tools、有效/无效 call_tool 与关闭；M9-T6 已完成课程和里程碑回归 | `V-20260720-003`：TypeScript MCP STDIO E2E；`V-20260720-009`：M9 40 项聚焦与全量离线门通过 |
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
-| KI-004 | high | open | M10 | LangGraph 没有 checkpoint、interrupt、resume 和恢复测试 | 中断、审批、重启恢复测试通过 |
+| KI-004 | high | mitigated | M10–M11 | M10-T1 已完成版本化 graph state、服务端 owner/thread 绑定、共享内存 checkpoint、跨 Runtime invocation 恢复、隔离和节点失败恢复；仍缺 interrupt、审批 resume、重复恢复幂等与进程重启持久化 | `V-20260720-011`：10 项 checkpoint 专项和后端 304 项全量门通过；M10-T2 补中断/审批恢复，M11 补 PostgreSQL 重启恢复后再关闭 |
 | KI-005 | high | open | M10–M11 | 上下文选择、记忆注入和动态重规划未进入主 Run | 长对话、记忆纠错与失败重规划评测通过 |
 | KI-006 | high | open | M11 | pgvector 只有 Fake Connection，没有真实数据库、Embedding 与检索指标 | PostgreSQL/pgvector 集成和固定评测集通过 |
 | KI-007 | high | open | M12 | SSE 在 Run 完成后回放；前端再次调用 Research API 覆盖答案 | 单 Run 真流式、续传和刷新恢复 E2E 通过 |

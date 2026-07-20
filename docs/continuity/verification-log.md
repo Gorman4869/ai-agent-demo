@@ -928,3 +928,55 @@
 
 - M9-T6 课程提交固定为 `fdeb9b5`；`V-20260720-009` 的 40 项聚焦、后端 294 项、全量构建/配置门、首次沙箱失败和 E3 边界不变。
 - 当前任务为 `M10-T1 / planned`；不重做 M9，不提前实现 M10-T2 interrupt/resume，不把共享内存 checkpointer 描述成进程重启持久化。
+
+## V-20260720-011：M10-T1 共享内存 Checkpoint 纵切
+
+- 任务：`M10-T1`
+- 时间：2026-07-20 15:16，Asia/Shanghai
+- 验证目标：HEAD `c4d4efe` 上的 M10-T1 工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类共享 Runtime/Coordinator 契约变更，时间盒 2–4 小时
+- 模式：offline；只执行本地 LangGraph、Mock、Store、构建和配置路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用仓库现有 Python 3.12.10、LangGraph 1.2.9 与 langgraph-checkpoint 4.1.1
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净；M9-T6 课程提交 `fdeb9b5` 与验证锚点 `c4d4efe` 存在 |
+| M9-T6 handoff 恢复命令 | 0 | TypeScript build、M9 聚焦 40 项、固定 Skill 评测 2/2 与 52 个稳定任务/62 个 Markdown 连续性检查通过，无漂移或 ResourceWarning |
+| 仓库虚拟环境中的 LangGraph `InMemorySaver` API 探针 | 0 | 不设置自定义顶层 namespace 时，失败节点前一 superstep 保存 `invocation_count=1`；使用相同 thread 的下一次 `ainvoke()` 恢复并推进到 2；`context_schema` 中的瞬时值未进入 checkpoint |
+| `python -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator` | 1 | PATH 首先命中 WindowsApps `python.exe`，报“指定的登录会话不存在”，测试没有启动；改用仓库 `.venv` 后通过，未修改系统配置 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m unittest backend.tests.test_runtime_contract backend.tests.test_run_coordinator -q` | 0 | 实现中途冒烟 31 项通过；三条 notifier 日志来自既有负向用例 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_checkpointing -v` | 0 | 10 项新增关键测试全部通过，覆盖稳定线程、跨 Runtime 恢复、用户隔离、缺失上下文、节点失败、版本/作用域拒绝、脱敏、真实 LangGraph 工具链与 Coordinator 注入 |
+| 7 模块 Checkpoint/Runtime/Coordinator/Skill/Container 定向回归 | 0 | 73 项全部通过；只有既有 Starlette/httpx 弃用提示和 notifier 负向日志，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 7 项手写 Loop 测试通过，证明 checkpoint 模块未污染 M1 顶层导入 |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m backend.app.demo` | 0 | 禁用 `site-packages` 后 Demo 仍输出 start、tool start/completed 与 run completed |
+| 摘要化 owner 上下文后的 Checkpoint/Skill/Coordinator 回归 | 0 | 39 项通过；原始 `owner_id` 不再进入 Runtime 请求上下文，只保留 owner/thread 摘要 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（沙箱内首轮） | 1 | 后端 304 项中 303 项通过、1 项既有 Windows symlink 能力跳过；Code Agent Demo 与 `pip check` 通过，随后 Vue 因沙箱拒绝写 `tsconfig.app.tsbuildinfo` 以 `EPERM` 中断 |
+| 同一 `scripts/verify.ps1` 经工作区构建权限批准后在沙箱外重跑 | 0 | 后端结果一致；Code Agent Demo、依赖、Vue 18 模块 production build、MCP TypeScript build 与 Docker Compose 配置门全部通过 |
+| `scripts/check-continuity.ps1` / `git diff --check` / 占位符扫描 | 0 | ADR、状态和 handoff 后为 52 个稳定任务、64 个 Markdown；相对链接与映射通过，无空白错误或占位符，只有既有 LF/CRLF 转换提示 |
+
+### 实现与安全证据
+
+- `RuntimeCheckpointContext.for_run()` 由 Coordinator 使用持久 Run 的可信 `owner_id` 和 `run_id` 派生固定 owner/thread 摘要；客户端没有 thread 注入入口，错 Run 上下文在 `RuntimeRequest` 构造时拒绝。
+- `CheckpointedLangGraphRuntime` 独立包装现有 `AgentRuntime`，持有共享 `InMemorySaver` 并只编译一次真实 `StateGraph`；两个 Runtime 实例复用同一 saver 和 thread 时，第二次调用从 1 恢复并推进到 2。
+- checkpoint schema 固定 `state_version=1`、owner scope、调用计数和标准化终态；未知版本、错 owner scope 和损坏计数 fail closed。当前迁移边界是“只接受当前版本”，没有静默猜测或原地升级。
+- request、Skill prompt、事件 sink、取消控制和 delegate 通过 LangGraph `context_schema` 瞬时传递；自动化检查确认原始 owner、输入和 prompt 不进入 checkpoint 表示。
+- delegate 节点异常只返回稳定 `checkpoint_node_failed`，不保留原始异常；前一 `advance` superstep 已被保存，后续同 thread 调用能恢复。`StoreError` 与外层任务取消继续原样传播，不触发隐藏重试。
+- 真实纵切不是 import 证据：测试实际执行外层 checkpoint graph 的 `ainvoke()`，再调用现有 `LangGraphRuntime` 完成 `MockModel -> add_numbers -> tool events -> terminal result`。
+- 现有简单 `LangGraphRuntime`、Container 默认 Runtime 选择与 M1 顶层导出保持不变；M10-T1 新 Runtime 只通过显式组合启用，不提前迁移默认主链。
+
+### 失败、警告与未验证范围
+
+- 首个 API 探针把 `checkpoint_ns="m10"` 当作顶层 namespace，`aget_state()` 返回 `ValueError: Subgraph m10 not found`；改为只设置 server-derived `thread_id` 后实际恢复通过，因此实现没有保留错误 namespace 方案。
+- 一个早期 context 探针把测试 secret 同时写进 answer，无法区分 state 与 context 持久化；该轮判定为无效证据，改为固定安全 answer 后确认 context 未持久化。另一个无 entrypoint 的只读图探针报 `ValueError: Graph must have an entrypoint`，没有据此作结论。
+- 全量首轮只因沙箱拒绝 Vue build info 写入而失败；没有把退出 1 改写成成功。相同完整脚本经批准在沙箱外退出 0。
+- 全量仍有 1 项既有 Code Agent Windows symlink 能力测试跳过；既有 Starlette/httpx 弃用提示、notifier warning 和 Windows asyncio 调试诊断不影响退出码，没有安装提示中的依赖。
+- `InMemorySaver` 只证明同一进程、共享对象、跨 invocation 恢复；没有验证进程重启、多进程、PostgreSQL、checkpoint 加密、容量或清理策略。真正重启持久化属于 M11。
+- 没有实现或验证 interrupt、`Command(resume=...)`、审批状态机、重复 resume、副作用恰好一次、重规划或多 Agent；这些分别属于 M10-T2 及后续任务。
+- 没有验证同一 thread 的跨进程并发写入；当前 Coordinator 单进程 singleflight 仍是并发边界。checkpoint 写入结果未知时不会自动重试有副作用 delegate。
+
+### 结论
+
+- `M10-T1` 达到 `verified`：稳定 graph state、服务端 owner/thread 绑定、共享内存 checkpointer、版本拒绝边界、跨 Runtime invocation 恢复、隔离和失败恢复均有真实 LangGraph 自动化证据。
+- 下一任务进入 `M10-T2 / planned`，只设计并实现 interrupt/审批 resume 与重复恢复幂等；不得把本次内存证据描述成进程重启持久化，也不得提前进入 M10-T3 重规划。

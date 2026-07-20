@@ -3,6 +3,7 @@ from .manual_loop import ManualAgentLoop
 from .manual_runtime import ManualRuntime
 from .runtime import (
     AgentRuntime,
+    RuntimeCheckpointContext,
     RuntimeControl,
     RuntimeEvent,
     RuntimeEventSink,
@@ -16,6 +17,7 @@ __all__ = [
     "ManualAgentLoop",
     "ManualRuntime",
     "RunCancelled",
+    "RuntimeCheckpointContext",
     "RuntimeControl",
     "RuntimeEvent",
     "RuntimeEventSink",

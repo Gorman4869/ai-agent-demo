@@ -10,6 +10,7 @@ from typing import Protocol
 from backend.app.agent import (
     AgentRuntime,
     CancellationToken,
+    RuntimeCheckpointContext,
     RuntimeControl,
     RuntimeEvent,
     RuntimeRequest,
@@ -369,6 +370,10 @@ class RunCoordinator:
                         run_id=running.id,
                         input_text=running.input_text,
                         execution_context=execution_context,
+                        checkpoint_context=RuntimeCheckpointContext.for_run(
+                            run_id=running.id,
+                            owner_id=running.owner_id,
+                        ),
                     ),
                     emit=emit,
                     control=control,

@@ -18,6 +18,7 @@
 - M9-T4 验证基线提交：`83a5234`；实现提交：`de8a63d`
 - M9-T5 验证基线提交：`c820c7e`；实现提交：`a6ff518`
 - M9-T6 验证基线提交：`19b5596`；课程提交：`fdeb9b5`
+- M10-T1 验证基线提交：`c4d4efe`；实现提交：待本地 commit 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -25,14 +26,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M10-T1` |
+| 任务 ID | `M10-T2` |
 | 状态 | `planned` |
-| 目标 | 建立具有稳定 graph state、thread ID、共享内存 checkpointer、状态版本和迁移边界的可持久 StateGraph 纵切 |
-| 设计依据 | `docs/stages/10-durable-langgraph.md`、实施计划 M10-T1、M8-T3 Runtime/Coordinator 与 M9-T2 共同工具契约 |
+| 目标 | 增加审批请求、`interrupt()`、服务端绑定审批、`Command(resume=...)` 与拒绝分支，禁止客户端裸布尔值恢复工具执行 |
+| 设计依据 | `docs/stages/10-durable-langgraph.md`、实施计划 M10-T2、`ADR-0011`、既有 ToolApproval/Runtime/Coordinator 契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M9-T6 已完成四次里程碑跟练、三者对照、roots 边界、三类考核、一页速查、费曼任务和 30 项映射；M9 聚焦 40 项与全量离线门通过，状态为 `verified` |
-| 前置证据 | `V-20260720-009`、`V-20260720-008`、`V-20260720-004` |
-| 下一动作 | 只读审阅 M10-T1、阶段 10、现有 LangGraph Runtime 与已安装 checkpointer API，先固定 state/thread/version/迁移和进程内持久边界；不提前实现 M10-T2 interrupt/resume |
+| 当前修改 | M10-T1 已完成独立 checkpoint Runtime、服务端 owner/thread 摘要、版本 1 state、共享 `InMemorySaver`、跨 Runtime invocation 恢复、隔离、失败恢复和 10 项专项；现有简单 LangGraph 与默认 Container 未切换 |
+| 前置证据 | `V-20260720-011`、`ADR-0011`、`V-20260720-009` |
+| 下一动作 | 只读审阅 M10-T2、现有 ToolApproval/ToolExecution/RuntimeResult 与 LangGraph interrupt 公共 API，先固定服务端审批状态、resume payload、单次消费和 M10/M11 重启证据边界；不提前实现 M10-T3 重规划 |
 
 ## 里程碑状态
 
@@ -42,7 +43,7 @@
 | C0 连续性基线 | `verified` | 计划基线 `6f8490a`；验证见 `V-20260716-001`、`V-20260716-002` |
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
-| M10 LangGraph 持久工作流 | `planned` | 依赖 M8、M9 |
+| M10 LangGraph 持久工作流 | `in_progress` | M10-T1 verified；共享内存 checkpoint 只证明同进程跨 invocation 恢复，M10-T2 interrupt/审批 resume 待实现 |
 | M11 上下文、记忆与真实 RAG | `planned` | 依赖 M10 状态和 Store 协议 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
@@ -56,6 +57,9 @@
 
 ## 未验证范围
 
+- M10-T1 见 `V-20260720-011`：10 项 checkpoint 专项、73 项定向回归和统一全量门通过；后端 304 项中 303 项通过、1 项既有 Windows symlink 能力测试跳过。全量沙箱内首轮在 Vue `tsbuildinfo` 写入处 `EPERM`，相同脚本经批准在沙箱外退出 0，两次事实均保留。
+- M10-T1 的 `InMemorySaver` 只验证同一进程中共享 saver 的跨 Runtime invocation 恢复；没有进程重启、多进程、PostgreSQL、加密、容量、清理或同 thread 跨进程并发证据，真正重启持久化仍由 M11 验收。
+- M10-T1 没有实现 interrupt、`Command(resume=...)`、审批状态机、拒绝/过期/篡改/重复 resume、副作用恰好一次、重规划或多 Agent；`KI-004` 仅为 mitigated。现有 checkpoint Runtime 也未切换为 Container 默认主链。
 - M9-T6 见 `V-20260720-009`：M9 聚焦 40 项全部通过；全量后端 294 项中 293 项通过、1 项既有 Windows symlink 能力测试跳过，Code Agent Demo、依赖、Vue、MCP TypeScript 与 Compose 配置门通过。
 - 本轮全量首轮在后端、Code Agent 和依赖门通过后，因沙箱拒绝写 Vue `tsbuildinfo` 退出 1；相同完整脚本经工作区构建权限批准后在沙箱外退出 0。两次结果均保留，不能删除首次失败事实。
 - 当前 Windows 环境仍无法为既有 Code Agent 测试创建真实 symlink；M9 Skill 的 `../`/嵌套逃逸由实际文件系统测试拒绝，symlink 拒绝只完成受控分支覆盖，不能描述为 OS 级实证。
@@ -72,4 +76,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t6-course-acceptance.md`，再核对 `V-20260720-009`、实施计划 M10-T1 和 `docs/stages/10-durable-langgraph.md`。若 M9 聚焦 40 项、固定 2 项离线评测与连续性检查仍一致，不要重做 M9；下一步只读审阅现有 LangGraph Runtime、checkpointer API 与状态契约，不提前实现 M10-T2。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m10-t1-checkpointed-langgraph.md`，再核对 `V-20260720-011`、`ADR-0011`、实施计划 M10-T2 和 `docs/stages/10-durable-langgraph.md`。若 M10-T1 专项 10 项与连续性检查仍一致，不要重做 checkpoint 纵切；下一步只读审阅 ToolApproval、ToolExecution、RuntimeResult 与 LangGraph interrupt/resume 公共 API，先解决 M10-T2 审批单次消费和 M11 重启边界，不提前进入 M10-T3。没有用户新的单次授权，不得读取 Key 或执行真实模型。

@@ -173,3 +173,13 @@
 - Manual and LangGraph use a system message while the Agents SDK default factory uses agent instructions. Every path keeps the original user input unchanged and must never derive identity, roles, approvals, tools, or Schema from Skill text.
 - Tool visibility and execution continue through the shared `ToolRegistry`. Tests must prove malicious Skill wording cannot bypass role checks, exact approvals, or argument validation and that denied handlers do not run.
 - Offline Skill cost reports may record exact UTF-8 bytes and a clearly labeled `ceil(bytes / 4)` heuristic. Provider usage remains unavailable and financial cost remains `None`; this comparison is not a tokenizer, billing, or online-model claim and does not close `KI-018`.
+
+## 19. LangGraph Checkpoint State
+
+- `RunCoordinator` derives `RuntimeCheckpointContext` from the stored owner and Run. Request, model, tool, and client data never supply a checkpoint thread; the context stores only versioned owner/thread digests and validates its Run binding.
+- Keep checkpoint state minimal and versioned. Persist only reviewed workflow fields and normalized Runtime outcomes; pass requests, prompts, event sinks, cancellation controls, tools, and delegates through invocation context instead of state.
+- Read and validate existing state before invoking a checkpointed graph. Unknown versions, wrong owner scope, malformed counters, and unavailable storage fail closed with stable categories; do not silently migrate or discard state.
+- A Schema upgrade requires an explicit migrator and fixed old-version fixtures before increasing the current version. Until then, rejecting every non-current version is the migration boundary.
+- Save a side-effect-free progress boundary before a fallible node. A node exception must not expose raw text or trigger an automatic delegate retry; `StoreError` and outer cancellation retain their existing propagation semantics.
+- `InMemorySaver` proves only same-process recovery when Runtime instances share one saver. It is not process-restart, multi-process, encrypted, capacity-managed, or PostgreSQL persistence evidence.
+- Keep checkpoint-enabled LangGraph modules on explicit imports so the M1 standard-library path remains runnable with `python -S`. Do not switch the default Container Runtime as part of an isolated checkpoint task.

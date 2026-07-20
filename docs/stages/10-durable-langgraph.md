@@ -29,6 +29,30 @@
 - 使用共享 checkpointer 验证跨 invocation 续接。
 - 注入错用户、错 Run、缺 thread ID 和 checkpoint 损坏。
 
+#### M10-T1 已验证纵切
+
+代码入口：
+
+- `backend/app/agent/runtime.py`：`RuntimeCheckpointContext`，由 owner/Run 派生版本化摘要。
+- `backend/app/agent/checkpoint_runtime.py`：`CheckpointedLangGraphRuntime`，共享 `InMemorySaver` 并编译真实 `StateGraph`。
+- `backend/app/services/run_coordinator.py`：只从持久 Run 注入可信 checkpoint 上下文。
+- `backend/tests/test_langgraph_checkpointing.py`：10 项稳定线程、恢复、隔离、损坏、脱敏和失败恢复证据。
+
+执行链：
+
+```text
+stored owner + run
+  -> RuntimeCheckpointContext.for_run()
+  -> thread_id
+  -> advance superstep checkpoint
+  -> existing AgentRuntime delegate
+  -> normalized terminal state checkpoint
+```
+
+`RuntimeRequest`、Skill prompt、事件 sink 和取消对象只走本次 invocation context，不进入 checkpoint。`state_version=1` 是当前唯一接受版本；未知版本 fail closed，等后续有迁移 fixture 和显式 migrator 后再升级。
+
+本纵切的“跨实例恢复”是两个 Runtime 对象共享同一内存 saver，不是操作系统进程重启。M10-T2 才增加 interrupt/审批 resume；M11 才把 saver 替换为 PostgreSQL 并验证真正重启恢复。
+
 ### 第 2 次：人工审批
 
 - 高风险工具先写 ApprovalRequest，再 interrupt。
@@ -66,6 +90,7 @@
 | 永久错误不断重规划 | 错误分类错误 | 检查 retryable 和最大重规划次数 |
 | 多 Agent 无限互调 | handoff 无预算 | 限制角色切换和返工次数 |
 | 误称支持重启恢复 | 使用的是内存 checkpointer | 保留为 M11 验收，不修改证据措辞 |
+| checkpoint 查询报 Subgraph not found | 把自定义 namespace 当成顶层子图 | 顶层只设置服务端派生 `thread_id`，不要虚构 `checkpoint_ns` |
 
 ## 自测
 
