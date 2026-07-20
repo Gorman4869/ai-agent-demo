@@ -3,7 +3,7 @@
 - 更新时间：2026-07-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`5aba130`
+- 最近已确认实现提交：`de8a63d`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -15,7 +15,7 @@
 - M9-T1 验证基线提交：`ba7adf9`；实现提交：`f8b59d2`
 - M9-T2 验证基线提交：`f8b59d2`；实现提交：`40b1257`
 - M9-T3 验证基线提交：`c3972b6`；实现提交：`5aba130`
-- M9-T4 验证基线提交：`83a5234`；实现提交待本轮本地 commit 固定
+- M9-T4 验证基线提交：`83a5234`；实现提交：`de8a63d`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -29,7 +29,7 @@
 | 设计依据 | `docs/stages/09-mcp-client-skills.md`、实施计划 M9-T5、M9-T4 `SkillCatalog`/`SkillResolver`、现有 Runtime 请求与离线评测边界 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M9-T4 已实现固定根目录、严格 frontmatter、有界 reference、不可变缓存、显式/自动触发和稳定错误；10 项新增测试与 17 项路径安全定向集通过，状态为 `verified` |
-| 前置证据 | `V-20260720-005`、`V-20260720-003` |
+| 前置证据 | `V-20260720-005`、`V-20260720-006`、`V-20260720-003` |
 | 下一动作 | 按 B 类协议只读审阅 M9-T5、Runtime 请求/模型输入和离线 eval 风格；先定义有界 SkillContext 片段与固定触发/不触发对照，不提前执行 M9-T6 里程碑教程或 M10 |
 
 ## 里程碑状态
@@ -67,4 +67,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t4-skill-catalog-resolver.md`，再核对 `V-20260720-005`、实施计划 M9-T5 和 `docs/stages/09-mcp-client-skills.md`。若 10 项 Skill 测试、17 项路径安全定向集和连续性检查仍一致，不要重做 M9-T1–M9-T4；下一步只设计有界 SkillContext 注入与固定离线评测，不提前执行 M9-T6 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-20-m9-t4-skill-catalog-resolver.md`，再核对 `V-20260720-005`、`V-20260720-006`、实施计划 M9-T5 和 `docs/stages/09-mcp-client-skills.md`。若 10 项 Skill 测试、17 项路径安全定向集和连续性检查仍一致，不要重做 M9-T1–M9-T4；下一步只设计有界 SkillContext 注入与固定离线评测，不提前执行 M9-T6 或 M10。没有用户新的单次授权，不得读取 Key 或执行真实模型。

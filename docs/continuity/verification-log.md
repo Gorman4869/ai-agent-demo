@@ -757,3 +757,24 @@
 
 - `M9-T4` 达到 `verified`：现有 Skill 真实加载、严格元数据、引用边界、缓存、显式/自动触发和稳定错误均有离线可复现证据。
 - 下一任务进入 `M9-T5 / planned`，只实现有界 SkillContext 注入与固定效果/成本评测，不提前执行 M9-T6 里程碑验收或 M10。
+
+## V-20260720-006：M9-T4 实现提交后恢复锚点
+
+- 任务：`M9-T4`
+- 时间：2026-07-20 11:21，Asia/Shanghai
+- 验证目标：实现提交 `de8a63d`（`feat: add read-only skill catalog`）
+- 模式：offline；只读取仓库 Skill 与测试临时目录，没有读取真实 API Key、访问网络服务、执行 Skill 脚本或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` | 0 | 实现提交后工作区干净 |
+| `git log -3 --oneline` | 0 | `de8a63d` 位于 M9-T3 验证锚点 `83a5234` 之后，提交边界正确 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_skill_catalog -q` | 0 | 提交后最小恢复集 10 项通过，无 ResourceWarning |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、58 个 Markdown 文件通过 |
+
+### 结论
+
+- M9-T4 实现提交固定为 `de8a63d`；`V-20260720-005` 的 17 项定向集、symlink 证据边界与 `verified` 结论不变。
+- 当前任务为 `M9-T5 / planned`；只实现有界 SkillContext 注入与固定离线评测，不重做 Catalog/Resolver，不提前执行 M9-T6 或 M10。
