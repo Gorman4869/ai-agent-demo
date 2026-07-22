@@ -5,7 +5,8 @@
 - 完成状态：`verified`
 - 下一任务：`M10-T5 / planned`
 - 验证基线 HEAD：`ae9e3aa`
-- 验证记录：`V-20260722-003`
+- M10-T4 实现提交：`abdc409`
+- 验证记录：`V-20260722-003`、`V-20260722-004`
 - 分支：`main`
 - 任务等级：A 类角色工具隔离、调用预算与失败闭合，时间盒 2–4 小时
 - 新增或安装依赖：无
@@ -43,6 +44,7 @@
 - 新增专项 14 项无异步警告、无 ResourceWarning 通过；最终 SDK、多 Agent、评测、ToolRegistry、Runtime 与重规划定向回归 93 项通过。
 - M1 隔离：禁用 `site-packages` 的手写 Loop 7 项通过，新 SDK 模块未从 `backend.app.agent` 顶层导出。
 - 连续性在新增 handoff 后为 52 个稳定任务/69 个 Markdown，通过。
+- 提交后恢复：实现提交 `abdc409` 工作区干净；Demo 仍选择 single Agent，manager 27 requests/324 fixture Token/415.495 ms，单 Agent 9/108/138.762 ms；专项 14 项、M1 7 项和连续性 52/69 再次通过。
 - 所有证据均为本地离线。实际框架编排达到 E2，共享工具授权/Schema 边界达到本地 E3；没有网络、密钥、Provider 或费用。
 
 ## 失败尝试与复审修正
@@ -62,7 +64,7 @@
 
 ## 未提交改动
 
-M10-T4 代码、测试、规约、课程和连续性记录当前均在基线 `ae9e3aa` 之上的工作区；没有任务外改动，没有安装依赖，没有远程 Git 操作。实现提交后由下一条 verification 或 handoff 固定新 HEAD。
+M10-T4 代码、测试、规约、课程和首轮连续性记录已由本地实现提交 `abdc409` 固定。当前只修改本 handoff、`status.md` 与 `verification-log.md` 以记录提交后恢复锚点；没有任务外改动，没有安装依赖，没有远程 Git 操作。
 
 ## 下一条原子动作
 

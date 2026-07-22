@@ -1220,3 +1220,25 @@
 
 - `M10-T4` 达到 `verified`：真实公开 SDK manager-as-tools 调用链、独立角色指令/工具、共享 ToolRegistry 安全边界、turns 预算、零网络和同任务单 Agent 固定对照均有可复现离线证据。
 - `KI-013` closed；固定集没有质量或失败率收益，结论保留单 Agent。下一任务进入 `M10-T5 / planned`，只做恢复与故障注入，不把本地 fixture 指标描述为在线证据，也不提前进入 M10-T6。
+
+## V-20260722-004：M10-T4 实现提交后恢复锚点
+
+- 任务：`M10-T4`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：实现提交 `abdc409`（`feat: compare manager-as-tools collaboration`）
+- 模式：offline；只执行本地 Agents SDK、确定性 Model、ToolRegistry 与标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交后工作区干净；`abdc409` 位于 M10-T3 验证锚点 `ae9e3aa` 之后 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.multi_agent` | 0 | 3 例两组质量 1.0、失败率 0，选择 single Agent；manager 27 requests/324 fixture Token/415.495 ms，单 Agent 9/108/138.762 ms |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_multi_agent backend.tests.test_workflow_comparison_eval -q` | 0 | handoff 专项 14 项通过，无 ResourceWarning 或异步错误日志 |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，多 Agent 模块保持显式导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、69 个 Markdown 文件通过 |
+
+### 结论
+
+- M10-T4 实现提交固定为 `abdc409`；`V-20260722-003` 的 14 项专项、93 项定向回归、失败尝试、单 Agent 结论和离线 E2/E3 边界不变。
+- 当前任务为 `M10-T5 / planned`；不重做 manager-as-tools，不接入默认 Runtime，不提前进入 M10-T6，也不把 fixture usage/延迟描述为 Provider 或生产证据。
