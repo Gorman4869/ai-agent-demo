@@ -40,7 +40,7 @@ M0–M7 的现有代码和文档继续保留，但 2026-07-16 审计已确认其
 | C0 连续性基线 | 补齐第 0 周 | 全局 | Git、设计规格、稳定计划、状态、ADR、验证与交接 | 文档一致性和全量离线基线 |
 | M8 真实模型与运行时 | 补齐第 1–2 周 | 05、09、10 | 异步 Runtime、持久事件、OpenAI Runner、LangChain 对照 | 离线契约 + 显式在线冒烟 |
 | M9 MCP Client 与 Skill | 补齐第 3 周 | 07、08 | MCP Client 发现/调用、Skill Catalog 与触发评测 | STDIO 协议端到端测试 |
-| M10 LangGraph 持久工作流 | 补齐第 4–5 周 | 11、14、15、18 | checkpoint、interrupt、审批恢复、重规划、多 Agent 对照 | 中断和重启恢复测试 |
+| M10 LangGraph 持久工作流 | 补齐第 4–5 周 | 11、14、15、18 | checkpoint、interrupt、审批恢复、重规划、多 Agent 对照 | 中断和同进程换实例恢复测试；真重启留 M11 |
 | M11 上下文、记忆与真实 RAG | 补齐第 6–8 周 | 12、16、17、21 | PostgreSQL、pgvector、Embedding、上下文预算、持久记忆 | 数据库集成与固定评测集 |
 | M12 统一 Run 与实时 UI | 补齐第 9–10 周 | 04、19、20、22 | 持久 Run API、真 SSE、断线续传、Vue 恢复 | 前端单测与浏览器 E2E |
 | M13 生产工程闭环 | 补齐第 11–12 周 | 23–27 | Trace、成本、错误、CI、Docker、安全与故障演练 | CI、容器健康、压测和安全回归 |
@@ -475,7 +475,7 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 
 - 依赖：M10-T1。
 - 产物：审批请求、`interrupt()`、服务端绑定审批、`Command(resume=...)` 和拒绝分支。
-- 测试：批准、拒绝、过期、重复使用、参数被篡改、重启后恢复。
+- 测试：批准、拒绝、过期、重复使用、参数被篡改、同进程新 Runtime 实例恢复；真正进程重启由 M11 验收。
 - 验收：客户端裸 `approved=true` 不能恢复工具执行。
 
 #### M10-T2 离线实现结果与恢复边界
@@ -530,8 +530,15 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 
 - 依赖：M10-T1 至 M10-T5。
 - 产物：`docs/stages/10-durable-langgraph.md`、状态图、排错、考核和费曼任务。
-- 验收：学习者能演示暂停、审批、重启恢复、失败重规划，并解释单 Agent 与多 Agent 取舍。
-- 关闭目标：KI-004、KI-013；KI-005 的重规划部分。
+- 验收：学习者能演示暂停、审批、同进程新 Runtime 实例复用共享 saver 恢复、失败重规划，并解释单 Agent 与多 Agent 取舍；PostgreSQL 真正进程重启明确留给 M11。
+- 关闭目标：KI-013；完成 KI-004 的 M10 同进程故障恢复部分和 KI-005 的重规划部分。KI-004 在 M11 真重启验收前保持 `mitigated`。
+
+#### M10-T6 课程与里程碑验收结果
+
+- 课程产物：Stage 10 已汇总三张状态图、四次跟练、固定排错顺序、概念/实操/场景题与评分红线；`docs/m10-langgraph-cheat-sheet.md` 提供一页工作速查，30 项大纲映射同步到 `docs/syllabus-map.md`。
+- 聚焦证据：checkpoint、审批 resume、重规划、恢复故障、多 Agent 和对照评测共 58 项通过；固定 3 例两种策略质量均为 1.0、失败率均为 0，多 Agent request、fixture Token、延迟和复杂度更高，继续保留单 Agent。
+- 里程碑门：统一离线验证的后端 354 项通过、1 项因 Windows 符号链接能力跳过；受控代码 Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建和 Compose 配置均通过。
+- 证据边界：M10 达到工程 `verified`，但最高仍是确定性离线 E3；没有在线 Provider、真实 Token/账单、PostgreSQL、跨进程 checkpoint、持久 ToolExecution、lease 或恢复扫描证据。`KI-004` 保持 `mitigated`，由 M11-T1 继续承接。
 
 ## M11：上下文、持久记忆与真实 RAG
 

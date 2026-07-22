@@ -1320,3 +1320,46 @@
 
 - M10-T5 实现提交固定为 `1e332f3`；`V-20260722-005` 的 10 项专项、123 项定向回归、失败尝试、全量门跳过理由和同进程 E3 边界不变。
 - 当前任务为 `M10-T6 / planned`；不重做故障矩阵，不把内存故障注入描述为进程重启或 exactly-once，不提前进入 M11。
+
+## V-20260722-007：M10 课程汇总与里程碑验收
+
+- 任务：`M10-T6`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：HEAD `07741db` 上的 M10-T6 课程工作区；课程提交由后续本地 commit 固定
+- 任务等级：B 类课程文档整合与里程碑完整门，时间盒 60–90 分钟
+- 模式：offline；只执行本地 LangGraph、Agents SDK 确定性 Model、Store、构建与配置检查，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；没有修改业务代码、公共契约、默认 Container、HTTP/SSE 或前端行为
+
+### 恢复、漂移与课程检查
+
+- 开始时 `git status --short` 干净；最近提交为 `07741db`、`1e332f3`、`7538fb4`、`abdc409`、`ae9e3aa`、`e27a8ef`，没有重做 M10-T1–T5。
+- 按顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M10-T6/M11-T1、ADR-0011/0012/0013、最新 handoff、V-005/V-006、后端规约、Stage 10、Stage 9、课程模板和 30 项映射，并核对实际 M10 代码/测试。
+- handoff 最小恢复集通过：故障专项 10 项、禁用 `site-packages` 的 M1 手写 Loop 7 项、52 个稳定任务/70 个 Markdown；实际代码与 M10-T5 提交一致。
+- 发现并先登记 `KI-021`：动态 status 的最近实现提交和结果未知描述已过时；最新不可变 handoff 仍描述待提交文档，但 `07741db` 后工作区实际干净；实施计划曾要求 M10 关闭 `KI-004`/演示重启，与 accepted ADR 的 M11 真重启边界冲突。课程、status 和新 handoff 已澄清，旧 handoff 不回写。
+- Stage 10 新增三张状态图、四次跟练、故障定位矩阵、固定排错顺序、证据等级、题库/评分红线、速查与费曼任务；新增 M10 一页速查表并同步 30 项大纲映射。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `07741db`，提交边界正确 |
+| M10-T5 handoff 的故障专项、M1 与连续性恢复命令 | 0 | 10 项、7 项、52 个任务/70 个 Markdown 通过；代码与记录一致 |
+| `... -m unittest backend.tests.test_langgraph_checkpointing backend.tests.test_langgraph_approval_resume backend.tests.test_langgraph_replanning backend.tests.test_langgraph_recovery_faults backend.tests.test_multi_agent backend.tests.test_workflow_comparison_eval -v` | 0 | M10 checkpoint、审批、重规划、故障、多 Agent 与对照评测聚焦 58 项通过，无 ResourceWarning |
+| `... -m backend.app.evals.multi_agent` | 0 | 3 个固定案例两组质量均 1.0、失败率均 0；manager 27 requests/324 fixture Token/412.399 ms/复杂度 12，single 9/108/138.548 ms/复杂度 3，选择 `single_agent` |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1`（沙箱首轮） | 1 | 后端 354 项通过、1 项 Windows symlink 能力跳过；受控代码 Agent 与依赖检查通过；Vue 因无法写 `frontend/tsconfig.app.tsbuildinfo` 报 `TS5033`/`EPERM`，MCP/Compose 尚未执行 |
+| 同一完整脚本（批准工作区构建权限后） | 0 | 后端 354 项通过、1 项跳过；受控代码 Agent、依赖检查、Vue 生产构建、MCP TypeScript 构建和 Compose 配置全部通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 新 handoff 后 52 个稳定任务、72 个 Markdown 文件通过 |
+| 新课程相对链接 `Test-Path` / `git diff --check` | 0 | 速查、syllabus、status、known issue 和 playbook 链接目标存在；无 whitespace 错误，仅有 Git 的 LF/CRLF 转换提示 |
+
+### 失败、警告与未验证范围
+
+- 完整门首次失败只发生在沙箱 Vue `tsbuildinfo` 写入边界；没有修改代码或配置规避。相同脚本在获批工作区构建权限下完整退出 0，首次失败事实与后续结果同时保留。
+- 全量后端输出含一条既有 `StarletteDeprecationWarning`，Windows 环境仍有 1 项真实 symlink 能力测试跳过；二者没有被描述为已消除。
+- 课程中的“恢复”只指同一进程内新 Runtime 实例复用共享 `InMemorySaver`；没有操作系统进程重启、PostgreSQL checkpointer、持久 ToolExecution、lease、恢复扫描或多进程仲裁证据，`KI-004` 保持 mitigated。
+- 多 Agent usage/延迟来自确定性 fixture 与本地 SDK 聚合，不是 Provider tokenizer、账单、线上质量、费用或生产容量证据。
+- 没有在线 Provider、密钥、网络或付费调用。学习者尚未在 `docs/progress.md` 完成 M10 题库、速查和费曼个人通关；工程 verified 不等于个人 accepted。
+
+### 结论
+
+- `M10-T6` 达到 `verified`，M10 里程碑达到工程 `verified`：可运行代码、58 项聚焦证据、完整离线门、跟练、排错、题库、速查、费曼任务和 30 项映射全部落盘。
+- `KI-021` closed；`KI-004` 正确保留 mitigated 并由 M11-T1 承接 PostgreSQL 真重启边界。当前任务推进到 `M11-T1 / planned`，不在本轮实现数据库、记忆或 RAG。

@@ -3,7 +3,7 @@
 - 更新时间：2026-07-22，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`abdc409`
+- 最近已确认实现提交：`1e332f3`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -23,6 +23,7 @@
 - M10-T3 验证基线提交：`545d5af`；实现提交：`e27a8ef`
 - M10-T4 验证基线提交：`ae9e3aa`；实现提交：`abdc409`
 - M10-T5 验证基线提交：`7538fb4`；实现提交：`1e332f3`
+- M10-T6 验证基线提交：`07741db`；课程提交：待本地提交固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -30,14 +31,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M10-T6` |
+| 任务 ID | `M11-T1` |
 | 状态 | `planned` |
-| 目标 | 汇总 M10 checkpoint、审批、重规划、多 Agent 取舍与故障恢复的跟练、考核、速查和费曼材料，并执行里程碑验收 |
-| 设计依据 | `docs/stages/10-durable-langgraph.md`、实施计划 M10-T6、`ADR-0011`、`ADR-0012`、`ADR-0013` 与 M10-T1–T5 自动化证据 |
+| 目标 | 设计并实现版本化 PostgreSQL migration、Run/Event/Approval/Memory Store、LangGraph checkpointer、连接生命周期和事务边界 |
+| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、现有 Store Protocol 与 M10 checkpoint/审批契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M10-T5 已新增 10 项 checkpoint/interrupt/replanning 故障矩阵；审批副作用完成但 checkpoint 写失败时，后续 Runtime 返回 `side_effect_resume_unsafe`、记录 `approval.stopped` 且 handler 不重放；同进程内存证据边界保持不变 |
-| 前置证据 | `V-20260722-005`、`V-20260722-003`、`V-20260722-001`、`ADR-0013`、`ADR-0012`、`ADR-0011` |
-| 下一动作 | 开始 M10-T6 前只读审阅 Stage 10、30 项大纲映射和 M10-T1–T5 verification，列出里程碑必须汇总的跟练、概念/实操/场景题、速查表、费曼任务与验收命令；不提前进入 M11 实现 |
+| 当前修改 | M10-T6 已汇总三张状态图、四次跟练、排错矩阵、题库、评分、速查表和费曼任务；58 项 M10 聚焦测试及完整离线门通过，M10 里程碑达到 `verified`；`KI-004` 因仍缺 PostgreSQL 真重启而保持 mitigated |
+| 前置证据 | `V-20260722-007`、`V-20260722-005`、`ADR-0013`、`ADR-0012`、`ADR-0011` |
+| 下一动作 | 开始 M11-T1 前只读审阅现有 Run/Event/Approval/Memory Store Protocol、数据库连接与 migration 目录、相关 ADR 和 Docker 可用性，先固定内存/PostgreSQL 共同契约与最小数据库恢复纵切；未经授权不安装依赖、不启动在线服务 |
 
 ## 里程碑状态
 
@@ -47,7 +48,7 @@
 | C0 连续性基线 | `verified` | 计划基线 `6f8490a`；验证见 `V-20260716-001`、`V-20260716-002` |
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
-| M10 LangGraph 持久工作流 | `in_progress` | M10-T1–M10-T5 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照及 10 场景故障矩阵均有离线证据，M10-T6 课程与里程碑验收待完成；进程重启仍属 M11 |
+| M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
 | M11 上下文、记忆与真实 RAG | `planned` | 依赖 M10 状态和 Store 协议 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
@@ -61,6 +62,10 @@
 
 ## 未验证范围
 
+- M10-T6 见 `V-20260722-007`：M10 聚焦 58 项通过；完整离线门的后端 354 项通过、1 项因 Windows 符号链接能力跳过，受控代码 Agent、依赖检查、Vue 生产构建、MCP TypeScript 构建和 Compose 配置均通过。
+- 完整门沙箱首轮在后端 354 项、受控代码 Agent 和依赖检查通过后，因拒绝写入 Vue `tsconfig.app.tsbuildinfo` 以 `EPERM` 退出 1；相同脚本经工作区构建权限批准后退出 0。首次失败和最终通过均保留，另有一条既有 `StarletteDeprecationWarning`。
+- M10 工程里程碑已 `verified`，但所有模型与多 Agent 结论仍来自确定性离线 fixture；没有在线 Provider、真实 Token/账单、生产质量或容量证据。真正操作系统进程重启、PostgreSQL checkpointer、持久 ToolExecution、lease 和恢复扫描由 M11 承接。
+- 学习者个人尚未完成 M10 题库、速查练习和费曼复述；工程 `verified` 不代替 `docs/progress.md` 的个人通关记录。
 - M10-T5 见 `V-20260722-005`：新增故障矩阵 10 项、M10-T1–T5/Coordinator/Store/ToolRegistry 定向 123 项和 M1 隔离 7 项通过；真实 `StateGraph`、故障 saver、共享内存 saver、RunCoordinator/EventStore 和 ToolRegistry 均执行。
 - 结果未知审批路径只证明同一进程中 grant 已消费后，新 Runtime 不重放 handler并返回 `side_effect_resume_unsafe`/`approval.stopped`；重规划路径产生同类终态和 `plan.stopped`。这不是跨进程 exactly-once、PostgreSQL、持久 ToolExecution、lease 或恢复扫描证据。
 - M10-T5 未修改依赖、锁文件、默认 Container、公共 Runtime/Store Protocol、HTTP/SSE 或前端，因此未运行全仓 `scripts/verify.ps1`；M10-T6 里程碑验收再执行计划要求的完整门。
@@ -77,7 +82,7 @@
 - M10-T2 没有迁移默认 Container、旧 HTTP/SSE 或 Agents SDK 审批路径；M12 才提供统一审批端点。其 M10-T3 重规划和 M10-T4 多 Agent 对照缺口已分别由 `V-20260722-001`、`V-20260722-003` 补齐。
 - M10-T1 见 `V-20260720-011`：10 项 checkpoint 专项、73 项定向回归和统一全量门通过；后端 304 项中 303 项通过、1 项既有 Windows symlink 能力测试跳过。全量沙箱内首轮在 Vue `tsbuildinfo` 写入处 `EPERM`，相同脚本经批准在沙箱外退出 0，两次事实均保留。
 - M10-T1 的 `InMemorySaver` 只验证同一进程中共享 saver 的跨 Runtime invocation 恢复；没有进程重启、多进程、PostgreSQL、加密、容量、清理或同 thread 跨进程并发证据，真正重启持久化仍由 M11 验收。
-- M10-T1 的旧缺口中，interrupt、`Command(resume=...)`、审批状态机与正常/重复恢复已由 M10-T2 补齐，动态重规划已由 M10-T3 补齐，多 Agent 对照已由 M10-T4 补齐；结果未知故障和默认主链迁移仍未完成，`KI-004` 保持 mitigated。
+- M10-T1 的旧缺口中，interrupt、`Command(resume=...)`、审批状态机与正常/重复恢复已由 M10-T2 补齐，动态重规划已由 M10-T3 补齐，多 Agent 对照已由 M10-T4 补齐，结果未知故障已由 M10-T5 补齐；默认主链、PostgreSQL 和跨进程恢复仍未完成，`KI-004` 保持 mitigated。
 - M9-T6 见 `V-20260720-009`：M9 聚焦 40 项全部通过；全量后端 294 项中 293 项通过、1 项既有 Windows symlink 能力测试跳过，Code Agent Demo、依赖、Vue、MCP TypeScript 与 Compose 配置门通过。
 - 本轮全量首轮在后端、Code Agent 和依赖门通过后，因沙箱拒绝写 Vue `tsbuildinfo` 退出 1；相同完整脚本经工作区构建权限批准后在沙箱外退出 0。两次结果均保留，不能删除首次失败事实。
 - 当前 Windows 环境仍无法为既有 Code Agent 测试创建真实 symlink；M9 Skill 的 `../`/嵌套逃逸由实际文件系统测试拒绝，symlink 拒绝只完成受控分支覆盖，不能描述为 OS 级实证。
@@ -94,4 +99,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t5-recovery-fault-injection.md`，再核对 `V-20260722-005`、`V-20260722-003`、`ADR-0013`、`ADR-0012`、实施计划 M10-T6 和 `docs/stages/10-durable-langgraph.md`。若故障专项 10 项、M1 7 项与连续性检查仍一致，不要重做 M10-T5 或提前进入 M11；下一步只读整理 M10 里程碑课程交付与验收清单。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t6-course-acceptance.md`，再核对 `V-20260722-007`、`ADR-0011`、`ADR-0012`、实施计划 M11-T1 和现有 Store Protocol。若 M10 聚焦 58 项、M1 7 项与连续性检查仍一致，不要重做 M10；下一步只读固定 M11-T1 的内存/PostgreSQL 共同契约和最小数据库恢复纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线调用或扩大范围。

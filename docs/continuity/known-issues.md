@@ -24,6 +24,7 @@
 | KI-018 | high | open | M8–M13 | 当前 `max_turns` 仅粗略约束模型调用；SDK 聚合 request/input usage 只能在流结束后校验，可能超出一个请求，`max_cost_usd` 尚未计算或强制执行。M9-T5 只增加明确标注的 Skill 上下文字节与 `ceil(bytes / 4)` Token 启发式，不是 Provider usage 或费用。`AsyncOpenAI` HTTP timeout 只约束提供方传输请求，不是覆盖模型、工具和清理阶段的整次 Run 硬墙钟；定价源与持久 usage/cost 账本尚未接入 | 接入逐调用 usage、可版本化定价源与持久账本；明确并测试预算超限余量，以 fail-closed 处理未知费用；模型、工具、总 Run 超时故障测试和 M8-T6 经单独授权的低预算线上证据通过 |
 | KI-019 | low | closed | C0 | M8-T5 实现提交 `e03f8d6` 已由 `V-20260717-001` 和 M8-T6 handoff 记录，动态 status 同步更新 | 新 verification 或 handoff 记录 `e03f8d6`，并更新动态 status 后通过连续性检查 |
 | KI-020 | low | closed | M10 | Stage 10 的 20% 关键知识表曾把“多 Agent 取舍”误映射到 M10-T5，与实施计划 M10-T4 和实际验证冲突；M10-T5 故障矩阵复审时已修正为 M10-T4 | `V-20260722-005`：Stage 映射修正并通过连续性检查 |
+| KI-021 | low | closed | M10 | M10-T6 恢复审计发现三处动态文档仍停在 M10-T4/T5 提交前措辞，且实施计划“关闭 KI-004/重启恢复”与 accepted ADR 的 M11 PostgreSQL 真重启边界冲突；现已修正动态状态和里程碑措辞，旧 handoff 保持不可变并由新交接澄清 | `V-20260722-007`：课程链接、52 个稳定任务/72 个 Markdown 连续性与完整离线门通过；`KI-004` 正确保留为 mitigated |
 
 ## 状态值
 
