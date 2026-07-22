@@ -68,9 +68,16 @@ stored owner + run
 
 ### 第 3 次：计划与重规划
 
-- 记录计划、已完成步骤、失败分类和尝试次数。
-- retryable 故障允许有限改路；权限和校验错误禁止重试。
-- 验证预算耗尽和循环检测。
+- `ReplanningLangGraphRuntime` 记录 operation 计划、已完成步骤、revision、失败分类、执行次数、重规划次数和历史路径签名；原始问题、工具参数和中间输出不进入 checkpoint。
+- 只有 `retryable=true`、错误码命中服务端白名单、category 安全且步骤无副作用时才允许有限改路。权限、校验、审批、存储和取消错误禁止重规划。
+- 相同操作路径即使更换 step ID 也会触发循环检测；新计划不能重复已完成副作用。结果未知的 pending 副作用返回 `side_effect_resume_unsafe`，不自动重放。
+- 通过以下离线命令执行真实 StateGraph、共享 saver 恢复与 durable Coordinator/EventStore 纵切：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_replanning -v
+```
+
+该纵切使用确定性 planner/executor fixture 验证框架和领域契约，证据最高为本地 E3，不是在线规划质量、进程重启或跨崩溃副作用恰好一次。固定输入、固定规则和无需失败改路的任务仍优先使用普通 Workflow。
 
 ### 第 4 次：多 Agent 对照
 

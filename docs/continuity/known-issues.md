@@ -8,7 +8,7 @@
 | KI-002 | blocker | closed | M9 | M9-T1–T3 已完成真实 SDK 生命周期、可信工具映射，并对构建后的 TypeScript Knowledge Server 执行 initialize、list_tools、有效/无效 call_tool 与关闭；M9-T6 已完成课程和里程碑回归 | `V-20260720-003`：TypeScript MCP STDIO E2E；`V-20260720-009`：M9 40 项聚焦与全量离线门通过 |
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
 | KI-004 | high | mitigated | M10–M11 | M10-T1 已完成版本化 checkpoint；M10-T2 已完成真实 interrupt、服务端审批绑定、批准/拒绝/过期、篡改拒绝、重复 resume 单次消费和同进程新 Runtime 实例恢复；仍缺结果未知故障恢复、进程重启与 PostgreSQL 持久化 | `V-20260720-011`：checkpoint 纵切；`V-20260720-013`：审批恢复专项与全量门；M10-T5 补结果未知故障注入，M11 补 PostgreSQL 重启恢复后再关闭 |
-| KI-005 | high | open | M10–M11 | 上下文选择、记忆注入和动态重规划未进入主 Run | 长对话、记忆纠错与失败重规划评测通过 |
+| KI-005 | high | mitigated | M10–M11 | M10-T3 已把有界动态计划、失败诊断、白名单重规划、预算/循环停止和副作用禁重放接入可注入的 durable Coordinator Run；默认 Container 尚未迁移，上下文选择和记忆注入仍未进入统一主链 | `V-20260722-001`：失败重规划 E3；M11 长对话、记忆纠错与统一上下文评测通过后关闭 |
 | KI-006 | high | open | M11 | pgvector 只有 Fake Connection，没有真实数据库、Embedding 与检索指标 | PostgreSQL/pgvector 集成和固定评测集通过 |
 | KI-007 | high | open | M12 | SSE 在 Run 完成后回放；前端再次调用 Research API 覆盖答案 | 单 Run 真流式、续传和刷新恢复 E2E 通过 |
 | KI-008 | high | open | M12–M13 | M9-T3 已补 TypeScript MCP STDIO 协议自动化；仍缺前端和真实数据库自动化测试及统一分层门 | 分层测试进入统一验证和 CI |

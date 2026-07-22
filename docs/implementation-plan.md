@@ -492,6 +492,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：可重试故障、不重试故障、预算耗尽、取消和循环检测。
 - 验收：固定三步计划被替换为可解释、可恢复的任务状态，但确定性任务仍优先 Workflow。
 
+#### M10-T3 离线实现结果与恢复边界
+
+- 已实现：显式导入的 `ReplanningLangGraphRuntime`，真实执行 `plan -> execute -> diagnose -> replan` StateGraph；结构化 operation、完成步骤、revision、执行/重规划预算、失败分类和计划签名进入版本化 checkpoint。
+- 已实现：`retryable=true`、服务端错误码白名单和安全 category 三重门；权限、校验、审批、存储、取消和副作用失败不重规划。相同操作路径换 step ID 仍触发循环检测，已完成副作用不能进入新计划。
+- 离线证据：动态改路通过实际 `RunCoordinator`、EventStore 和终态 Run；共享 `InMemorySaver` 可恢复被取消的只读 pending step，终态不重放，结果未知副作用 fail closed。这属于同进程 E3。
+- 未实现：默认 Container/HTTP 迁移、真实模型规划质量、多 Agent、持久 ToolExecution 结果仲裁、进程重启和 PostgreSQL 恢复；分别由 M10-T4/M10-T5、M11 与 M12 承接。
+
 ### M10-T4：真实多 Agent 对照
 
 - 依赖：M10-T3、M8-T4。

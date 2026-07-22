@@ -193,3 +193,12 @@
 - Persist `running -> waiting_approval + run.waiting_approval` with `commit_pause()` and `waiting_approval -> running + run.resumed` with `commit_resume()`. Ordinary append rejects both lifecycle event types.
 - Only the actor that creates the resume commit may invoke the Runtime. Tool execution still traverses `ToolRegistry` and consumes the exact Run-bound approval once; rejection, expiry, tampering and replay do not call the handler.
 - Shared `InMemorySaver` and ApprovalStore prove same-process recovery across Runtime instances only. Process restart, multi-process arbitration, durable private arguments and result-unknown side-effect recovery remain PostgreSQL/ToolExecution work for M10-T5 and M11.
+
+## 21. Bounded LangGraph Replanning
+
+- Keep dynamic planning in an explicitly imported Runtime. Structured plans contain only stable server-reviewed step IDs, operation IDs, and side-effect/approval metadata; raw input, arguments, intermediate output, planner objects, executors, emitters, and cancellation controls never enter checkpoint state.
+- `RunFailure.retryable` is necessary but not sufficient for replanning. A failure must also match the server-owned recoverable-code allowlist, avoid auth/authorization, validation, approval, security, storage, and cancellation categories, and originate from a non-side-effecting step.
+- Bound total step executions and replan count independently. A replacement plan must fit the remaining step budget, cannot repeat a completed step ID or completed side-effect operation, and is rejected when its operation signature repeats a prior path even under different cosmetic IDs.
+- Approval-required steps stop before executor invocation and must move through the M10 approval Runtime. Planner metadata never grants authorization; real tool execution still traverses `ToolRegistry` and its trusted context.
+- A terminal checkpoint replays without invoking planner or executor. A pending read-only step may resume from a shared same-process saver; a pending side-effect step has an unknown result and fails closed without replay.
+- `InMemorySaver` remains same-process E3 evidence. Persistent ToolExecution records, result-unknown recovery, process restart, multi-process arbitration, default Container migration, and HTTP APIs remain later tasks.

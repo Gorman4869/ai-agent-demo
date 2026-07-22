@@ -1089,3 +1089,58 @@
 
 - M10-T2 实现提交固定为 `eba696b`；`V-20260720-013` 的审批/Store 42 项、定向 85 项、后端 316 项全量门、失败尝试和同进程证据边界不变。
 - 当前任务为 `M10-T3 / planned`；不重做 checkpoint 或审批 resume，不把内存恢复描述成进程重启，不提前进入 M10-T4。
+
+## V-20260722-001：M10-T3 有界动态计划与失败重规划
+
+- 任务：`M10-T3`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：HEAD `545d5af` 上的 M10-T3 工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类 checkpoint、错误分类与副作用禁重放边界，时间盒 2–4 小时
+- 模式：offline；只执行本地 LangGraph、确定性 planner/executor、内存 Store 和标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用仓库现有 Python 3.12.10、LangGraph 1.2.9 与 langgraph-checkpoint 4.1.1
+
+### 恢复与设计核对
+
+- 开始时 `git status --short` 干净；最近提交为 `545d5af`、`eba696b`、`cdc9436`、`b6dfa0b`、`c4d4efe`、`fdeb9b5`，未重做 M10-T1/T2。
+- 按顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M10-T3/M10-T4、Stage 10、ADR-0003/0006/0007/0011/0012、最新 handoff、V-013/V-014、后端规约和实际 Runtime/RunFailure/ToolResult/Coordinator 代码；代码与记录一致，无需登记漂移。
+- handoff 恢复集通过：审批/Store 42 项、禁用 `site-packages` 的 M1 7 项、52 个稳定任务/66 个 Markdown；无 ResourceWarning。
+- 设计固定为结构化 operation、服务端错误码白名单、auth/validation/approval/security/storage/cancellation 硬停止、独立步骤/重规划预算、忽略 step ID 的循环签名和副作用禁重放；默认 Container、多 Agent、PostgreSQL 与在线模型均排除。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `545d5af`，提交边界正确 |
+| handoff 的审批/Store、M1 与连续性恢复命令 | 0 | 42 项、7 项、52 个任务/66 个 Markdown 通过，代码与记录无漂移 |
+| `.\.venv\Scripts\python.exe -B -c "import backend.app.agent.replanning_runtime"` | 0 | 新 Runtime 显式导入成功，没有修改 `backend.app.agent` 顶层导出 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_replanning -v` | 0 | 首轮 12 项通过；聚焦复审补齐已完成副作用禁重放和 durable Coordinator 纵切后最终 14 项通过 |
+| 6 模块 79 项定向回归（首轮） | 1 | 78 项通过；既有 `test_pre_runtime_delay_consumes_the_total_execution_budget` 的毫秒级 deadline 断言一次读到 Runtime calls=1 |
+| 同一 deadline 单用例 / `test_run_coordinator` 模块 | 0 | 单用例通过；Coordinator 19 项通过，未修改生产 Coordinator 或该测试 |
+| 同一 6 模块 79 项组合重跑 | 0 | 79 项全部通过；既有三条 notifier 负向日志，不含原始异常文本 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_replanning backend.tests.test_langgraph_checkpointing backend.tests.test_langgraph_approval_resume backend.tests.test_run_coordinator backend.tests.test_runtime_contract backend.tests.test_tool_security backend.tests.test_run_store_contract backend.tests.test_skill_context backend.tests.test_framework_runtimes -q` | 0 | 最终 124 项重规划、checkpoint、审批、Coordinator、Runtime、工具、Store、Skill 与框架回归通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，新 LangGraph 模块未污染顶层导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | ADR 加入后 52 个稳定任务、67 个 Markdown 文件通过；最终 handoff 加入后重跑为 52 个任务、68 个 Markdown 文件通过 |
+
+### 实现与安全证据
+
+- `ReplanningLangGraphRuntime` 真实执行 `plan -> execute -> diagnose -> replan` StateGraph；动态失败改路通过 `RunCoordinator`、EventStore 顺序事件和 completed Run，不是 import 或手写等价逻辑。
+- checkpoint 保存 workflow kind/version、owner scope、operation、完成步骤、revision、执行/重规划次数、历史计划摘要、稳定失败和终态；测试 secret、planner/executor、工具参数和中间输出不进入 state。
+- 只有 `retryable=true`、错误码命中服务端白名单、category 非硬拒绝且步骤无副作用时才重规划；错误的 retryable 标记不能绕过 auth 或白名单。
+- 初始与替换计划均受剩余 step budget 约束；max replan、同路径换 step ID、重复完成 step 和重复已完成副作用均产生稳定停止结果。
+- approval step 在 executor 前返回 `approval_step_requires_interrupt`，必须转入 M10-T2 审批 Runtime；planner 元数据不授权工具。
+- 新 Runtime 实例复用共享 saver 时，终态不重跑 planner/executor，被任务取消的只读 pending step可恢复；pending 副作用返回 `side_effect_resume_unsafe` 并记录停止事件，handler 不被再次调用。
+
+### 失败、警告与未验证范围
+
+- 本轮工具会话未提供旧 `exec_command` 名称，首个只读 `git status` 工具调用未执行；改用本轮 `shell_command` 后按恢复顺序重跑成功。
+- AGENTS 首次按 PowerShell 默认编码读取为乱码，随后显式 `-Encoding UTF8` 重读；一次猜错 ADR-0011 文件名、一次猜错 `domain/model.py`、一次针对不存在配置文件和 Windows wildcard 的 formatter 搜索退出 1，均通过 `rg --files`/符号搜索按实际结构修正，没有据此修改业务结论。
+- 79 项组合首轮的既有 deadline 用例只失败一次；单用例、完整 Coordinator 模块和相同组合连续重跑均通过。保留该失败事实，不把它静默改写成首次成功，也没有为通过测试放宽 deadline。
+- 恢复测试出现一次既有 asyncio 慢任务诊断；定向回归出现三条预期 notifier 失败日志。所有最终命令退出 0，无 ResourceWarning。
+- 未运行 `scripts/verify.ps1` 全仓门：本任务新增显式 Runtime/测试/文档，没有修改依赖、锁文件、构建配置、默认 Container、前后端接口或既有共享 Runtime/Store Protocol；124 项风险定向集覆盖实际边界。
+- planner/executor 是确定性离线 fixture，不能描述为真实模型规划质量、Provider 兼容、Token/费用或线上性能。`InMemorySaver` 仍不是进程重启、多进程或 PostgreSQL 证据。
+- 没有持久 ToolExecution 结果仲裁、lease、结果未知恢复扫描、默认主链迁移、HTTP/SSE、多 Agent 或 M10-T5 故障注入；这些保持后续任务边界。
+
+### 结论
+
+- `M10-T3` 达到 `verified`：结构化计划、失败诊断、白名单重规划、步骤/重规划预算、循环检测、取消、审批/副作用停止、同进程 checkpoint 恢复和 durable Coordinator 纵切均有可复现 E3 证据。
+- `KI-005` 更新为 mitigated；下一任务进入 `M10-T4 / planned`，只实现一种真实多 Agent 模式及单 Agent 对照，不提前执行 M10-T5。
