@@ -3,7 +3,7 @@
 - 更新时间：2026-07-22，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`eba696b`
+- 最近已确认实现提交：`e27a8ef`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -20,7 +20,7 @@
 - M9-T6 验证基线提交：`19b5596`；课程提交：`fdeb9b5`
 - M10-T1 验证基线提交：`c4d4efe`；实现提交：`b6dfa0b`
 - M10-T2 验证基线提交：`cdc9436`；实现提交：`eba696b`
-- M10-T3 验证基线提交：`545d5af`；实现提交：待本地提交固定
+- M10-T3 验证基线提交：`545d5af`；实现提交：`e27a8ef`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -34,7 +34,7 @@
 | 设计依据 | `docs/stages/10-durable-langgraph.md`、实施计划 M10-T4、M8-T4 Runtime/Agents SDK 证据、`ADR-0013` 与既有 AgentRuntime/ToolRegistry 契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M10-T3 已完成真实 `plan -> execute -> diagnose -> replan` StateGraph、版本化任务状态、错误码白名单、步骤/重规划预算、循环检测、审批阻断、已完成/结果未知副作用禁重放、同进程只读 checkpoint 恢复和 durable Coordinator/EventStore 纵切；默认 Container 未迁移 |
-| 前置证据 | `V-20260722-001`、`ADR-0013`、`V-20260720-014`、`ADR-0012`、`ADR-0011` |
+| 前置证据 | `V-20260722-002`、`V-20260722-001`、`ADR-0013`、`V-20260720-014`、`ADR-0012`、`ADR-0011` |
 | 下一动作 | 只读审阅实施计划 M10-T4、现有 Agents SDK handoff 拒绝边界、LangGraph/ToolRegistry 角色隔离和 M8-T4 评测 fixture；先固定 manager-as-tools 或 handoff 的单一最小模式、角色契约和单 Agent 对照指标，不提前进入 M10-T5 |
 
 ## 里程碑状态
@@ -86,4 +86,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t3-bounded-replanning.md`，再核对 `V-20260722-001`、`ADR-0013`、`V-20260720-014`、实施计划 M10-T4 和 `docs/stages/10-durable-langgraph.md`。若重规划专项 14 项、M1 7 项与连续性检查仍一致，不要重做 checkpoint、审批或动态重规划；下一步只读审阅 manager-as-tools/handoff 方案、角色工具边界和单 Agent 对照指标，不提前进入 M10-T5。没有用户新的单次授权，不得读取 Key 或执行真实模型。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t3-bounded-replanning.md`，再核对 `V-20260722-002`、`V-20260722-001`、`ADR-0013`、`V-20260720-014`、实施计划 M10-T4 和 `docs/stages/10-durable-langgraph.md`。若重规划专项 14 项、M1 7 项与连续性检查仍一致，不要重做 checkpoint、审批或动态重规划；下一步只读审阅 manager-as-tools/handoff 方案、角色工具边界和单 Agent 对照指标，不提前进入 M10-T5。没有用户新的单次授权，不得读取 Key 或执行真实模型。

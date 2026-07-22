@@ -1144,3 +1144,24 @@
 
 - `M10-T3` 达到 `verified`：结构化计划、失败诊断、白名单重规划、步骤/重规划预算、循环检测、取消、审批/副作用停止、同进程 checkpoint 恢复和 durable Coordinator 纵切均有可复现 E3 证据。
 - `KI-005` 更新为 mitigated；下一任务进入 `M10-T4 / planned`，只实现一种真实多 Agent 模式及单 Agent 对照，不提前执行 M10-T5。
+
+## V-20260722-002：M10-T3 实现提交后恢复锚点
+
+- 任务：`M10-T3`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：实现提交 `e27a8ef`（`feat: add bounded LangGraph replanning`）
+- 模式：offline；只执行本地 LangGraph、确定性 fixture 和标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交后工作区干净；`e27a8ef` 位于 M10-T2 验证锚点 `545d5af` 之后 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_replanning -q` | 0 | handoff 最小恢复集 14 项通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，重规划模块未污染顶层导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、68 个 Markdown 文件通过 |
+
+### 结论
+
+- M10-T3 实现提交固定为 `e27a8ef`；`V-20260722-001` 的专项 14 项、定向 124 项、失败尝试、全量门跳过理由和同进程 E3 边界不变。
+- 当前任务为 `M10-T4 / planned`；不重做 checkpoint、审批或动态重规划，不提前进入 M10-T5，也不把确定性 fixture 描述为真实模型证据。
