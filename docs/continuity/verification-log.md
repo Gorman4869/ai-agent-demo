@@ -1165,3 +1165,58 @@
 
 - M10-T3 实现提交固定为 `e27a8ef`；`V-20260722-001` 的专项 14 项、定向 124 项、失败尝试、全量门跳过理由和同进程 E3 边界不变。
 - 当前任务为 `M10-T4 / planned`；不重做 checkpoint、审批或动态重规划，不提前进入 M10-T5，也不把确定性 fixture 描述为真实模型证据。
+
+## V-20260722-003：M10-T4 Agents SDK Manager-as-Tools 对照
+
+- 任务：`M10-T4`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：HEAD `ae9e3aa` 上的 M10-T4 工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类角色工具隔离、调用预算与失败闭合边界，时间盒 2–4 小时
+- 模式：offline；实际执行本地 OpenAI Agents SDK `Runner.run()`、`Agent.as_tool()`、确定性 Model 与共享 ToolRegistry，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用仓库现有 Python 3.12.10 与 openai-agents 0.18.2
+
+### 恢复与设计核对
+
+- 开始时 `git status --short` 干净；最近提交为 `ae9e3aa`、`e27a8ef`、`545d5af`、`eba696b`、`cdc9436`、`b6dfa0b`，未重做 M10-T1–T3。
+- 按顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M10-T4/M8-T4/M10-T3、Stage 10、ADR-0008/0013、最新 M10-T3 handoff、V-001/V-002、M8-T5 对照 handoff、后端规约和实际 SDK/ToolRegistry/fixture 代码；代码与记录一致，无需登记漂移。
+- handoff 恢复集通过：重规划专项 14 项、禁用 `site-packages` 的 M1 7 项、52 个稳定任务/68 个 Markdown；无 ResourceWarning。
+- 方案固定为独立 manager-as-tools：不改现有 `OpenAIAgentsRuntime` 对 handoff event 的 fail-closed 契约，不接入默认 Container；manager 只能调用 researcher/writer/reviewer，业务工具仍经共享 Registry 快照。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `ae9e3aa`，提交边界正确 |
+| handoff 的重规划、M1 与连续性恢复命令 | 0 | 14 项、7 项、52 个任务/68 个 Markdown 通过，代码与记录无漂移 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.multi_agent`（首次） | 1 | 固定案例在模块导入时先于 `_required_text` 定义构造，触发 `NameError`；前移纯校验函数后修复，Runner 尚未在该次失败中启动 |
+| 同一 Demo（第二次） | 0 | 报告安全记录两组均为 `collaboration_execution_failed`；诊断确认 0.18.2 即使 RunConfig 禁用 Trace 仍先初始化默认 exporter，当前 SOCKS 代理缺可选 `socksio` |
+| 只读 Runner 诊断探针 | 1 | 首个 `python -c` 多行探针因 PowerShell 引号产生 `SyntaxError`；改用 stdin 探针后复现上述 `ImportError`，没有安装依赖或修改代理 |
+| 同一 Demo（禁用的进程本地无 exporter Trace provider 后） | 0 | 最终 3 例两组质量 1.0、失败率 0；manager 27 requests/324 fixture Token/424.656 ms/复杂度 12，单 Agent 9/108/138.526 ms/复杂度 3，结论 `single_agent` |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_multi_agent backend.tests.test_workflow_comparison_eval -v`（首轮） | 0 | 14 项通过；零网络守卫替换 `socket.socket` 类后触发 Windows Proactor 自管道类型错误日志，测试退出仍为 0但不接受该噪声 |
+| 同一 14 项专项（修复守卫后） | 0 | 改为守卫 `create_connection`/`socket.connect`，14 项无异步错误日志、无 ResourceWarning 通过 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_multi_agent backend.tests.test_workflow_comparison_eval backend.tests.test_openai_agents_runtime backend.tests.test_runtime_comparison backend.tests.test_tool_security backend.tests.test_runtime_contract backend.tests.test_langgraph_replanning -q` | 0 | 最终 93 项 SDK、多 Agent、评测、工具安全、Runtime 与重规划定向回归通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，新 SDK 模块保持显式导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 新 handoff 后 52 个稳定任务、69 个 Markdown 文件通过，当前任务已推进到 M10-T5 |
+
+### 实现与安全证据
+
+- `create_manager_as_tools_topology()` 使用公开 `Agent.as_tool()` 构造三个 specialist，公开 `Runner.run()` 实际进入 manager 与嵌套 Agent run；每例模型调用计数固定为 manager 4、researcher 2、writer 1、reviewer 2，不是 import、对象构造或手写等价逻辑。
+- manager 只有三个 orchestration tool，researcher 只有事实查询，writer 无业务工具，reviewer 只有要求检查；manager 无直接业务工具。角色工具来自独立 `ToolRegistry` 快照，身份/角色和 Schema 在执行时重校验，高风险、审批和副作用工具不进入。
+- manager `max_turns=6`，specialist `max_turns=3`；预算专项用 `max_turns=1` 实际得到 `MaxTurnsExceeded`。角色异常不转换为成功答案，评测只记录稳定 `collaboration_execution_failed`，原始异常不进入报告。
+- 每例两种策略都实际执行一次 `lookup_course_fact` 和一次 `check_required_terms`。相同固定输入/事实/要求下质量与失败率相同，多 Agent 没有收益，按任务契约保留单 Agent。
+- 每次 Runner 使用显式禁用 Trace 与敏感 Trace 数据的 RunConfig。独立离线评测进程安装无 exporter 的禁用 provider，零网络守卫通过；该 provider 不是应用组合配置，不能嵌入默认应用进程。
+- 报告不输出事实、答案或异常文本；fixture usage 保持 SDK aggregate 形状，Token 和延迟 scope 明确标注，未猜测费用。
+- `git diff --check` 与连续性检查在 handoff 落盘后执行；任务 ID、当前任务、相对链接和恢复入口保持一致。
+
+### 失败、警告与未验证范围
+
+- 首次 Demo 的定义顺序错误、第二次 Trace exporter/SOCKS 环境失败、首个诊断探针引号错误和首轮 socket 守卫的 Proactor 日志均保留如上；修复后 Demo、14 项专项和 93 项定向集连续退出 0，无警告。
+- 确定性 Model 每次响应写入 8 input/4 output fixture Token，并增加 1 ms delay；SDK aggregate request/Token 是真实框架聚合，但不是 Provider tokenizer、账单或在线 usage，本地 elapsed 也不是生产网络延迟。
+- 没有读取 Key、执行在线 Provider、计算真实费用、验证真实模型角色质量、并发容量或资源清理；费用仍未知而非 0，本轮“费用 0”只表示未发生付费调用。
+- 没有修改依赖、锁文件、默认 Container、共享 Runtime/Store Protocol、前后端 API 或构建配置，因此未执行 `scripts/verify.ps1` 全仓门；93 项定向集覆盖实际代码边界。
+- 没有实现 SDK handoff、默认 Runtime 迁移、RunCoordinator/EventStore 接线或 M10-T5 故障注入。现有 SDK Runtime 对后续 agent update 的拒绝语义不变，真实恢复/结果未知测试继续由 M10-T5/M11 承接。
+
+### 结论
+
+- `M10-T4` 达到 `verified`：真实公开 SDK manager-as-tools 调用链、独立角色指令/工具、共享 ToolRegistry 安全边界、turns 预算、零网络和同任务单 Agent 固定对照均有可复现离线证据。
+- `KI-013` closed；固定集没有质量或失败率收益，结论保留单 Agent。下一任务进入 `M10-T5 / planned`，只做恢复与故障注入，不把本地 fixture 指标描述为在线证据，也不提前进入 M10-T6。

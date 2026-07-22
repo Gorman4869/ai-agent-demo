@@ -202,3 +202,13 @@
 - Approval-required steps stop before executor invocation and must move through the M10 approval Runtime. Planner metadata never grants authorization; real tool execution still traverses `ToolRegistry` and its trusted context.
 - A terminal checkpoint replays without invoking planner or executor. A pending read-only step may resume from a shared same-process saver; a pending side-effect step has an unknown result and fails closed without replay.
 - `InMemorySaver` remains same-process E3 evidence. Persistent ToolExecution records, result-unknown recovery, process restart, multi-process arbitration, default Container migration, and HTTP APIs remain later tasks.
+
+## 22. Manager-as-Tools Comparison
+
+- Keep the M10 multi-Agent comparison explicitly imported and outside the default Container. It is a bounded experiment, not a replacement for `OpenAIAgentsRuntime` or its fail-closed handoff event contract.
+- Build manager-as-tools with the public `Agent.as_tool()` and `Runner.run()` APIs. The manager receives only specialist tools; researcher, writer, and reviewer use distinct instructions and isolated business-tool snapshots.
+- Build every role tool through the shared `build_sdk_tools()` and `ToolRegistry` boundary. Role filtering, Schema validation, low-risk policy, cancellation context, and repeated execution authorization remain application-owned; manager input cannot create identity, roles, approval, or new tools.
+- Give both manager and nested specialists explicit turn limits. Specialist failures propagate instead of becoming a successful answer, and the single-Agent control receives the same business tools and fixed cases.
+- Every run still uses `RunConfig(tracing_disabled=True, trace_include_sensitive_data=False)`. The standalone offline evaluator installs a process-local disabled trace provider before calling the SDK so the locked SDK cannot initialize its default exporter; do not embed this evaluator in the application process or overwrite an application trace provider.
+- Compare quality, failure rate, local elapsed time, aggregate fixture usage, and topology complexity separately. Deterministic Model usage is not Provider Token or billing evidence, local latency is not production latency, and unknown online cost remains `None`.
+- Retain the single-Agent design when the fixed set has no quality or failure-rate gain. Handoff, default Runtime migration, online quality, persistent usage/cost, and recovery fault injection remain separate tasks.

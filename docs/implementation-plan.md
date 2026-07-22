@@ -506,6 +506,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 评测：质量、延迟、Token、失败率和复杂度对比；没有收益时保留单 Agent 结论。
 - 关闭目标：KI-013。
 
+#### M10-T4 离线实现结果与恢复边界
+
+- 已实现：显式导入的 OpenAI Agents SDK manager-as-tools；manager 只持有 researcher、writer、reviewer 三个 `Agent.as_tool()`，角色使用独立指令和隔离工具集，并由公开 `Runner.run()` 实际执行嵌套调用。
+- 已实现：研究与审查工具继续由共享 `ToolRegistry`、可信 Run context 和 `build_sdk_tools()` 快照提供；writer 无业务工具，manager 无直接业务工具；高风险、审批和副作用工具保持 fail closed。
+- 对照结论：3 个固定课程案例中，多 Agent 与同工具单 Agent 的质量均为 1.0、失败率均为 0；多 Agent 每例 9 次 fixture model request/108 fixture Token、复杂度 12，单 Agent 为 3 次/36 Token、复杂度 3，本地延迟也更高，因此保留单 Agent。
+- 证据边界：这是实际 SDK 公开编排路径加确定性离线 Model/usage 的 E2，以及共享工具安全边界的本地 E3；不是 Provider Token、账单、线上质量或生产延迟证据。默认 Container、现有 SDK Runtime handoff 拒绝语义和 HTTP/SSE 均未迁移。
+
 ### M10-T5：恢复与故障注入测试
 
 - 依赖：M10-T2、M10-T3。

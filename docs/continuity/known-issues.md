@@ -16,7 +16,7 @@
 | KI-010 | high | open | M14 | 浏览器审批未绑定完整 URL/计划，且缺少私网、DNS 与重定向防护 | 真实浏览器安全和 SSRF 测试通过 |
 | KI-011 | high | open | M13–M14 | 代码 Agent 在截断前完整缓冲输出，超时未证明清理进程树 | 有界流式输出和进程树测试通过 |
 | KI-012 | medium | closed | C0 | M1 文档零依赖命令、硬编码 Python 路径、测试数量与当前实现漂移 | `V-20260716-001`：删除硬编码路径和固定测试数；禁用 `site-packages` 后 7 项测试与 Demo 通过 |
-| KI-013 | medium | open | M10 | 当前多 Agent 是确定性节点，没有真实角色、handoff 和单 Agent 对照 | 多 Agent 与单 Agent 固定评测完成 |
+| KI-013 | medium | closed | M10 | M10-T4 已通过公开 `Agent.as_tool()`/`Runner.run()` 实现 researcher、writer、reviewer manager-as-tools，并与同工具单 Agent 完成固定质量、失败率、本地延迟、fixture usage 和复杂度对照；无质量收益，保留单 Agent | `V-20260722-003`：14 项专项与 93 项定向回归通过，固定 3 例对照完成 |
 | KI-014 | medium | open | M11 | ConversationMemory 未接入 Run 且不持久化 | Agent 上下文读取、纠正、删除和重启恢复通过 |
 | KI-015 | high | mitigated | M8–M11 | M8-T3 已用 StartCommit/TerminalCommit 固定一次提交协议，并在内存 Run→Event 锁对内原子发布；PostgreSQL 同事务、多进程和连接结果未知重试尚未验证 | M11 PostgreSQL 继承合同测试，并通过同事务 CAS、精确重放、连接中断和多进程终态竞争 |
 | KI-016 | high | open | M11–M13 | Runtime 开始后的过程事件 Store 故障或进程退出会保留 running Run；当前选择 fail closed，不通知、不伪造终态，但尚无 lease、恢复扫描和安全重调度 | 持久 lease/heartbeat、RunRecoveryService、结果未知重试与重启恢复测试通过 |

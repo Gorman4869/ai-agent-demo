@@ -81,9 +81,16 @@ stored owner + run
 
 ### 第 4 次：多 Agent 对照
 
-- 建立独立 researcher、writer、reviewer 指令和输出契约。
-- 对比单 Agent、manager 和 handoff 的质量、调用数、延迟和成本。
-- 如果没有收益，报告保留单 Agent 结论。
+- `create_manager_as_tools_topology()` 建立独立 researcher、writer、reviewer：manager 只调用三个 `Agent.as_tool()`，researcher 只有固定事实查询工具，writer 没有业务工具，reviewer 只有要求检查工具。
+- `run_offline_multi_agent_comparison()` 对三个固定课程问题分别运行真实 `Runner.run()` manager-as-tools 和同工具单 Agent。每次嵌套角色执行都受 turns 上限、无 Trace 配置和共享 `ToolRegistry` 权限/Schema 边界约束。
+- 当前固定集两组质量均为 1.0、失败率均为 0。manager 每例 9 次 fixture request/108 fixture Token、复杂度 12；单 Agent每例 3 次/36 Token、复杂度 3，本地实测延迟也更低，因此结论保留单 Agent。
+- 运行完整可复现实验：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -m backend.app.evals.multi_agent
+```
+
+输出中的 `E2_offline_fixture`、`local_runner_with_fixture_model_delay` 和 `deterministic_fixture_usage_not_provider_billing` 是证据范围，不是在线 Provider、真实 tokenizer、账单或生产容量。manager-as-tools 不修改现有 `OpenAIAgentsRuntime` 对 handoff event 的 fail-closed 处理，也不进入默认 Container。
 
 ## 计划验证命令
 
