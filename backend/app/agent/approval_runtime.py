@@ -17,6 +17,7 @@ from backend.app.agent.runtime import (
     RuntimeApprovalPause,
     RuntimeApprovalResume,
     RuntimeControl,
+    RuntimeEvent,
     RuntimeEventSink,
     RuntimeOutcome,
     RuntimeRequest,
@@ -79,6 +80,7 @@ class _ApprovalContext:
     registry: ToolRegistry = field(repr=False)
     request: RuntimeRequest = field(repr=False)
     control: RuntimeControl = field(repr=False)
+    emit: RuntimeEventSink = field(repr=False)
     planned_call: PlannedToolCall | None = field(default=None, repr=False)
     approval_ttl: timedelta = field(
         default=timedelta(minutes=15),
@@ -124,7 +126,6 @@ class ApprovalLangGraphRuntime:
         emit: RuntimeEventSink,
         control: RuntimeControl,
     ) -> RuntimeOutcome:
-        del emit
         context_failure = self._validate_execution_context(request)
         if context_failure is not None:
             return context_failure
@@ -169,6 +170,7 @@ class ApprovalLangGraphRuntime:
                 registry=self._registry,
                 request=request,
                 control=control,
+                emit=emit,
                 planned_call=planned_call,
                 approval_ttl=self._approval_ttl,
             ),
@@ -182,7 +184,6 @@ class ApprovalLangGraphRuntime:
         emit: RuntimeEventSink,
         control: RuntimeControl,
     ) -> RuntimeOutcome:
-        del emit
         context_failure = self._validate_execution_context(request)
         if context_failure is not None:
             return context_failure
@@ -225,6 +226,7 @@ class ApprovalLangGraphRuntime:
                 registry=self._registry,
                 request=request,
                 control=control,
+                emit=emit,
             ),
         )
 
@@ -458,6 +460,30 @@ async def _execute_approved_call(
         call_id=resolution.request.tool_call_id,
     )
     if not result.ok:
+        if (
+            result.error_code == "approval_required"
+            and result.error_details is not None
+            and result.error_details.get("reason")
+            == "approval_already_consumed"
+        ):
+            await context.emit(
+                RuntimeEvent(
+                    type="approval.stopped",
+                    step=1,
+                    data={
+                        "reason": "side_effect_outcome_unknown",
+                        "error_code": "side_effect_resume_unsafe",
+                        "tool_name": resolution.request.tool_name,
+                    },
+                )
+            )
+            return _failure_state(
+                code="side_effect_resume_unsafe",
+                category="workflow",
+                public_message=(
+                    "Approved tool outcome is unknown and was not replayed"
+                ),
+            )
         return _failure_state(
             code=result.error_code or "tool_execution_failed",
             category="tool",

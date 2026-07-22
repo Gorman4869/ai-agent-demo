@@ -7,7 +7,7 @@
 | KI-001 | blocker | mitigated | M8 | M8-T4/M8-T5 已完成 SDK 适配与共享契约，M8-T6 已完成双重授权门和 E3 离线纵切，M8-T7 已完成课程材料与全量离线门；没有新的单次授权，真实线上流式、工具与 usage 仍未执行 | M8-T4/M8-T5 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
 | KI-002 | blocker | closed | M9 | M9-T1–T3 已完成真实 SDK 生命周期、可信工具映射，并对构建后的 TypeScript Knowledge Server 执行 initialize、list_tools、有效/无效 call_tool 与关闭；M9-T6 已完成课程和里程碑回归 | `V-20260720-003`：TypeScript MCP STDIO E2E；`V-20260720-009`：M9 40 项聚焦与全量离线门通过 |
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
-| KI-004 | high | mitigated | M10–M11 | M10-T1 已完成版本化 checkpoint；M10-T2 已完成真实 interrupt、服务端审批绑定、批准/拒绝/过期、篡改拒绝、重复 resume 单次消费和同进程新 Runtime 实例恢复；仍缺结果未知故障恢复、进程重启与 PostgreSQL 持久化 | `V-20260720-011`：checkpoint 纵切；`V-20260720-013`：审批恢复专项与全量门；M10-T5 补结果未知故障注入，M11 补 PostgreSQL 重启恢复后再关闭 |
+| KI-004 | high | mitigated | M10–M11 | M10-T1/T2 已完成版本化 checkpoint、真实 interrupt、服务端审批绑定和同进程恢复；M10-T5 已对 checkpoint 损坏、timeout、审批等待与两条结果未知副作用路径注入故障，确认 handler 不重放且产生稳定终态/诊断。仍缺持久 ToolExecution、lease、恢复扫描、进程重启与 PostgreSQL | `V-20260720-011`、`V-20260720-013` 与 `V-20260722-005`；M11 完成 PostgreSQL/ToolExecution 重启恢复后再关闭 |
 | KI-005 | high | mitigated | M10–M11 | M10-T3 已把有界动态计划、失败诊断、白名单重规划、预算/循环停止和副作用禁重放接入可注入的 durable Coordinator Run；默认 Container 尚未迁移，上下文选择和记忆注入仍未进入统一主链 | `V-20260722-001`：失败重规划 E3；M11 长对话、记忆纠错与统一上下文评测通过后关闭 |
 | KI-006 | high | open | M11 | pgvector 只有 Fake Connection，没有真实数据库、Embedding 与检索指标 | PostgreSQL/pgvector 集成和固定评测集通过 |
 | KI-007 | high | open | M12 | SSE 在 Run 完成后回放；前端再次调用 Research API 覆盖答案 | 单 Run 真流式、续传和刷新恢复 E2E 通过 |
@@ -23,6 +23,7 @@
 | KI-017 | medium | open | M8–M13 | ManualRuntime 在同步 Loop 完成后回放过程事件；OpenAI Agents SDK 适配器尚未实现 M10 审批暂停协议，仍拒绝审批、写入和其他副作用工具，但允许的只读同步 handler 仍通过 `asyncio.to_thread` 执行。Run 取消可丢弃结果，却不能硬停止底层线程，线程可能在终态后继续运行并占用默认 executor | 真实 async Runtime 成为主链；同步工具使用隔离且有界的 executor 或进程，并通过协作取消、工具超时、取消后清理与副作用测试 |
 | KI-018 | high | open | M8–M13 | 当前 `max_turns` 仅粗略约束模型调用；SDK 聚合 request/input usage 只能在流结束后校验，可能超出一个请求，`max_cost_usd` 尚未计算或强制执行。M9-T5 只增加明确标注的 Skill 上下文字节与 `ceil(bytes / 4)` Token 启发式，不是 Provider usage 或费用。`AsyncOpenAI` HTTP timeout 只约束提供方传输请求，不是覆盖模型、工具和清理阶段的整次 Run 硬墙钟；定价源与持久 usage/cost 账本尚未接入 | 接入逐调用 usage、可版本化定价源与持久账本；明确并测试预算超限余量，以 fail-closed 处理未知费用；模型、工具、总 Run 超时故障测试和 M8-T6 经单独授权的低预算线上证据通过 |
 | KI-019 | low | closed | C0 | M8-T5 实现提交 `e03f8d6` 已由 `V-20260717-001` 和 M8-T6 handoff 记录，动态 status 同步更新 | 新 verification 或 handoff 记录 `e03f8d6`，并更新动态 status 后通过连续性检查 |
+| KI-020 | low | closed | M10 | Stage 10 的 20% 关键知识表曾把“多 Agent 取舍”误映射到 M10-T5，与实施计划 M10-T4 和实际验证冲突；M10-T5 故障矩阵复审时已修正为 M10-T4 | `V-20260722-005`：Stage 映射修正并通过连续性检查 |
 
 ## 状态值
 

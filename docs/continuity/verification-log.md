@@ -1242,3 +1242,59 @@
 
 - M10-T4 实现提交固定为 `abdc409`；`V-20260722-003` 的 14 项专项、93 项定向回归、失败尝试、单 Agent 结论和离线 E2/E3 边界不变。
 - 当前任务为 `M10-T5 / planned`；不重做 manager-as-tools，不接入默认 Runtime，不提前进入 M10-T6，也不把 fixture usage/延迟描述为 Provider 或生产证据。
+
+## V-20260722-005：M10-T5 恢复与故障注入
+
+- 任务：`M10-T5`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：HEAD `7538fb4` 上的 M10-T5 工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类 checkpoint、审批副作用与恢复诊断边界，时间盒 2–4 小时
+- 模式：offline；只执行本地 LangGraph、确定性 fixture、故障 saver、内存 Store 和 ToolRegistry，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；使用仓库现有 Python 3.12.10、LangGraph 1.2.9 与 langgraph-checkpoint 4.1.1
+
+### 恢复与故障矩阵
+
+- 开始时 `git status --short` 干净；最近提交为 `7538fb4`、`abdc409`、`ae9e3aa`、`e27a8ef`、`545d5af`、`eba696b`，未重做 M10-T1–T4。
+- 按顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M10-T5 及依赖、Stage 10、ADR-0011/0012/0013、最新 handoff、V-003/V-004、后端规约和实际 checkpoint/approval/replanning 代码与测试；代码和记录一致，无需登记漂移。
+- handoff 恢复集通过：M10-T4 Demo 仍选择 single Agent，多 Agent专项 14 项、禁用 `site-packages` 的 M1 7 项、52 个稳定任务/69 个 Markdown 通过。
+- 故障矩阵固定为 10 个场景：checkpoint 读取不可用/状态损坏；只读 step 中断/timeout；审批等待换实例/丢 checkpoint/取消；重规划 pending 副作用；审批后 checkpoint 写失败；副作用 timeout。PostgreSQL、进程重启、lease 和恢复扫描明确排除。
+- 复审发现 Stage 10 曾把“多 Agent 取舍”误映射到 M10-T5，而实施计划和实际证据均为 M10-T4；先登记 `KI-020` 并修正映射，未改变任务编号或实现范围。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `7538fb4`，提交边界正确 |
+| M10-T4 handoff 的 Demo、14 项专项、M1 与连续性恢复命令 | 0 | 固定 3 例仍选择 single Agent；14 项、7 项、52 个任务/69 个 Markdown 通过，无 ResourceWarning |
+| `rg`/`Get-Content` 两次只读路径探查 | 1 | 首次猜错三项测试文件名，第二次猜错 ADR 标题后缀；均用 `rg --files` 按真实文件名纠正，没有据此修改结论 |
+| `... -m unittest backend.tests.test_langgraph_recovery_faults -v`（首轮） | 1 | 测试模块默认参数先于 `_approval_planner` 定义求值，导入时报 `NameError`；改为运行时解析后重跑 |
+| 同一故障专项（第二轮） | 1 | 10 项中 8 项通过；终态事件字段断言应为既有 `failure_code`，单次 saver 写故障未阻断后续成功 checkpoint 写入 |
+| 同一故障专项（夹具修正后） | 0 | 本 invocation 全程阻断写入、恢复前解除，真实保留结果未知窗口；10 项全部通过，无 ResourceWarning |
+| `... -m unittest backend.tests.test_langgraph_approval_resume -q` | 0 | 既有审批正常、拒绝、过期、重复、换 Runtime 与取消 10 项通过 |
+| checkpoint、approval、replanning 与 recovery 4 模块组合 | 0 | 44 项核心回归通过，无 ResourceWarning |
+| `... -m unittest backend.tests.test_langgraph_checkpointing backend.tests.test_langgraph_approval_resume backend.tests.test_langgraph_replanning backend.tests.test_langgraph_recovery_faults backend.tests.test_run_coordinator backend.tests.test_run_store_contract backend.tests.test_tool_security backend.tests.test_multi_agent backend.tests.test_workflow_comparison_eval -q` | 0 | 最终 123 项 M10-T1–T5、Coordinator、Store、ToolRegistry 与多 Agent 对照定向回归通过；三行 notifier 失败日志来自既有负向用例 |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，新测试和专用 LangGraph 模块未污染顶层导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 新 handoff 后 52 个稳定任务、70 个 Markdown 文件通过，当前任务推进到 M10-T6 |
+
+### 实现与安全证据
+
+- `_FailAfterEffectSaver` 在审批 handler 完成后阻断本 invocation 的 checkpoint 写入，使 graph 保持在 interrupt 前快照；解除故障后由新 Runtime 复用同一 saver/store 恢复，实际进入单次 grant 已消费分支。
+- 已消费 grant 且 checkpoint 未终结时，审批 Runtime 返回 `side_effect_resume_unsafe`、发出 `approval.stopped`，handler 调用列表仍只有一项；不再把结果未知退化成可再次尝试的普通审批错误。
+- 重规划 pending 副作用在任务取消后由新 Runtime 读取共享 saver，返回 `side_effect_resume_unsafe`、发出 `plan.stopped`，新 executor 调用数为 0。
+- checkpoint 读取不可用时 delegate 调用数为 0；损坏重规划 checkpoint 通过真实 Coordinator 形成 `run.started -> run.failed`，planner/executor 均不运行。
+- 只读 pending step 可由新 Runtime 恢复；只读 `tool_timeout` 只在白名单、retryable 和预算均满足时改路。副作用 step 即使返回可重试 timeout 也产生 `side_effect_replan_forbidden`/`plan.stopped`，planner 不再次调用。
+- 审批等待可由共享 saver/store 的新 Runtime 恢复一次；换成空 saver 返回 `approval_checkpoint_missing`，取消 waiting Run 形成 `run.cancelled`，两者 handler 都不运行。
+
+### 失败、警告与未验证范围
+
+- 测试模块导入失败和第二轮两个夹具错误均如上保留；生产分支修复后，专项、44 项核心和 123 项定向集连续退出 0。
+- `git diff` 与 formatter 搜索组合命令因仓库没有对应 formatter 配置而整体退出 1；其中 `git diff --check` 无 whitespace 报错，最终仍以实际测试、后续 diff 审查和连续性检查验收。
+- `InMemorySaver` 故障只模拟同进程 checkpoint 写不可用，不是操作系统 kill、PostgreSQL、网络分区或多进程证据。单次 approval 消费证明 at-most-once；消费后、handler 前退出仍可能未执行，不能宣称 exactly-once。
+- 未实现持久 ToolExecution 结果、lease、恢复扫描、私有参数重启恢复、默认 Container 或 HTTP/SSE 迁移；这些保持 M11/M12 边界。
+- 未运行 `scripts/verify.ps1` 全仓门：没有依赖、锁文件、构建配置、默认组合根、前后端 API 或公共 Runtime/Store Protocol 变化；123 项定向集覆盖本任务风险，M10-T6 里程碑验收再执行完整门。
+- 没有读取 Key、执行在线 Provider、产生费用或验证生产容量。所有结论最高为同进程本地 E3。
+
+### 结论
+
+- `M10-T5` 达到 `verified`：checkpoint/interrupt/replanning 的中断、换实例、timeout、审批等待、损坏状态和结果未知副作用均有可复现故障证据；可安全恢复则继续，不可安全恢复则明确停止并诊断，副作用不重复。
+- `KI-004` 保持 mitigated，M11 仍需 PostgreSQL、持久 ToolExecution、lease、恢复扫描和真实进程重启才能关闭。下一任务进入 `M10-T6 / planned`，只做 M10 课程汇总与里程碑验收，不提前实现 M11。

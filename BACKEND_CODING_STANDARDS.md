@@ -192,7 +192,7 @@
 - Split the graph into a side-effect-free request preparation node and an interrupting execution node. Resume only with `Command(resume=...)` after validating the stored checkpoint and server resolution; never rerun the planner to reconstruct an approved call.
 - Persist `running -> waiting_approval + run.waiting_approval` with `commit_pause()` and `waiting_approval -> running + run.resumed` with `commit_resume()`. Ordinary append rejects both lifecycle event types.
 - Only the actor that creates the resume commit may invoke the Runtime. Tool execution still traverses `ToolRegistry` and consumes the exact Run-bound approval once; rejection, expiry, tampering and replay do not call the handler.
-- Shared `InMemorySaver` and ApprovalStore prove same-process recovery across Runtime instances only. Process restart, multi-process arbitration, durable private arguments and result-unknown side-effect recovery remain PostgreSQL/ToolExecution work for M10-T5 and M11.
+- Treat an already-consumed approval with a non-terminal checkpoint as an unknown side-effect outcome: return `side_effect_resume_unsafe`, emit `approval.stopped`, and never call the handler again. Shared `InMemorySaver` and ApprovalStore prove same-process recovery across Runtime instances only; process restart, multi-process arbitration, durable private arguments, persistent ToolExecution results and recovery scanning remain M11 work.
 
 ## 21. Bounded LangGraph Replanning
 

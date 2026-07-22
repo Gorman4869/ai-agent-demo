@@ -19,7 +19,7 @@
 | 必学 | 错误分类与重规划预算 | 工具故障 | 不循环、不乱重试 | M10-T3 |
 | 高频 | manager 与 handoff | 多角色任务 | 能对比并选择 | M10-T4 |
 | 易错 | checkpoint 等同 EventStore | 恢复设计 | 能说明快照与流水的区别 | 自测 |
-| 易错 | 多 Agent 一定优于单 Agent | 架构评审 | 用数据而非角色数量判断 | M10-T5 |
+| 易错 | 多 Agent 一定优于单 Agent | 架构评审 | 用数据而非角色数量判断 | M10-T4 |
 
 ## 跟练顺序
 
@@ -92,12 +92,33 @@ stored owner + run
 
 输出中的 `E2_offline_fixture`、`local_runner_with_fixture_model_delay` 和 `deterministic_fixture_usage_not_provider_billing` 是证据范围，不是在线 Provider、真实 tokenizer、账单或生产容量。manager-as-tools 不修改现有 `OpenAIAgentsRuntime` 对 handoff event 的 fail-closed 处理，也不进入默认 Container。
 
+### 第 5 次：恢复故障矩阵
+
+M10-T5 用 10 个确定性场景对三个纵切做故障注入：
+
+| 边界 | 注入点 | 安全结果 |
+| --- | --- | --- |
+| Checkpoint | 读取不可用、状态损坏 | delegate/planner/executor 不运行，Run 以稳定失败和 `run.failed` 结束 |
+| 只读重规划 | step 执行中断、`tool_timeout` | 共享 saver 可由新 Runtime 恢复；timeout 只在白名单与预算内改路 |
+| 审批等待 | 换 Runtime、取消、丢 saver | 只消费一次；取消或缺 checkpoint 时 handler 不运行 |
+| 结果未知副作用 | 重规划 step 中断、审批后 checkpoint 写失败 | 不重放；返回 `side_effect_resume_unsafe` 并记录 `plan.stopped` 或 `approval.stopped` |
+| 副作用 timeout | executor 返回可重试 timeout | 仍禁止重规划，记录 `plan.stopped` |
+
+执行专项：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_recovery_faults -v
+```
+
+故障 saver 只在测试进程内阻断 checkpoint 写入，用来保留“handler 已发生、graph 仍停在 interrupt”的窗口。它不是 PostgreSQL 或进程崩溃模拟器；M11 才实现持久 ToolExecution、lease、恢复扫描和真实进程重启验收。
+
 ## 计划验证命令
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_langgraph_checkpointing -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_langgraph_approval_resume -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_langgraph_replanning -v
+.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_langgraph_recovery_faults -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_multi_agent -v
 .\.venv\Scripts\python.exe -B -m unittest backend.tests.test_workflow_comparison_eval -v
 ```

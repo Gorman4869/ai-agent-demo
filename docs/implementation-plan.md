@@ -519,6 +519,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：中断、新 Runtime 实例复用同一 checkpointer、工具超时、审批等待和 checkpoint 损坏测试。
 - 验收：副作用不重复；无法安全恢复时产生明确终态和诊断事件；进程重启能力明确列为 M11 前置缺口。
 
+#### M10-T5 离线实现结果与恢复边界
+
+- 已实现：10 项独立故障矩阵覆盖 checkpoint 读取不可用/状态损坏、只读 pending step 中断后换 Runtime 恢复、只读工具 timeout 改路、审批等待换 Runtime 恢复/取消/丢 checkpoint，以及重规划和审批两条结果未知副作用路径。
+- 已实现：审批 handler 已完成但 checkpoint 写失败时，单次 approval 已被消费；后续 Runtime 返回 `side_effect_resume_unsafe`、发出 `approval.stopped`，且不再次调用 handler。重规划 pending 副作用继续返回同一稳定终态并发出 `plan.stopped`。
+- 离线证据：实际 `StateGraph`、`InMemorySaver` 故障 saver、`RunCoordinator`、EventStore 和 `ToolRegistry` 均执行；专项 10 项、受影响定向 123 项和 M1 隔离 7 项通过。这是同进程 E3，不是操作系统进程重启、跨进程或 exactly-once 证据。
+- 未实现：PostgreSQL checkpointer/Store、持久 ToolExecution 结果、lease、恢复扫描、私有参数重启恢复和默认 Container 迁移；这些分别由 M11/M12 承接。
+
 ### M10-T6：M10 跟练与验收
 
 - 依赖：M10-T1 至 M10-T5。
