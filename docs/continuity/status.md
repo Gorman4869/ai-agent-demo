@@ -24,6 +24,7 @@
 - M10-T4 验证基线提交：`ae9e3aa`；实现提交：`abdc409`
 - M10-T5 验证基线提交：`7538fb4`；实现提交：`1e332f3`
 - M10-T6 验证基线提交：`07741db`；课程提交：`1766875`
+- M11-T1 首个纵切验证基线提交：`8af705b`；实现提交待本轮本地 commit 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -32,13 +33,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M11-T1` |
-| 状态 | `planned` |
+| 状态 | `in_progress` |
 | 目标 | 设计并实现版本化 PostgreSQL migration、Run/Event/Approval/Memory Store、LangGraph checkpointer、连接生命周期和事务边界 |
 | 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、现有 Store Protocol 与 M10 checkpoint/审批契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M10-T6 已汇总三张状态图、四次跟练、排错矩阵、题库、评分、速查表和费曼任务；58 项 M10 聚焦测试及完整离线门通过，M10 里程碑达到 `verified`；`KI-004` 因仍缺 PostgreSQL 真重启而保持 mitigated |
-| 前置证据 | `V-20260722-008`、`V-20260722-007`、`V-20260722-005`、`ADR-0013`、`ADR-0012`、`ADR-0011` |
-| 下一动作 | 开始 M11-T1 前只读审阅现有 Run/Event/Approval/Memory Store Protocol、数据库连接与 migration 目录、相关 ADR 和 Docker 可用性，先固定内存/PostgreSQL 共同契约与最小数据库恢复纵切；未经授权不安装依赖、不启动在线服务 |
+| 当前修改 | 已完成 M11-T1 首个真实 PostgreSQL 纵切：版本化 migration、Run/Event Store 同事务、官方 AsyncPostgresSaver、两个 OS 进程 checkpoint 恢复、数据库不可用 fail closed；真实 PostgreSQL 集成 35 项、受影响回归 71 项和完整发布门通过 |
+| 前置证据 | `V-20260722-009`、`V-20260722-008`、`ADR-0012`、`ADR-0011`、`ADR-0006`、`ADR-0004` |
+| 下一动作 | 继续 M11-T1 的下一条原子纵切：为 ApprovalStore/MemoryStore 增加 PostgreSQL migration、适配器和共同合同，并持久化审批恢复所需私有参数；暂不进入 ToolExecution、lease、默认 Container 或 M11-T2 pgvector |
 
 ## 里程碑状态
 
@@ -49,19 +50,23 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `planned` | 依赖 M10 状态和 Store 协议 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 首个 PostgreSQL Run/Event/checkpoint 纵切已落盘并通过真实容器验证；Approval/Memory、ToolExecution、lease、默认主链及 M11-T2 以后任务尚未完成 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- Docker Engine 未运行；不阻塞文档和离线测试，但阻塞容器、PostgreSQL/pgvector 和 Nginx 实际验收。
+- Docker Engine 已由用户启动，本轮授权的本地 PostgreSQL 17.10 测试容器健康运行；这不是持续可用或生产部署证据，后续会话仍须先检查实际状态。
 - 真实模型在线冒烟测试尚未获得单次执行授权；不阻塞离线实现与测试。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
 ## 未验证范围
 
+- M11-T1 首个纵切见 `V-20260722-009`：真实 PostgreSQL migration/Run/Event/checkpointer 集成 35 项、受影响 Store/Coordinator/LangGraph 回归 71 项、M1 隔离 7 项和完整发布门通过；发布门后端 354 项通过、1 项既有 Windows symlink 能力跳过。
+- 两个 PID 不同的 Python 进程已通过官方 AsyncPostgresSaver 恢复同一可信 thread，但没有验证数据库容器重启、跨主机、同 thread 并发写、多进程终态竞争或生产容量。PostgreSQL Approval/Memory、持久私有审批参数、ToolExecution 结果仲裁、lease/recovery scanning 和默认 Container 仍未实现，M11-T1 保持 `in_progress`。
+- 本地 Compose 使用仅绑定 `127.0.0.1` 的 trust/tmpfs 测试实例；它不是生产鉴权、持久卷、备份、TLS、高可用或灾备证据。没有读取 Key、调用在线模型或产生付费调用。
+- M11 发布门沙箱首轮在后端 354 项、受控代码 Agent 和依赖检查通过后，因拒绝写入 Vue `tsconfig.app.tsbuildinfo` 以 `TS5033`/`EPERM` 退出 1；相同脚本经工作区构建权限批准后完整退出 0。后端仍有一条既有 `StarletteDeprecationWarning`。
 - M10-T6 见 `V-20260722-007`：M10 聚焦 58 项通过；完整离线门的后端 354 项通过、1 项因 Windows 符号链接能力跳过，受控代码 Agent、依赖检查、Vue 生产构建、MCP TypeScript 构建和 Compose 配置均通过。
 - 完整门沙箱首轮在后端 354 项、受控代码 Agent 和依赖检查通过后，因拒绝写入 Vue `tsconfig.app.tsbuildinfo` 以 `EPERM` 退出 1；相同脚本经工作区构建权限批准后退出 0。首次失败和最终通过均保留，另有一条既有 `StarletteDeprecationWarning`。
 - M10 工程里程碑已 `verified`，但所有模型与多 Agent 结论仍来自确定性离线 fixture；没有在线 Provider、真实 Token/账单、生产质量或容量证据。真正操作系统进程重启、PostgreSQL checkpointer、持久 ToolExecution、lease 和恢复扫描由 M11 承接。
@@ -99,4 +104,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t6-course-acceptance.md`，再核对 `V-20260722-008`、`V-20260722-007`、`ADR-0011`、`ADR-0012`、实施计划 M11-T1 和现有 Store Protocol。若 M10 聚焦 58 项、M1 7 项与连续性检查仍一致，不要重做 M10；下一步只读固定 M11-T1 的内存/PostgreSQL 共同契约和最小数据库恢复纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线调用或扩大范围。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m11-t1-postgres-run-event-checkpoint.md`，再核对 `V-20260722-009`、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、实施计划 M11-T1 和实际 PostgreSQL Store。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 35 项、M1 7 项和连续性检查；若一致，不要重做首个纵切，下一步只做 PostgreSQL Approval/Memory。没有用户新的明确授权，不得读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T2。

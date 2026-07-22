@@ -7,7 +7,7 @@
 | KI-001 | blocker | mitigated | M8 | M8-T4/M8-T5 已完成 SDK 适配与共享契约，M8-T6 已完成双重授权门和 E3 离线纵切，M8-T7 已完成课程材料与全量离线门；没有新的单次授权，真实线上流式、工具与 usage 仍未执行 | M8-T4/M8-T5 离线契约与 M8-T6 经单独授权的线上流式/工具冒烟均通过 |
 | KI-002 | blocker | closed | M9 | M9-T1–T3 已完成真实 SDK 生命周期、可信工具映射，并对构建后的 TypeScript Knowledge Server 执行 initialize、list_tools、有效/无效 call_tool 与关闭；M9-T6 已完成课程和里程碑回归 | `V-20260720-003`：TypeScript MCP STDIO E2E；`V-20260720-009`：M9 40 项聚焦与全量离线门通过 |
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
-| KI-004 | high | mitigated | M10–M11 | M10-T1/T2 已完成版本化 checkpoint、真实 interrupt、服务端审批绑定和同进程恢复；M10-T5 已对 checkpoint 损坏、timeout、审批等待与两条结果未知副作用路径注入故障，确认 handler 不重放且产生稳定终态/诊断。仍缺持久 ToolExecution、lease、恢复扫描、进程重启与 PostgreSQL | `V-20260720-011`、`V-20260720-013` 与 `V-20260722-005`；M11 完成 PostgreSQL/ToolExecution 重启恢复后再关闭 |
+| KI-004 | high | mitigated | M10–M11 | M10-T1/T2 已完成版本化 checkpoint、真实 interrupt、服务端审批绑定和同进程恢复；M10-T5 已覆盖结果未知副作用。M11-T1 首个纵切已使用官方 PostgreSQL saver，由两个 PID 不同的 Python 进程把同一 thread 的 invocation count 从 0 推进到 1、再推进到 2。仍缺持久 Approval/ToolExecution、lease、恢复扫描和结果未知仲裁 | `V-20260720-011`、`V-20260720-013`、`V-20260722-005` 与 `V-20260722-009`；M11 完成剩余 PostgreSQL/ToolExecution 重启恢复后再关闭 |
 | KI-005 | high | mitigated | M10–M11 | M10-T3 已把有界动态计划、失败诊断、白名单重规划、预算/循环停止和副作用禁重放接入可注入的 durable Coordinator Run；默认 Container 尚未迁移，上下文选择和记忆注入仍未进入统一主链 | `V-20260722-001`：失败重规划 E3；M11 长对话、记忆纠错与统一上下文评测通过后关闭 |
 | KI-006 | high | open | M11 | pgvector 只有 Fake Connection，没有真实数据库、Embedding 与检索指标 | PostgreSQL/pgvector 集成和固定评测集通过 |
 | KI-007 | high | open | M12 | SSE 在 Run 完成后回放；前端再次调用 Research API 覆盖答案 | 单 Run 真流式、续传和刷新恢复 E2E 通过 |
@@ -18,7 +18,7 @@
 | KI-012 | medium | closed | C0 | M1 文档零依赖命令、硬编码 Python 路径、测试数量与当前实现漂移 | `V-20260716-001`：删除硬编码路径和固定测试数；禁用 `site-packages` 后 7 项测试与 Demo 通过 |
 | KI-013 | medium | closed | M10 | M10-T4 已通过公开 `Agent.as_tool()`/`Runner.run()` 实现 researcher、writer、reviewer manager-as-tools，并与同工具单 Agent 完成固定质量、失败率、本地延迟、fixture usage 和复杂度对照；无质量收益，保留单 Agent | `V-20260722-003`：14 项专项与 93 项定向回归通过，固定 3 例对照完成 |
 | KI-014 | medium | open | M11 | ConversationMemory 未接入 Run 且不持久化 | Agent 上下文读取、纠正、删除和重启恢复通过 |
-| KI-015 | high | mitigated | M8–M11 | M8-T3 已用 StartCommit/TerminalCommit 固定一次提交协议，并在内存 Run→Event 锁对内原子发布；PostgreSQL 同事务、多进程和连接结果未知重试尚未验证 | M11 PostgreSQL 继承合同测试，并通过同事务 CAS、精确重放、连接中断和多进程终态竞争 |
+| KI-015 | high | mitigated | M8–M11 | M8-T3 已用 StartCommit/TerminalCommit 固定一次提交协议。M11-T1 首个纵切的 PostgreSQL Run/Event 已继承同一合同，并证明 start/pause/resume/terminal 与事件同事务、每 Run 序号、幂等创建、并发终态 CAS 和 event INSERT 故障回滚；连接结果未知与多进程终态竞争尚未验证 | `V-20260722-009`；后续再通过连接中断结果仲裁和多进程终态竞争后关闭 |
 | KI-016 | high | open | M11–M13 | Runtime 开始后的过程事件 Store 故障或进程退出会保留 running Run；当前选择 fail closed，不通知、不伪造终态，但尚无 lease、恢复扫描和安全重调度 | 持久 lease/heartbeat、RunRecoveryService、结果未知重试与重启恢复测试通过 |
 | KI-017 | medium | open | M8–M13 | ManualRuntime 在同步 Loop 完成后回放过程事件；OpenAI Agents SDK 适配器尚未实现 M10 审批暂停协议，仍拒绝审批、写入和其他副作用工具，但允许的只读同步 handler 仍通过 `asyncio.to_thread` 执行。Run 取消可丢弃结果，却不能硬停止底层线程，线程可能在终态后继续运行并占用默认 executor | 真实 async Runtime 成为主链；同步工具使用隔离且有界的 executor 或进程，并通过协作取消、工具超时、取消后清理与副作用测试 |
 | KI-018 | high | open | M8–M13 | 当前 `max_turns` 仅粗略约束模型调用；SDK 聚合 request/input usage 只能在流结束后校验，可能超出一个请求，`max_cost_usd` 尚未计算或强制执行。M9-T5 只增加明确标注的 Skill 上下文字节与 `ceil(bytes / 4)` Token 启发式，不是 Provider usage 或费用。`AsyncOpenAI` HTTP timeout 只约束提供方传输请求，不是覆盖模型、工具和清理阶段的整次 Run 硬墙钟；定价源与持久 usage/cost 账本尚未接入 | 接入逐调用 usage、可版本化定价源与持久账本；明确并测试预算超限余量，以 fail-closed 处理未知费用；模型、工具、总 Run 超时故障测试和 M8-T6 经单独授权的低预算线上证据通过 |

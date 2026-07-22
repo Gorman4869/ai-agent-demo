@@ -550,6 +550,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：迁移首次执行、重复执行、回滚失败、所有权隔离、并发事件序号、幂等创建、状态事务和进程重启后 checkpoint 恢复。
 - 验收：内存与 PostgreSQL Store 运行同一契约测试；数据库不可用时错误可诊断，不静默回退内存。
 
+#### M11-T1 首个真实纵切边界
+
+- 已实现工作区纵切：固定 `psycopg[binary,pool]` 与官方 `langgraph-checkpoint-postgres`，新增带校验和和 advisory transaction lock 的应用 migration，并由共享异步连接池提供 PostgreSQL Run/Event Store 与 `AsyncPostgresSaver`。
+- 已实现工作区证据：PostgreSQL Run/Event 继承 M8 的适配器无关合同；每 Run 计数器分配事件序号，start/pause/resume/terminal 的状态与事件在一个数据库事务内提交。migration 首次/重复、校验和漂移、失败回滚和 event INSERT 故障回滚均走真实数据库。
+- 已实现工作区恢复：两个 PID 不同的 Python 进程使用相同可信 thread，从 PostgreSQL 读取 checkpoint 并把 invocation count 从 0 推进到 1、再推进到 2；数据库不可用返回稳定 `store_unavailable`，不回退内存。
+- 尚未完成：PostgreSQL Approval/Memory Store、持久私有审批参数、ToolExecution 仲裁、lease/recovery scanning、默认 Container 迁移和完整 M11-T1 验收。首个纵切只能把 M11-T1 保持为 `in_progress`，不能关闭 `KI-004`、`KI-014`、`KI-015` 或 `KI-016`。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。

@@ -1384,3 +1384,60 @@
 
 - M10-T6 课程提交固定为 `1766875`；`V-20260722-007` 的 58 项聚焦、完整离线门、首次沙箱 EPERM、课程链接和离线 E2/E3 边界不变。
 - 当前任务为 `M11-T1 / planned`；不重做 M10，不把 `InMemorySaver` 描述为进程重启，不提前进入 pgvector、Embedding、记忆或 RAG。
+
+## V-20260722-009：M11-T1 PostgreSQL Run/Event/checkpoint 首个纵切
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：HEAD `8af705b` 上的 M11-T1 工作区；首个纵切实现提交由后续本地 commit 固定
+- 任务等级：A 类关键持久化、事务和恢复边界，时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；用户已明确授权安装依赖、启动 Docker Desktop、拉取镜像和运行本地测试容器。没有读取真实 API Key、访问模型 Provider 或产生付费调用，费用 0
+- 依赖事实：新增并固定 `langgraph-checkpoint-postgres==3.1.0`、`psycopg[binary,pool]==3.3.4`；实际安装 `psycopg-binary==3.3.4`、`psycopg-pool==3.3.1` 与传递依赖 `tzdata==2026.3`
+
+### 恢复、环境与纵切边界
+
+- 开始时 `git status --short` 干净；最近提交为 `8af705b`、`1766875`、`07741db`、`1e332f3`、`7538fb4`、`abdc409`，没有重做 M10。
+- 按强制顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M11-T1 及 M8-T2/M10-T1 依赖、ADR-0004/0006/0011/0012、最新 M10 handoff、关联 verification、后端规约和实际 Store/checkpoint/依赖/Docker 边界；启动时代码与记录一致，无需登记漂移。
+- handoff 最小恢复集通过：M10 聚焦 58 项、禁用 `site-packages` 的 M1 手写 Loop 7 项、52 个稳定任务/72 个 Markdown。
+- 本轮只完成版本化应用 migration、PostgreSQL Run/Event Store、共享连接池与官方 PostgreSQL checkpointer，以及两个 Python 进程恢复。Approval/Memory、持久私有审批参数、ToolExecution、lease/recovery scanning、默认 Container 和 pgvector 明确不在首个纵切内。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` 与 handoff 恢复命令 | 0 | 初始工作区干净；M10 58 项、M1 7 项、连续性 52/72 通过 |
+| `python -m pip show psycopg psycopg-pool langgraph-checkpoint-postgres` | 1 | 安装前确认三项均不存在；未把 import 或依赖存在当作框架完成证据 |
+| `python -m pip install "psycopg[binary,pool]==3.3.4" "langgraph-checkpoint-postgres==3.1.0"` | 0 | 经用户授权解析并安装固定依赖；后续 `pip check` 无损坏依赖 |
+| `docker version`（沙箱首轮/批准后） | 1 / 0 | 首轮 Docker API 权限被拒；批准后 Client/Server 29.3.1 可用 |
+| `docker compose -f deploy/compose.postgres.yaml config` / `up -d --wait` | 0 / 0 | 配置有效；经授权拉取 `postgres:17-alpine` 并启动本地健康容器 |
+| 容器内 `SHOW server_version` | 0 | 实际 PostgreSQL 17.10；测试端口只绑定 `127.0.0.1:55432` |
+| PostgreSQL persistence `setup()`（默认 Proactor / Selector loop） | 1 / 0 | Psycopg 明确拒绝 Windows Proactor；适配器稳定返回 `store_unavailable`。使用局部 Selector loop 后 migration、pool 和 saver setup 成功 |
+| `... -m unittest backend.tests.postgres_store_integration -q`（首轮） | 1 | 33 项中 32 项通过；测试进程的 Selector loop 不支持 asyncio subprocess，checkpoint 子进程用例报 `NotImplementedError` |
+| checkpoint 子进程改用 `asyncio.to_thread(subprocess.run)` 后专项 / 33 项全量 | 0 / 0 | 两个不同 PID 分别观察 0→1、1→2；33 项通过 |
+| 增加 event INSERT 触发器故障回滚后专项 / 最终集成 | 0 / 0 | Run 状态与 event INSERT 同事务回滚；复审再补 applied history 连续前缀用例，最终真实 PostgreSQL 集成 35 项通过 |
+| RunStore、Coordinator、checkpoint 与 approval 受影响回归（首轮/原命令复跑） | 0 / 0 | 两轮均 71 项通过；首轮有一条 Windows asyncio 0.172 秒慢任务诊断，复跑只保留 3 条既有 notifier 负向日志，无 ResourceWarning |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过；PostgreSQL 模块保持显式导入 |
+| `scripts/verify.ps1`（沙箱首轮/批准后） | 1 / 0 | 首轮在 Vue `tsbuildinfo` 写入处 `TS5033`/`EPERM`；相同完整脚本批准后后端 354 项通过、1 项跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| `scripts/check-continuity.ps1` / `git diff --check` | 0 / 0 | 新 handoff 后 52 个稳定任务、73 个 Markdown 通过；无 whitespace 错误，仅有 Git 的 LF/CRLF 转换提示 |
+
+### 实现与事务证据
+
+- `0001_durable_run_event_store.sql` 建立 Run、每 Run event sequence 和 Event 表；应用 migration 记录版本与 SHA-256 校验和，使用 advisory transaction lock，首次/重复、历史缺口、校验和漂移和失败回滚均有真实数据库用例。
+- `PostgresPersistence` 让 RunStore、EventStore 和官方 `AsyncPostgresSaver` 复用一个异步连接池；应用 migration 先于 saver `setup()`，模块不进入 Store 包顶层导出，M1 隔离保持不变。
+- PostgreSQL RunStore 继承现有完整 `RunStoreContract`。EventStore 在持有 Run row lock 后分配每 Run 序号，并在同一个数据库事务内提交 start/pause/resume/terminal 状态与事件；幂等创建、所有权隔离、并发序号、并发终态和注入 event INSERT 失败后的原子回滚均通过。
+- 数据库不可达只返回稳定 `store_unavailable`，没有切换 InMemory Store，也不在错误或 probe JSON 中输出 DSN。checkpoint probe 只读取显式测试 DSN，并由父测试核对两个不同进程的前后计数和答案。
+- Windows psycopg 异步连接需要 Selector loop；生产模块不在 import 时修改全局 event-loop policy，probe 与显式集成测试只在自己的进程/测试边界安装 Selector。
+
+### 警告与未验证范围
+
+- 首次 Proactor setup、asyncio subprocess 用例、Docker 沙箱权限和 Vue 沙箱写入失败均如上保留；没有静默吞掉失败或将 fallback 当作成功。最终 35 项集成、71 项受影响回归、M1 7 项和完整发布门均退出 0。
+- 全量后端仍有一条既有 `StarletteDeprecationWarning`，Windows 环境仍有 1 项真实 symlink 能力测试跳过。数据库不可达负向用例会输出一条 psycopg pool connection timeout 诊断，测试退出 0且没有泄露 DSN。
+- 两进程证据证明 Python 进程边界后的 checkpoint 恢复，不证明 PostgreSQL 容器重启、持久卷、同 thread 并发、多主机、跨机房、备份、TLS、高可用或生产容量。
+- 本地 Compose 使用 localhost-only、trust 和 tmpfs，只供显式集成测试；不是生产部署模板。容器在交接时保持健康运行，后续会话必须重新检查，不能据文档假设可用。
+- PostgreSQL Approval/Memory Store、持久私有审批参数、ToolExecution 结果仲裁、连接结果未知、lease/heartbeat、恢复扫描、默认 Container 和 M11-T2 pgvector 均未实现；因此 M11-T1 只能进入 `in_progress`，`KI-004`、`KI-014`、`KI-015`、`KI-016` 均不关闭。
+- 没有读取 Key、调用在线模型或产生付费调用；本轮数据库网络仅为本机 Docker 端口，镜像与依赖下载均在用户明确授权内。
+
+### 结论
+
+- M11-T1 首个真实 PostgreSQL 纵切达到可运行、可恢复和可复现：不是 import-only，也没有 Fake/Mock 数据库完成声明。Run/Event 同事务和官方 saver 跨两个 OS 进程恢复已有真实 PostgreSQL 证据。
+- 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只实现 PostgreSQL ApprovalStore/MemoryStore、共同合同和审批恢复所需私有参数；不提前进入 ToolExecution/lease、默认 Container 或 M11-T2。

@@ -212,3 +212,14 @@
 - Every run still uses `RunConfig(tracing_disabled=True, trace_include_sensitive_data=False)`. The standalone offline evaluator installs a process-local disabled trace provider before calling the SDK so the locked SDK cannot initialize its default exporter; do not embed this evaluator in the application process or overwrite an application trace provider.
 - Compare quality, failure rate, local elapsed time, aggregate fixture usage, and topology complexity separately. Deterministic Model usage is not Provider Token or billing evidence, local latency is not production latency, and unknown online cost remains `None`.
 - Retain the single-Agent design when the fixed set has no quality or failure-rate gain. Handoff, default Runtime migration, online quality, persistent usage/cost, and recovery fault injection remain separate tasks.
+
+## 23. PostgreSQL Persistence
+
+- PostgreSQL code stays on explicit imports. The default offline Container remains on the in-memory Store pair until M11-T1 completes every required adapter and composition test.
+- Pin `psycopg[binary,pool]` and `langgraph-checkpoint-postgres`. One `AsyncConnectionPool` with `dict_row`, autocommit, and prepared statements disabled is shared by the Run/Event adapters and `AsyncPostgresSaver`; application operations still open explicit transactions.
+- Application migrations are ordered SQL files with immutable SHA-256 checksums. Apply pending versions under one PostgreSQL advisory transaction lock; checksum drift, unknown history, or a failed statement must fail closed and never mark a version applied.
+- PostgreSQL Run/Event adapters inherit the adapter-independent Store contract. Lock the owned Run row before CAS and event work, allocate event sequence through the per-Run counter row, and commit lifecycle state plus event in one database transaction. Never use `MAX(sequence) + 1`.
+- Driver, pool, and SQL failures cross the adapter boundary only as stable Store or migration errors. Database unavailability never selects an in-memory fallback.
+- The official async checkpointer requires `setup()` before first use. On Windows, Psycopg async integration runs on a Selector event loop; libraries do not mutate the process-wide event-loop policy at import time.
+- PostgreSQL integration tests require an explicit local DSN and are not part of default offline discovery. They must execute a real database, shared Run/Event contract, migration rollback, transaction rollback, and separate-process checkpoint recovery before claiming real PostgreSQL evidence.
+- The first M11-T1 slice persists Run/Event and LangGraph checkpoint state only. PostgreSQL Approval/Memory Stores, durable private approval arguments, ToolExecution arbitration, lease/recovery scanning, and default Container migration remain incomplete until later M11-T1 slices verify them.
