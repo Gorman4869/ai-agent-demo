@@ -1298,3 +1298,25 @@
 
 - `M10-T5` 达到 `verified`：checkpoint/interrupt/replanning 的中断、换实例、timeout、审批等待、损坏状态和结果未知副作用均有可复现故障证据；可安全恢复则继续，不可安全恢复则明确停止并诊断，副作用不重复。
 - `KI-004` 保持 mitigated，M11 仍需 PostgreSQL、持久 ToolExecution、lease、恢复扫描和真实进程重启才能关闭。下一任务进入 `M10-T6 / planned`，只做 M10 课程汇总与里程碑验收，不提前实现 M11。
+
+## V-20260722-006：M10-T5 实现提交后恢复锚点
+
+- 任务：`M10-T5`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：实现提交 `1e332f3`（`test: inject LangGraph recovery faults`）
+- 模式：offline；只执行本地 LangGraph、故障 fixture 与标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交后工作区干净；`1e332f3` 位于 M10-T4 验证锚点 `7538fb4` 之后 |
+| `.\.venv\Scripts\python.exe -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.test_langgraph_recovery_faults -q`（首次） | 0 | 10 项通过；Windows asyncio debug 输出一条 0.187 秒慢任务诊断，不是 ResourceWarning |
+| 同一故障专项原命令复跑 | 0 | 10 项在 0.256 秒内通过，无 ResourceWarning 或慢任务诊断 |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，LangGraph 专用模块保持显式导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、70 个 Markdown 文件通过 |
+
+### 结论
+
+- M10-T5 实现提交固定为 `1e332f3`；`V-20260722-005` 的 10 项专项、123 项定向回归、失败尝试、全量门跳过理由和同进程 E3 边界不变。
+- 当前任务为 `M10-T6 / planned`；不重做故障矩阵，不把内存故障注入描述为进程重启或 exactly-once，不提前进入 M11。
