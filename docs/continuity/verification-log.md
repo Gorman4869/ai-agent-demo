@@ -1441,3 +1441,24 @@
 
 - M11-T1 首个真实 PostgreSQL 纵切达到可运行、可恢复和可复现：不是 import-only，也没有 Fake/Mock 数据库完成声明。Run/Event 同事务和官方 saver 跨两个 OS 进程恢复已有真实 PostgreSQL 证据。
 - 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只实现 PostgreSQL ApprovalStore/MemoryStore、共同合同和审批恢复所需私有参数；不提前进入 ToolExecution/lease、默认 Container 或 M11-T2。
+
+## V-20260722-010：M11-T1 PostgreSQL 首个纵切提交后恢复锚点
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：实现提交 `8c6b011`（`feat: persist runs and checkpoints in postgres`）
+- 模式：本地真实 PostgreSQL E3；没有读取真实 API Key、访问模型 Provider 或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交后工作区干净；`8c6b011` 位于 M10-T6 验证锚点 `8af705b` 之后 |
+| 设置本地测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 真实 PostgreSQL migration、Run/Event、故障和两个进程 checkpoint 集成 35 项通过；数据库不可达负向用例保留一条预期 pool timeout 诊断，无 ResourceWarning |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，PostgreSQL 专用模块仍为显式导入 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、73 个 Markdown 文件通过 |
+
+### 结论
+
+- M11-T1 首个 PostgreSQL 纵切实现提交固定为 `8c6b011`；`V-20260722-009` 的 35 项集成、71 项受影响回归、完整发布门、失败尝试和本地 E3 边界不变。
+- 当前任务保持 `M11-T1 / in_progress`；下一条原子动作只做 PostgreSQL ApprovalStore/MemoryStore 和审批恢复私有参数，不重做 Run/Event/checkpoint，也不提前进入 ToolExecution/lease、默认 Container 或 M11-T2。

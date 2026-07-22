@@ -24,7 +24,7 @@
 - M10-T4 验证基线提交：`ae9e3aa`；实现提交：`abdc409`
 - M10-T5 验证基线提交：`7538fb4`；实现提交：`1e332f3`
 - M10-T6 验证基线提交：`07741db`；课程提交：`1766875`
-- M11-T1 首个纵切验证基线提交：`8af705b`；实现提交待本轮本地 commit 固定
+- M11-T1 首个纵切验证基线提交：`8af705b`；实现提交：`8c6b011`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -38,7 +38,7 @@
 | 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、现有 Store Protocol 与 M10 checkpoint/审批契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | 已完成 M11-T1 首个真实 PostgreSQL 纵切：版本化 migration、Run/Event Store 同事务、官方 AsyncPostgresSaver、两个 OS 进程 checkpoint 恢复、数据库不可用 fail closed；真实 PostgreSQL 集成 35 项、受影响回归 71 项和完整发布门通过 |
-| 前置证据 | `V-20260722-009`、`V-20260722-008`、`ADR-0012`、`ADR-0011`、`ADR-0006`、`ADR-0004` |
+| 前置证据 | `V-20260722-010`、`V-20260722-009`、`V-20260722-008`、`ADR-0012`、`ADR-0011`、`ADR-0006`、`ADR-0004` |
 | 下一动作 | 继续 M11-T1 的下一条原子纵切：为 ApprovalStore/MemoryStore 增加 PostgreSQL migration、适配器和共同合同，并持久化审批恢复所需私有参数；暂不进入 ToolExecution、lease、默认 Container 或 M11-T2 pgvector |
 
 ## 里程碑状态

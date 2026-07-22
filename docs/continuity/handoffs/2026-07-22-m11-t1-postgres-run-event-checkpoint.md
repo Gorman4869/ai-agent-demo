@@ -5,8 +5,8 @@
 - 当前状态：`in_progress`
 - 里程碑状态：`M11 / in_progress`
 - 验证基线 HEAD：`8af705b`
-- 首个纵切实现提交：待本轮本地 commit 固定
-- 验证记录：`V-20260722-009`
+- 首个纵切实现提交：`8c6b011`
+- 验证记录：`V-20260722-009`、`V-20260722-010`
 - 分支：`main`
 - 任务等级：A 类关键持久化、事务和恢复边界，时间盒 2–4 小时
 - 新增依赖：`langgraph-checkpoint-postgres==3.1.0`、`psycopg[binary,pool]==3.3.4`
@@ -47,6 +47,7 @@
 - 受影响回归：RunStore、Coordinator、checkpoint 与 approval 共 71 项通过；M1 在禁用 `site-packages` 后 7 项通过。
 - 完整发布门：沙箱首轮因 Vue `tsconfig.app.tsbuildinfo` 写入 `EPERM` 退出 1；相同脚本经批准后退出 0，后端 354 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置均通过。
 - 连续性和 diff：52 个稳定任务、73 个 Markdown 通过；`git diff --check` 无 whitespace 错误。
+- 提交后恢复：实现提交 `8c6b011` 后工作区干净；原样重跑真实 PostgreSQL 35 项、M1 7 项和连续性 52/73，均退出 0且无 ResourceWarning。
 
 ## 失败、警告与边界
 
@@ -58,7 +59,7 @@
 
 ## 未提交改动
 
-上述代码、依赖、测试 Compose、规约和连续性记录均在工作区，尚待首个纵切本地提交固定。没有任务外改动，没有读取密钥，没有在线模型或付费调用，没有远程 Git 操作。本地 PostgreSQL 测试容器在交接时保持健康运行。
+代码、依赖、测试 Compose、规约和首轮连续性记录已由本地提交 `8c6b011` 固定。当前只修改本 handoff、`status.md` 与 `verification-log.md` 以记录提交后恢复锚点；没有任务外改动，没有读取密钥，没有在线模型或付费调用，没有远程 Git 操作。本地 PostgreSQL 测试容器在交接时保持健康运行。
 
 ## 下一条原子动作
 
