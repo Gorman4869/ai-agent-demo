@@ -23,7 +23,7 @@
 - M10-T3 验证基线提交：`545d5af`；实现提交：`e27a8ef`
 - M10-T4 验证基线提交：`ae9e3aa`；实现提交：`abdc409`
 - M10-T5 验证基线提交：`7538fb4`；实现提交：`1e332f3`
-- M10-T6 验证基线提交：`07741db`；课程提交：待本地提交固定
+- M10-T6 验证基线提交：`07741db`；课程提交：`1766875`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -37,7 +37,7 @@
 | 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、现有 Store Protocol 与 M10 checkpoint/审批契约 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | M10-T6 已汇总三张状态图、四次跟练、排错矩阵、题库、评分、速查表和费曼任务；58 项 M10 聚焦测试及完整离线门通过，M10 里程碑达到 `verified`；`KI-004` 因仍缺 PostgreSQL 真重启而保持 mitigated |
-| 前置证据 | `V-20260722-007`、`V-20260722-005`、`ADR-0013`、`ADR-0012`、`ADR-0011` |
+| 前置证据 | `V-20260722-008`、`V-20260722-007`、`V-20260722-005`、`ADR-0013`、`ADR-0012`、`ADR-0011` |
 | 下一动作 | 开始 M11-T1 前只读审阅现有 Run/Event/Approval/Memory Store Protocol、数据库连接与 migration 目录、相关 ADR 和 Docker 可用性，先固定内存/PostgreSQL 共同契约与最小数据库恢复纵切；未经授权不安装依赖、不启动在线服务 |
 
 ## 里程碑状态
@@ -99,4 +99,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t6-course-acceptance.md`，再核对 `V-20260722-007`、`ADR-0011`、`ADR-0012`、实施计划 M11-T1 和现有 Store Protocol。若 M10 聚焦 58 项、M1 7 项与连续性检查仍一致，不要重做 M10；下一步只读固定 M11-T1 的内存/PostgreSQL 共同契约和最小数据库恢复纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线调用或扩大范围。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-07-22-m10-t6-course-acceptance.md`，再核对 `V-20260722-008`、`V-20260722-007`、`ADR-0011`、`ADR-0012`、实施计划 M11-T1 和现有 Store Protocol。若 M10 聚焦 58 项、M1 7 项与连续性检查仍一致，不要重做 M10；下一步只读固定 M11-T1 的内存/PostgreSQL 共同契约和最小数据库恢复纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线调用或扩大范围。

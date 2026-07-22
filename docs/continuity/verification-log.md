@@ -1363,3 +1363,24 @@
 
 - `M10-T6` 达到 `verified`，M10 里程碑达到工程 `verified`：可运行代码、58 项聚焦证据、完整离线门、跟练、排错、题库、速查、费曼任务和 30 项映射全部落盘。
 - `KI-021` closed；`KI-004` 正确保留 mitigated 并由 M11-T1 承接 PostgreSQL 真重启边界。当前任务推进到 `M11-T1 / planned`，不在本轮实现数据库、记忆或 RAG。
+
+## V-20260722-008：M10-T6 课程提交后恢复锚点
+
+- 任务：`M10-T6`
+- 时间：2026-07-22，Asia/Shanghai
+- 验证目标：课程提交 `1766875`（`docs: complete M10 course acceptance`）
+- 模式：offline；只执行本地 LangGraph、Agents SDK 确定性 fixture 和标准库路径，没有读取真实 API Key、访问模型服务或产生付费调用，费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -3 --oneline` | 0 | 课程提交后工作区干净；`1766875` 位于 M10-T5 验证锚点 `07741db` 之后 |
+| `... -m unittest backend.tests.test_langgraph_checkpointing backend.tests.test_langgraph_approval_resume backend.tests.test_langgraph_replanning backend.tests.test_langgraph_recovery_faults backend.tests.test_multi_agent backend.tests.test_workflow_comparison_eval -q` | 0 | handoff 的 M10 聚焦 58 项通过，无 ResourceWarning |
+| `.\.venv\Scripts\python.exe -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，M10 专用模块仍未污染顶层导入 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、72 个 Markdown 文件通过 |
+
+### 结论
+
+- M10-T6 课程提交固定为 `1766875`；`V-20260722-007` 的 58 项聚焦、完整离线门、首次沙箱 EPERM、课程链接和离线 E2/E3 边界不变。
+- 当前任务为 `M11-T1 / planned`；不重做 M10，不把 `InMemorySaver` 描述为进程重启，不提前进入 pgvector、Embedding、记忆或 RAG。
