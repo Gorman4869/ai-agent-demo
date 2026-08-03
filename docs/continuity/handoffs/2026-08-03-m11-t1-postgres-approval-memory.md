@@ -5,8 +5,8 @@
 - 当前状态：`in_progress`
 - 里程碑状态：`M11 / in_progress`
 - 验证基线 HEAD：`bf875be`
-- 第二纵切实现提交：待本轮本地 commit 固定
-- 验证记录：`V-20260803-001`
+- 第二纵切实现提交：`cb4fd52`
+- 验证记录：`V-20260803-001`、`V-20260803-002`
 - 关联决策：`ADR-0014`
 - 分支：`main`
 - 任务等级：A 类身份授权、私有数据、迁移、事务和跨进程恢复边界，时间盒 2–4 小时
@@ -60,6 +60,7 @@
 - 受影响回归：Approval/Memory/Runtime/API/Container 等 80 项通过；M1 在禁用 `site-packages` 后 7 项通过。
 - 完整发布门：沙箱首轮在当时后端 370 项通过、1 项跳过，Code Agent 与依赖通过后因 Vue `tsbuildinfo` 写入 EPERM 退出 1；相同脚本获批后退出 0。聚焦复审补 forged resolution 合同后，最终后端 371 项、Vue、MCP TypeScript 和 Compose 配置再次全部通过。
 - 连续性与 diff：52 个稳定任务、75 个 Markdown 通过；`git diff --check` 无 whitespace 错误。
+- 提交后恢复：实现提交 `cb4fd52` 上真实 PostgreSQL 53 项、M1 7 项和连续性 52/75 再次通过；容器保持 healthy，不可达数据库负向用例保留预期 pool timeout，仍无 ResourceWarning。
 
 ## 失败、警告与边界
 
@@ -71,7 +72,7 @@
 
 ## 未提交改动
 
-上述代码、migration、测试、ADR、规约和连续性记录均在工作区，尚待第二纵切本地提交固定。没有任务外改动，没有读取密钥，没有在线模型或付费调用，没有远程 Git 操作。本地 PostgreSQL 测试容器在交接时保持健康运行。
+上述代码、migration、测试、ADR、规约和 `V-20260803-001` 已由实现提交 `cb4fd52` 固定；当前仅 `V-20260803-002`、status 和 handoff 的提交后锚点待本地文档提交。没有任务外改动，没有读取密钥，没有在线模型或付费调用，没有远程 Git 操作。本地 PostgreSQL 测试容器在交接时保持健康运行。
 
 ## 下一条原子动作
 

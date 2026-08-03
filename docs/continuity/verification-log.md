@@ -1524,3 +1524,25 @@
 
 - M11-T1 第二个真实 PostgreSQL 纵切达到可运行、可恢复和可复现：Approval/Memory 不是 Fake/Mock，私有参数、同事务 grant、并发单次消费、消息窗口、长期事实与两个 OS 进程恢复均有真实数据库证据。
 - `KI-014` 进入 mitigated，`KI-022` closed，新增 `KI-023` 记录同步数据库适配器接入 async 主链前的线程/取消缺口。M11-T1 保持 `in_progress`；下一条原子动作只做 PostgreSQL ToolExecution 结果仲裁，不合并 lease、默认 Container 或 M11-T2。
+
+## V-20260803-002：M11-T1 Approval/Memory 实现提交后恢复锚点
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-03，Asia/Shanghai
+- 验证目标：实现提交 `cb4fd52`（`feat: persist approvals and memory in postgres`）
+- 模式：本地真实 PostgreSQL E3；复用已批准并保持 healthy 的 localhost-only 测试容器。没有读取 Key、调用在线模型或产生费用
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: persist approvals and memory in postgres"` | 0 | 24 个本任务文件固定为实现提交 `cb4fd52`，2060 行新增、54 行删除 |
+| `docker compose -f deploy/compose.postgres.yaml ps` | 0 | `ai-agent-demo-m11-postgres-1` healthy，继续仅绑定 `127.0.0.1:55432` |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 实现提交上真实 PostgreSQL 53 项通过；不可达数据库负向用例保留预期 pool timeout，无 ResourceWarning |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、75 个 Markdown 文件通过 |
+
+### 结论
+
+- M11-T1 PostgreSQL Approval/Memory 第二纵切实现提交固定为 `cb4fd52`；`V-20260803-001` 的 53 项真实数据库集成、80 项受影响回归、371 项完整后端门、失败尝试与未验证范围不变。
+- 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只做 PostgreSQL ToolExecution 结果仲裁，不重做 Run/Event/checkpoint 或 Approval/Memory，不合并 lease、默认 Container 或 M11-T2。
