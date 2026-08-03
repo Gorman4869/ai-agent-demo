@@ -9,8 +9,18 @@ import sys
 import unittest
 from datetime import timedelta
 
-from backend.app.domain.run import RunRecord, RunStatus
-from backend.app.stores import EventStore, RunStore, StoreUnavailableError
+from backend.app.domain.run import (
+    RunRecord,
+    RunStatus,
+    ToolExecution,
+    ToolExecutionStatus,
+)
+from backend.app.stores import (
+    EventStore,
+    RunStore,
+    StoreUnavailableError,
+    ToolExecutionStore,
+)
 from backend.app.stores.base import StartCommit
 from backend.app.stores.postgres import PostgresPersistence
 from backend.app.stores.postgres_migrations import (
@@ -25,6 +35,10 @@ from backend.app.tools import ApprovalResponse
 from backend.tests.test_approval_store_contract import ApprovalStoreContract
 from backend.tests.test_memory_store_contract import MemoryStoreContract
 from backend.tests.test_run_store_contract import RunStoreContract, STORE_NOW
+from backend.tests.test_tool_execution_store_contract import (
+    TOOL_STORE_NOW,
+    ToolExecutionStoreContract,
+)
 
 
 POSTGRES_DSN = os.environ.get("AI_AGENT_TEST_POSTGRES_DSN", "")
@@ -92,6 +106,28 @@ class PostgresMemoryStoreContractTest(
         await self.persistence.close()
 
 
+class PostgresToolExecutionStoreContractTest(
+    ToolExecutionStoreContract,
+    unittest.IsolatedAsyncioTestCase,
+):
+    async def create_store_bundle(
+        self,
+    ) -> tuple[RunStore, ToolExecutionStore]:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            clock=lambda: TOOL_STORE_NOW,
+        )
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+        return (
+            self.persistence.run_store,
+            self.persistence.tool_execution_store,
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+
 class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
@@ -104,10 +140,10 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         first = await apply_postgres_migrations(self.persistence.pool)
         second = await apply_postgres_migrations(self.persistence.pool)
 
-        self.assertEqual((1, 2), first)
+        self.assertEqual((1, 2, 3), first)
         self.assertEqual((), second)
         self.assertEqual(
-            [1, 2],
+            [1, 2, 3],
             await _applied_versions(self.persistence),
         )
 
@@ -160,7 +196,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         await apply_postgres_migrations(self.persistence.pool)
         migrations = load_sql_migrations()
         broken = SqlMigration.from_sql(
-            version=3,
+            version=4,
             name="broken_transaction",
             sql="""
             CREATE TABLE migration_should_rollback (id integer PRIMARY KEY);
@@ -175,7 +211,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual("migration_apply_failed", raised.exception.code)
-        self.assertEqual([1, 2], await _applied_versions(self.persistence))
+        self.assertEqual([1, 2, 3], await _applied_versions(self.persistence))
         self.assertIsNone(
             await _relation_name(self.persistence, "migration_should_rollback")
         )
@@ -312,6 +348,138 @@ class PostgresApprovalTransactionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("exact_call_approval_missing", decision.reason)
 
 
+class PostgresToolExecutionProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await persistence.setup()
+            await _reset_app_data(persistence)
+        finally:
+            await persistence.close()
+
+    async def test_committed_result_and_running_unknown_survive_process_exit(
+        self,
+    ) -> None:
+        prepared = await _run_tool_execution_probe("prepare")
+        crashed = await _run_tool_execution_probe(
+            "settle-crash",
+            known_execution_id=prepared["known_execution_id"],
+            expected_returncode=17,
+        )
+        recovered = await _run_tool_execution_probe(
+            "recover",
+            known_execution_id=prepared["known_execution_id"],
+            unknown_execution_id=prepared["unknown_execution_id"],
+        )
+
+        self.assertEqual(
+            3,
+            len(
+                {
+                    prepared["process_id"],
+                    crashed["process_id"],
+                    recovered["process_id"],
+                }
+            ),
+        )
+        self.assertEqual("prepare", prepared["phase"])
+        self.assertEqual("settle-started", crashed["phase"])
+        self.assertEqual(
+            {
+                "phase": "recover",
+                "process_id": recovered["process_id"],
+                "known_completed": True,
+                "known_replayed": True,
+                "unknown_reconciled": True,
+                "terminal_immutable": True,
+            },
+            recovered,
+        )
+
+
+class PostgresToolExecutionTransactionTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            clock=lambda: STORE_NOW,
+        )
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_settlement_failure_leaves_running_for_unknown_recovery(
+        self,
+    ) -> None:
+        run = RunRecord.create(
+            run_id="tool-transaction-run",
+            session_id="tool-transaction-session",
+            owner_id="tool-transaction-owner",
+            runtime="manual",
+            input_text="private transaction input",
+            idempotency_key="tool-transaction-run-key",
+            created_at=STORE_NOW,
+        )
+        await self.persistence.run_store.create(run)
+        running_run = await self.persistence.run_store.transition(
+            run.id,
+            owner_id=run.owner_id,
+            expected_version=run.version,
+            target_status=RunStatus.RUNNING,
+        )
+        execution = ToolExecution.create(
+            execution_id="tool-transaction-execution",
+            run_id=running_run.id,
+            tool_call_id="tool-transaction-fault-call",
+            tool_name="publish_report",
+            arguments={"document_id": "private-document"},
+            side_effecting=True,
+            idempotency_key="private-tool-transaction-key",
+            created_at=STORE_NOW,
+        )
+        await self.persistence.tool_execution_store.create(
+            execution,
+            owner_id=run.owner_id,
+        )
+        running = await self.persistence.tool_execution_store.transition(
+            execution.id,
+            owner_id=run.owner_id,
+            expected_version=execution.version,
+            target_status=ToolExecutionStatus.RUNNING,
+        )
+
+        await _install_tool_settlement_failure_trigger(self.persistence)
+        try:
+            with self.assertRaises(StoreUnavailableError):
+                await self.persistence.tool_execution_store.transition(
+                    execution.id,
+                    owner_id=run.owner_id,
+                    expected_version=running.version,
+                    target_status=ToolExecutionStatus.COMPLETED,
+                    result={"private": "private-result"},
+                    result_summary="document published",
+                )
+        finally:
+            await _remove_tool_settlement_failure_trigger(self.persistence)
+
+        stored = await self.persistence.tool_execution_store.get(
+            execution.id,
+            owner_id=run.owner_id,
+        )
+        self.assertEqual(running, stored)
+        reconciled = await self.persistence.tool_execution_store.transition(
+            execution.id,
+            owner_id=run.owner_id,
+            expected_version=running.version,
+            target_status=ToolExecutionStatus.UNKNOWN,
+            error_code="tool_result_unknown",
+            public_message="Tool result could not be confirmed",
+        )
+        self.assertEqual(ToolExecutionStatus.UNKNOWN, reconciled.status)
+        self.assertIsNone(reconciled.result_digest)
+
+
 class PostgresLifecycleTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.persistence = await PostgresPersistence.open(
@@ -409,6 +577,7 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
     async with persistence.pool.connection() as connection:
         await connection.execute(
             """
+            DROP TABLE IF EXISTS tool_executions CASCADE;
             DROP TABLE IF EXISTS conversation_memory_facts CASCADE;
             DROP TABLE IF EXISTS conversation_messages CASCADE;
             DROP TABLE IF EXISTS memory_message_sequences CASCADE;
@@ -500,6 +669,48 @@ async def _remove_approval_grant_failure_trigger(
             DROP TRIGGER IF EXISTS m11_reject_fault_approval_grant_trigger
                 ON tool_approval_grants;
             DROP FUNCTION IF EXISTS m11_reject_fault_approval_grant();
+            """,
+            prepare=False,
+        )
+
+
+async def _install_tool_settlement_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            CREATE OR REPLACE FUNCTION m11_reject_tool_settlement()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.tool_call_id = 'tool-transaction-fault-call'
+                   AND NEW.status = 'completed' THEN
+                    RAISE EXCEPTION 'injected tool settlement failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+
+            CREATE TRIGGER m11_reject_tool_settlement_trigger
+            BEFORE UPDATE ON tool_executions
+            FOR EACH ROW
+            EXECUTE FUNCTION m11_reject_tool_settlement();
+            """,
+            prepare=False,
+        )
+
+
+async def _remove_tool_settlement_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            DROP TRIGGER IF EXISTS m11_reject_tool_settlement_trigger
+                ON tool_executions;
+            DROP FUNCTION IF EXISTS m11_reject_tool_settlement();
             """,
             prepare=False,
         )
@@ -621,6 +832,77 @@ def _run_state_probe_sync(
             + process.stderr.decode("utf-8", errors="replace")
         )
     return json.loads(process.stdout.decode("utf-8"))
+
+
+async def _run_tool_execution_probe(
+    phase: str,
+    *,
+    known_execution_id: object | None = None,
+    unknown_execution_id: object | None = None,
+    expected_returncode: int = 0,
+) -> dict[str, object]:
+    return await asyncio.to_thread(
+        _run_tool_execution_probe_sync,
+        phase,
+        known_execution_id,
+        unknown_execution_id,
+        expected_returncode,
+    )
+
+
+def _run_tool_execution_probe_sync(
+    phase: str,
+    known_execution_id: object | None,
+    unknown_execution_id: object | None,
+    expected_returncode: int,
+) -> dict[str, object]:
+    command = [
+        sys.executable,
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "backend.app.stores.postgres_tool_execution_probe",
+        "--phase",
+        phase,
+    ]
+    if known_execution_id is not None:
+        command.extend(("--known-execution-id", str(known_execution_id)))
+    if unknown_execution_id is not None:
+        command.extend(("--unknown-execution-id", str(unknown_execution_id)))
+    environment = os.environ.copy()
+    environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+    process = subprocess.run(
+        command,
+        cwd=os.getcwd(),
+        env=environment,
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode != expected_returncode:
+        raise AssertionError(
+            f"tool execution probe failed with code {process.returncode}: "
+            f"{process.stderr.decode('utf-8', errors='replace')}"
+        )
+    if process.stderr:
+        raise AssertionError(
+            "tool execution probe wrote stderr: "
+            + process.stderr.decode("utf-8", errors="replace")
+        )
+    stdout = process.stdout.decode("utf-8")
+    for private_value in (
+        "private-known-document",
+        "private-unknown-document",
+        "private-known-idempotency-key",
+        "private-unknown-idempotency-key",
+        "private-published-result",
+    ):
+        if private_value in stdout:
+            raise AssertionError("tool execution probe exposed private data")
+    lines = [line for line in stdout.splitlines() if line]
+    if len(lines) != 1:
+        raise AssertionError("tool execution probe output is not bounded JSON")
+    return json.loads(lines[0])
 
 
 if __name__ == "__main__":

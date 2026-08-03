@@ -26,6 +26,7 @@
 - M10-T6 验证基线提交：`07741db`；课程提交：`1766875`
 - M11-T1 首个纵切验证基线提交：`8af705b`；实现提交：`8c6b011`
 - M11-T1 第二纵切验证基线提交：`bf875be`；实现提交：`cb4fd52`
+- M11-T1 第三纵切验证基线提交：`bb36875`；实现提交待本轮本地 commit 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -36,11 +37,11 @@
 | 任务 ID | `M11-T1` |
 | 状态 | `in_progress` |
 | 目标 | 设计并实现版本化 PostgreSQL migration、Run/Event/Approval/Memory Store、LangGraph checkpointer、连接生命周期和事务边界 |
-| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、现有 Store Protocol 与 M10 checkpoint/审批契约 |
+| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015` 与现有 Store Protocol |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 已完成 M11-T1 第二个真实 PostgreSQL 纵切：同步 Approval/Memory 共同合同、`0002` migration、私有审批参数/决议/单次 grant、消息窗口与长期事实；两个 OS 进程恢复通过，真实 PostgreSQL 53 项、受影响回归 80 项和完整发布门通过 |
-| 前置证据 | `V-20260803-002`、`V-20260803-001`、`V-20260722-010`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
-| 下一动作 | 继续 M11-T1 的下一条原子纵切：为 ToolExecution 增加 PostgreSQL migration、适配器和结果未知仲裁合同，先证明副作用幂等键、CAS 与单次结果结算；暂不合并 lease/recovery scanning、默认 Container 或 M11-T2 pgvector |
+| 当前修改 | 已完成 M11-T1 第三个真实 PostgreSQL 纵切：async ToolExecution 共同合同、`0003` migration、owner/幂等/CAS/单次结算与 unknown 仲裁；结果 commit 后进程异常退出和遗留 running 恢复均由真实 PostgreSQL 跨进程验证 |
+| 前置证据 | `V-20260803-003`、`V-20260803-002`、`V-20260803-001`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
+| 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现 PostgreSQL lease/heartbeat 与 orphan recovery scanning，固定租约 token、过期 CAS 和 running Run/ToolExecution 的 fail-closed 恢复；暂不迁移默认 Container，也不进入 M11-T2 pgvector |
 
 ## 里程碑状态
 
@@ -51,7 +52,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 的 Run/Event/checkpoint 与 Approval/Memory 两个 PostgreSQL 纵切已通过真实容器和跨进程验证；ToolExecution、lease、默认主链及 M11-T2 以后任务尚未完成 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 的 Run/Event/checkpoint、Approval/Memory 与 ToolExecution 三个 PostgreSQL 纵切已通过真实容器和跨进程验证；lease/recovery scanning、默认主链及 M11-T2 以后任务尚未完成 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -64,13 +65,17 @@
 
 ## 未验证范围
 
+- M11-T1 第三纵切见 `V-20260803-003`：内存/PostgreSQL 各 10 项 ToolExecution 共同合同、完整 PostgreSQL 65 项、受影响 Run/Coordinator/LangGraph 108 项、M1 隔离 7 项通过；完整门后端 381 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
+- 三个 PID 不同的 probe 进程证明 terminal commit 后进程以 17 退出且未发送完成确认时，新进程能读取 completed 并按幂等键 replay；同一批中遗留 running 记录只能显式转为 terminal unknown。它证明本地数据库仲裁，不证明外部工具副作用与数据库 exactly-once。
+- `0003` 只保存参数/幂等键/结果摘要和有界安全摘要；没有原始参数、原始 key 或原始结果。ToolExecution 与 Run/Event/checkpoint、同步 Approval pool 和外部系统不共享事务，尚无 lease、heartbeat、自动恢复扫描、业务补偿或默认主链接线。
+- 第三纵切完整门沙箱首轮在后端 381 项、Code Agent 和依赖通过后因 Vue `tsconfig.app.tsbuildinfo` 写入 `TS5033`/`EPERM` 退出 1；相同脚本获批后退出 0。后端仍有一条既有 `StarletteDeprecationWarning`。
 - M11-T1 第二纵切见 `V-20260803-001`：真实 PostgreSQL Approval/Memory/Run/Event/checkpointer 集成 53 项、受影响 Runtime/API/Container 回归 80 项、M1 隔离 7 项通过；最终完整门后端 371 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
 - 两个 PID 不同的 Python 进程已恢复私有审批参数、完成决议与单次 grant 消费，并恢复消息和长期事实；probe 只输出 ID、计数和布尔结果。没有把 PostgreSQL Approval/Memory 注入默认 Container、M10 审批 Runtime、记忆 HTTP 主链或 ContextAssembler，因此不是统一应用重启恢复证据。
 - 为兼容既有同步 ToolRegistry/记忆 API，PostgreSQL Approval/Memory 使用共享同步 pool，Run/Event/checkpoint 继续使用异步 pool；它们共享 DSN 和生命周期但不共享事务。尚未验证 async 主链线程隔离、取消、超时、pool 耗尽、跨 pool 原子性或 exactly-once，见 `ADR-0014` 与 `KI-023`。
-- `0002` 私有参数和记忆为本地课程数据库中的明文 JSON/text；没有应用层加密、生产 TLS、备份、密钥管理或数据保留证据。持久 ToolExecution、lease/recovery scanning、默认 Container 与 M11-T2 pgvector 仍未实现，M11-T1 保持 `in_progress`。
+- `0002` 私有参数和记忆为本地课程数据库中的明文 JSON/text；没有应用层加密、生产 TLS、备份、密钥管理或数据保留证据。lease/recovery scanning、默认 Container 与 M11-T2 pgvector 仍未实现，M11-T1 保持 `in_progress`。
 - 第二纵切完整门沙箱首轮在当时后端 370 项、受控 Code Agent 和依赖检查通过后，因 Vue `tsconfig.app.tsbuildinfo` 写入 `TS5033`/`EPERM` 退出 1；相同脚本获批后退出 0。聚焦复审补一项授权伪造合同后，最终完整门以后端 371 项再次退出 0。后端仍有一条既有 `StarletteDeprecationWarning`。
 - M11-T1 首个纵切见 `V-20260722-009`：真实 PostgreSQL migration/Run/Event/checkpointer 集成 35 项、受影响 Store/Coordinator/LangGraph 回归 71 项、M1 隔离 7 项和完整发布门通过；发布门后端 354 项通过、1 项既有 Windows symlink 能力跳过。
-- 两个 PID 不同的 Python 进程已通过官方 AsyncPostgresSaver 恢复同一可信 thread，但没有验证数据库容器重启、跨主机、同 thread 并发写、多进程终态竞争或生产容量。PostgreSQL Approval/Memory、持久私有审批参数、ToolExecution 结果仲裁、lease/recovery scanning 和默认 Container 仍未实现，M11-T1 保持 `in_progress`。
+- 两个 PID 不同的 Python 进程已通过官方 AsyncPostgresSaver 恢复同一可信 thread，但没有验证数据库容器重启、跨主机、同 thread 并发写、多进程终态竞争或生产容量。首个纵切结束时 Approval/Memory、私有参数和 ToolExecution 尚未实现，后两个纵切已补齐；当前仍缺 lease/recovery scanning 和默认 Container，M11-T1 保持 `in_progress`。
 - 本地 Compose 使用仅绑定 `127.0.0.1` 的 trust/tmpfs 测试实例；它不是生产鉴权、持久卷、备份、TLS、高可用或灾备证据。没有读取 Key、调用在线模型或产生付费调用。
 - M11 发布门沙箱首轮在后端 354 项、受控代码 Agent 和依赖检查通过后，因拒绝写入 Vue `tsconfig.app.tsbuildinfo` 以 `TS5033`/`EPERM` 退出 1；相同脚本经工作区构建权限批准后完整退出 0。后端仍有一条既有 `StarletteDeprecationWarning`。
 - M10-T6 见 `V-20260722-007`：M10 聚焦 58 项通过；完整离线门的后端 354 项通过、1 项因 Windows 符号链接能力跳过，受控代码 Agent、依赖检查、Vue 生产构建、MCP TypeScript 构建和 Compose 配置均通过。
@@ -85,7 +90,7 @@
 - M10-T4 是显式离线评测，不接入默认 Container、`RunCoordinator`、HTTP/SSE 或现有 `OpenAIAgentsRuntime`；后者对 handoff event 的 fail-closed 契约保持不变。评测进程安装无 exporter 的禁用 Trace provider，不能嵌入应用进程或覆盖应用观测配置。
 - M10-T3 见 `V-20260722-001`：专项 14 项、定向 124 项和 M1 隔离 7 项通过；真实 `StateGraph`、共享 saver、durable Coordinator/EventStore 均执行。没有依赖、构建配置、默认 Container 或既有公共协议变化，因此未运行全仓构建门。
 - M10-T3 planner/executor 为确定性离线 fixture；只证明 LangGraph 与领域契约的 E3，不证明真实模型规划质量、在线 Provider、Token/费用、生产延迟或容量。计划 step 的副作用/审批标记不是授权来源，真实工具仍必须经过 `ToolRegistry` 和 M10-T2 审批。
-- M10-T3 的恢复仍使用同进程 `InMemorySaver`。M10-T5 已对只读 pending 恢复和 pending 副作用结果未知分支注入故障并证明 fail closed；仍没有持久 ToolExecution 结果仲裁、lease、进程重启或跨崩溃恰好一次证据，这些由 M11 承接。
+- M10-T3 的恢复使用同进程 `InMemorySaver`；M10-T5 的该组证据本身没有持久 ToolExecution、进程重启或跨崩溃仲裁。M11 的 `V-20260803-003` 已补持久 ToolExecution 与进程异常退出恢复；lease、自动扫描和跨外部系统 exactly-once 仍未实现。
 - M10-T3 只通过显式 Runtime 注入进入程序化 durable Run，没有迁移默认 Container、旧 HTTP/SSE 或 Agents SDK；M10-T4 的独立多 Agent 对照没有改变该边界。
 - M10-T2 见 `V-20260720-013`：审批/Store 专项 42 项、定向 85 项和统一全量门通过；最终后端 316 项通过、1 项既有 Windows symlink 能力测试跳过。全量沙箱首轮在 Vue `tsbuildinfo` 写入处 `EPERM`，竞态补丁前后相同脚本均经批准在沙箱外退出 0，失败与最终事实均保留。
 - M10-T2 的 ApprovalRequest、原始工具参数、saver、RunStore 和 EventStore 均为同进程内存对象；只验证新 Runtime/Coordinator 实例复用共享对象后的恢复，不是操作系统进程重启、多进程或 PostgreSQL 证据。
@@ -110,4 +115,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-approval-memory.md`，再核对 `V-20260803-002`、`V-20260803-001`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 53 项、M1 7 项和连续性检查；若一致，不要重做前两个纵切，下一步只做 PostgreSQL ToolExecution 结果仲裁。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T2。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-tool-execution.md`，再核对 `V-20260803-003`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 65 项、M1 7 项和连续性检查；若一致，不要重做前三个纵切，下一步只做 lease/heartbeat 与 orphan recovery scanning。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container 或扩大到 M11-T2。

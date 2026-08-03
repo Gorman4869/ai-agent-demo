@@ -1546,3 +1546,59 @@
 
 - M11-T1 PostgreSQL Approval/Memory 第二纵切实现提交固定为 `cb4fd52`；`V-20260803-001` 的 53 项真实数据库集成、80 项受影响回归、371 项完整后端门、失败尝试与未验证范围不变。
 - 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只做 PostgreSQL ToolExecution 结果仲裁，不重做 Run/Event/checkpoint 或 Approval/Memory，不合并 lease、默认 Container 或 M11-T2。
+
+## V-20260803-003：M11-T1 PostgreSQL ToolExecution 结果仲裁
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-03，Asia/Shanghai
+- 验证目标：HEAD `bb36875` 上的 M11-T1 第三纵切工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类副作用、持久化、幂等、CAS、事务和跨进程结果未知边界，时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用用户已启动的 localhost-only 测试容器。没有读取 Key、访问模型 Provider 或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；继续使用已固定的 PostgreSQL 驱动和官方 checkpointer
+
+### 恢复、设计与范围
+
+- 开始时 `git status --short` 干净，最近提交为 `bb36875`、`cb4fd52`、`bf875be`、`8c6b011`、`8af705b`、`1766875`；按强制顺序读取 Git、AGENTS、continuity、实施计划、ADR-0004/0006/0011/0012/0014、最新 handoff、V-001/V-002、后端规约和实际代码。
+- Docker Compose 状态查询的自动权限审查因远端 stream 断开而未执行；已获准的只读 `docker exec ... pg_isready` 返回 accepting connections。handoff 恢复集随后真实 PostgreSQL 53 项、M1 7 项和连续性 52/75 通过，数据库不可达负向用例保留预期 pool timeout，无 ResourceWarning。
+- `ADR-0015` 固定 async ToolExecutionStore、Run owner 绑定、running Run 创建门、`(run_id, tool_name, key digest)` 幂等作用域、version CAS、单次 terminal settlement 和 running 恢复只能 unknown。默认 Container、lease/recovery scanning 与 M11-T2 不在本纵切。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `bb36875`，没有重做前三个已提交范围 |
+| `docker compose ... ps` / `docker exec ... pg_isready` | 未执行 / 0 | Compose 权限审查 stream 断开；更窄只读健康检查确认本地数据库 accepting connections |
+| handoff PostgreSQL、M1、连续性恢复命令 | 0 | 53 项、7 项、52 个任务/75 个 Markdown 通过；预期 pool timeout，无 ResourceWarning |
+| 新内存 ToolExecution 合同首轮 | 1 | 10 项中 9 项通过；测试取消 Run 时漏传领域要求的 `error_code`，未放宽状态机 |
+| 修正测试输入后的内存 ToolExecution 合同 | 0 | 10 项通过：owner、running 创建门、幂等、call 冲突、claim/settle CAS、unknown 与终态不可变 |
+| 首轮完整 PostgreSQL 65 项 | wrapper 0 / unittest 1 | `0003` 显式约束名与列级自动 CHECK 同名，migration 回滚；后续 fixture setup 连锁产生 63 errors 并在该进程中耗尽连接。清理环境变量的 PowerShell `finally` 遮蔽了 Python 退出码，失败以 unittest 输出为准 |
+| 强制回滚诊断事务 | 0 | PostgreSQL 返回 `DuplicateObject / 42710`：`tool_executions_version_check` 已存在；没有提交诊断 DDL |
+| 重命名约束后的 migration 专项 | 0 | 首次/重复、checksum、history gap、失败回滚 4 项通过，应用版本为 1/2/3 |
+| PostgreSQL ToolExecution 合同、跨进程与事务专项 | 0 | 12 项通过；含 terminal commit 后进程退出 17、completed 恢复、running→unknown 和 settlement trigger 回滚 |
+| 完整 `backend.tests.postgres_store_integration -q` | 0 | Run/Event/checkpoint、Approval/Memory、ToolExecution 与 migration 共 65 项通过；预期 pool timeout，无 ResourceWarning |
+| Run/Store/Coordinator/LangGraph 受影响定向回归 | 0 | 108 项通过；三条既有 notifier 负向日志，无原始异常文本 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过 |
+| `scripts/verify.ps1`（沙箱首轮） | 1 | 后端 381 项通过、1 项既有 Windows symlink 跳过；Code Agent 与依赖通过；Vue `tsbuildinfo` 报 `TS5033`/`EPERM`，MCP/Compose 尚未执行 |
+| 相同完整脚本（批准工作区构建权限后） | 0 | 后端 381 项通过、1 项跳过；Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| 聚焦复审补 Run 终态 replay 后的内存/PostgreSQL 合同 | 0 / 0 | 两个适配器各 10 项通过；终态 Run 拒绝新执行但同幂等键仍返回既有终态 |
+| `scripts/check-continuity.ps1` / `git diff --check` | 0 / 0 | 新 ADR/handoff 后 52 个稳定任务、77 个 Markdown 通过；无 whitespace 错误，仅有 Git 的 LF/CRLF 转换提示 |
+
+### 实现与安全证据
+
+- 新增 async `ToolExecutionStore`、稳定冲突/未找到/非法转换错误和 `InMemoryToolExecutionStore`；owner 只由父 Run 验证，新记录只允许在 running Run 以 pending/version 0 创建。
+- `0003_tool_execution_store.sql` 只保存 arguments/result/idempotency digest、有界安全摘要和状态元数据；唯一 call、partial idempotency index、状态/version、时间和 outcome CHECK 与领域对象共同 fail closed。
+- PostgreSQL 创建锁 Run 行；claim 与 terminal settlement 锁 ToolExecution 行并检查 expected version。并发 claim/settle 各只有一个赢家，同键同参数返回既有权威状态，同键改参数稳定冲突。
+- 三个不同 PID 的 probe 依次 prepare、terminal commit 后异常退出、recover；stdout 只含 phase、PID、ID 和布尔结论，不含原始参数、结果或 key。恢复 completed 不重放，遗留 running 只转 terminal unknown。
+- 触发器拒绝 completed UPDATE 时整次 settlement 回滚，记录保持 running 且无 result digest；移除触发器后由显式恢复动作转 unknown。数据库错误不回退内存、不输出 DSN 或原始数据。
+
+### 失败、警告与未验证范围
+
+- Compose 权限审查 stream 断开、测试输入漏字段、migration 约束重名、首轮 PostgreSQL 连锁 setup 错误和 ad-hoc PowerShell 退出码遮蔽均保留。后续命令显式保存 `$LASTEXITCODE`；修正后 migration、PostgreSQL、定向、M1 和完整门均通过。
+- 完整门首次仍受沙箱 Vue `tsbuildinfo` EPERM 影响，批准后通过；后端保留一条既有 `StarletteDeprecationWarning` 和 1 项 Windows symlink 跳过，数据库不可达负向用例保留预期 pool timeout。
+- ToolExecution 持久仲裁不等于外部系统与数据库分布式 exactly-once。没有把 Store 接入默认 Container、ToolRegistry、Approval Runtime、Replanning Runtime 或 HTTP，也没有 lease、heartbeat、自动扫描、补偿、跨 pool/Run/Event/checkpoint 共同事务。
+- 本地 Compose 仍是 trust/tmpfs/localhost 课程实例；没有生产鉴权、TLS、持久卷、备份、高可用、容量或跨主机证据。没有读取 Key、调用在线模型或产生费用。
+
+### 结论
+
+- M11-T1 第三个真实 PostgreSQL 纵切达到本地 E3：ToolExecution 共同合同、真实 migration、跨连接 CAS、单次结果结算、提交后异常退出恢复与 fail-closed unknown 均可复现，不是 Fake/Mock 证据。
+- `KI-004` 与 `KI-015` 继续保持 mitigated；持久 ToolExecution 缺口已关闭，但 lease/recovery scanning、Run/Event 连接结果未知、默认主链和跨域一致性仍未关闭。M11-T1 保持 `in_progress`，下一动作只做 lease/heartbeat 与 orphan recovery scanning。

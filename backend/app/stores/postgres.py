@@ -40,6 +40,9 @@ from backend.app.stores.base import (
 )
 from backend.app.stores.postgres_migrations import apply_postgres_migrations
 from backend.app.stores.postgres_approval import PostgresApprovalStore
+from backend.app.stores.postgres_tool_execution import (
+    PostgresToolExecutionStore,
+)
 
 
 Clock = Callable[[], datetime]
@@ -86,6 +89,10 @@ class PostgresPersistence:
         self.pool = pool
         self.sync_pool = sync_pool
         self.run_store = PostgresRunStore(pool, clock=clock)
+        self.tool_execution_store = PostgresToolExecutionStore(
+            pool,
+            clock=clock,
+        )
         self.event_store = PostgresEventStore(
             self.run_store,
             pool,

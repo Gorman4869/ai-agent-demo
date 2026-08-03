@@ -562,7 +562,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增同步 `ApprovalStore`/`MemoryStore` Protocol，保留现有 ToolRegistry、记忆 API 和默认内存 Container；PostgreSQL persistence 用同一 DSN 统一管理原异步 pool 与 Approval/Memory 共享同步 pool，两类 pool 之间不宣称共同事务。
 - `0002_approval_memory_store.sql` 分离私有审批 request 与精确 grant；resolve 与 grant 同事务，consume 使用 row lock。消息按 session 计数器分配顺序并在追加事务中裁剪，长期事实保持显式批准和 owner 隔离。
 - 内存与 PostgreSQL 运行同一 Approval/Memory 合同；两个 PID 不同的进程实际恢复私有参数、决议后单次消费、消息和长期事实，probe 不输出这些内容。
-- 尚未完成：默认 async 主链接线及同步数据库调用的线程/取消边界、持久 ToolExecution 结果仲裁、lease/recovery scanning 和跨 pool 一致性。因此 M11-T1 继续保持 `in_progress`，不提前进入 M11-T2。
+- 第二纵切结束时尚未完成默认 async 主链接线及同步数据库调用的线程/取消边界、持久 ToolExecution 结果仲裁、lease/recovery scanning 和跨 pool 一致性；ToolExecution 由下面的第三纵切承接。当时 M11-T1 继续保持 `in_progress`，不提前进入 M11-T2。
+
+#### M11-T1 第三个真实纵切边界
+
+- 新增 async `ToolExecutionStore` 共同合同、内存参考实现、`0003_tool_execution_store.sql` 和 PostgreSQL 适配器；owner 由所属 Run 绑定，只有 running Run 能创建新 pending 执行。
+- 幂等摘要按 `(run_id, tool_name, digest)` 仲裁；副作用必须有 key，同键同参数返回既有权威状态，同键改参数冲突。claim 与 terminal settlement 均使用 version CAS，并发只有一个赢家。
+- 真实 PostgreSQL 跨进程 probe 覆盖 terminal commit 后进程异常退出但恢复读到 completed，以及遗留 running 显式转为 terminal unknown；触发器故障证明 settlement 失败回滚且不保存结果。
+- 尚未完成：默认 Container/Runtime 接线、同步 Approval/Memory 的 async 线程与取消边界、ToolExecution 与 Run/Event/checkpoint/外部副作用的共同事务、lease/heartbeat/recovery scanning。因此 M11-T1 保持 `in_progress`，不宣称 exactly-once，也不进入 M11-T2。
 
 ### M11-T2：真实 pgvector 文档与检索闭环
 

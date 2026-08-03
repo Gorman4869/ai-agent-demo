@@ -11,6 +11,8 @@ from backend.app.domain.run import (
     RunRecord,
     RunStatus,
     StoredRunEvent,
+    ToolExecution,
+    ToolExecutionStatus,
 )
 from backend.app.stores.base import (
     AppendEventResult,
@@ -28,6 +30,18 @@ from backend.app.stores.base import (
     StartCommitResult,
     TerminalCommit,
     TerminalCommitResult,
+)
+from backend.app.stores.tool_execution import (
+    CreateToolExecutionResult,
+    InvalidToolExecutionTransitionError,
+    ToolExecutionConflictError,
+    ToolExecutionNotFoundError,
+    _call_replay_matches,
+    _idempotency_replay_matches,
+    _require_expected_version,
+    _require_new_tool_execution,
+    _TOOL_RESULT_MISSING,
+    _transition_tool_execution,
 )
 
 
@@ -134,6 +148,177 @@ class InMemoryRunStore:
         if record is None or record.owner_id != owner_id:
             return None
         return record
+
+
+class InMemoryToolExecutionStore:
+    """Single-event-loop tool arbitration bound to an in-memory Run Store."""
+
+    def __init__(
+        self,
+        run_store: InMemoryRunStore,
+        *,
+        clock: Clock | None = None,
+    ) -> None:
+        self._run_store = run_store
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._lock = asyncio.Lock()
+        self._executions: dict[str, ToolExecution] = {}
+        self._call_index: dict[tuple[str, str], str] = {}
+        self._idempotency_index: dict[tuple[str, str, str], str] = {}
+
+    async def create(
+        self,
+        record: ToolExecution,
+        *,
+        owner_id: str,
+    ) -> CreateToolExecutionResult:
+        _require_new_tool_execution(record)
+        async with self._run_store._lock:
+            run = self._run_store._get_owned_unlocked(
+                record.run_id,
+                owner_id=owner_id,
+            )
+            if run is None:
+                raise RunNotFoundError()
+            async with self._lock:
+                replay = self._find_create_replay_unlocked(record)
+                if replay is not None:
+                    return CreateToolExecutionResult(
+                        record=replay,
+                        created=False,
+                    )
+                if run.status is not RunStatus.RUNNING:
+                    raise InvalidToolExecutionTransitionError()
+                self._executions[record.id] = record
+                self._call_index[(record.run_id, record.tool_call_id)] = record.id
+                if record.idempotency_key_digest is not None:
+                    self._idempotency_index[
+                        (
+                            record.run_id,
+                            record.tool_name,
+                            record.idempotency_key_digest,
+                        )
+                    ] = record.id
+                return CreateToolExecutionResult(record=record, created=True)
+
+    async def get(
+        self,
+        execution_id: str,
+        *,
+        owner_id: str,
+    ) -> ToolExecution | None:
+        async with self._run_store._lock:
+            async with self._lock:
+                return self._get_owned_unlocked(
+                    execution_id,
+                    owner_id=owner_id,
+                )
+
+    async def list_for_run(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[ToolExecution, ...]:
+        async with self._run_store._lock:
+            run = self._run_store._get_owned_unlocked(
+                run_id,
+                owner_id=owner_id,
+            )
+            if run is None:
+                return ()
+            async with self._lock:
+                records = (
+                    record
+                    for record in self._executions.values()
+                    if record.run_id == run_id
+                )
+                return tuple(
+                    sorted(records, key=lambda item: (item.created_at, item.id))
+                )
+
+    async def transition(
+        self,
+        execution_id: str,
+        *,
+        owner_id: str,
+        expected_version: int,
+        target_status: ToolExecutionStatus | str,
+        result: object = _TOOL_RESULT_MISSING,
+        result_summary: str | None = None,
+        error_code: str | None = None,
+        public_message: str | None = None,
+    ) -> ToolExecution:
+        _require_expected_version(expected_version)
+        async with self._run_store._lock:
+            async with self._lock:
+                current = self._get_owned_unlocked(
+                    execution_id,
+                    owner_id=owner_id,
+                )
+                if current is None:
+                    raise ToolExecutionNotFoundError()
+                if current.version != expected_version:
+                    raise ConcurrentWriteError()
+                updated = _transition_tool_execution(
+                    current,
+                    target_status,
+                    at=self._clock(),
+                    result=result,
+                    result_summary=result_summary,
+                    error_code=error_code,
+                    public_message=public_message,
+                )
+                self._executions[execution_id] = updated
+                return updated
+
+    def _find_create_replay_unlocked(
+        self,
+        candidate: ToolExecution,
+    ) -> ToolExecution | None:
+        if candidate.idempotency_key_digest is not None:
+            scope = (
+                candidate.run_id,
+                candidate.tool_name,
+                candidate.idempotency_key_digest,
+            )
+            existing_id = self._idempotency_index.get(scope)
+            if existing_id is not None:
+                existing = self._executions[existing_id]
+                if not _idempotency_replay_matches(existing, candidate):
+                    raise IdempotencyConflictError()
+                return existing
+
+        existing = self._executions.get(candidate.id)
+        if existing is not None:
+            if not _call_replay_matches(existing, candidate):
+                raise ToolExecutionConflictError()
+            return existing
+
+        call_id = self._call_index.get(
+            (candidate.run_id, candidate.tool_call_id)
+        )
+        if call_id is not None:
+            existing = self._executions[call_id]
+            if not _call_replay_matches(existing, candidate):
+                raise ToolExecutionConflictError()
+            return existing
+        return None
+
+    def _get_owned_unlocked(
+        self,
+        execution_id: str,
+        *,
+        owner_id: str,
+    ) -> ToolExecution | None:
+        record = self._executions.get(execution_id)
+        if record is None:
+            return None
+        run = self._run_store._get_owned_unlocked(
+            record.run_id,
+            owner_id=owner_id,
+        )
+        return record if run is not None else None
 
 
 class InMemoryEventStore:
