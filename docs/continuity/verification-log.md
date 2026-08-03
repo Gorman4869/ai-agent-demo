@@ -1623,3 +1623,60 @@
 
 - M11-T1 PostgreSQL ToolExecution 第三纵切实现提交固定为 `0de735d`；`V-20260803-003` 的 65 项真实数据库集成、108 项受影响回归、381 项完整后端门、失败尝试和未验证范围不变。
 - 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只做 lease/heartbeat 与 orphan recovery scanning，不重做前三个纵切，不迁移默认 Container，也不进入 M11-T2。
+
+## V-20260803-005：M11-T1 PostgreSQL Run lease 与 orphan recovery
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-03，Asia/Shanghai
+- 验证目标：HEAD `1219737` 上的 M11-T1 第四纵切工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类持久化凭证、并发租约、故障恢复、migration 与跨进程仲裁，时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用用户已启动的 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问模型 Provider 或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；继续使用已固定的 PostgreSQL 驱动和官方 checkpointer
+
+### 恢复、设计与范围
+
+- 开始时 `git status --short` 干净，最近提交为 `1219737`、`0de735d`、`bb36875`、`cb4fd52`、`bf875be`、`8c6b011`；按强制顺序读取 Git、AGENTS、continuity、实施计划、ADR-0004/0006/0011/0012/0014/0015、最新 handoff、V-003/V-004、后端规约和实际 Store/migration/test。
+- `docker exec ... pg_isready` 返回 accepting connections；handoff 恢复集的 PostgreSQL 65 项、M1 7 项和连续性 52/77 通过，不可达数据库负向用例保留预期 pool timeout，无 ResourceWarning。实际代码与记录一致，没有登记漂移。
+- `ADR-0016` 固定服务端生成 token、数据库时钟过期、heartbeat/release token+version CAS、`FOR UPDATE SKIP LOCKED` scanner，以及 running ToolExecution=unknown、pending/waiting=cancelled、Run=`run_orphaned` 的 fail-closed 顺序。默认 Container/Coordinator、后台调度、同步 Approval/Memory async 边界与 M11-T2 不在本纵切。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `1219737`，没有重做前三个已提交纵切 |
+| `docker exec ... pg_isready` | 0 | 本地数据库 accepting connections |
+| handoff PostgreSQL、M1、连续性恢复命令 | 0 | 65 项、7 项、52 个任务/77 个 Markdown 通过；预期 pool timeout，无 ResourceWarning |
+| 首轮内存 lease/recovery 专项 | 0 | 11 项通过；owner/running 门、token 隐藏、heartbeat/release CAS、过期领用、scanner 竞争、工具/Run 恢复和部分故障收敛 |
+| 首轮 migration/lease/四进程 PostgreSQL 专项 | 1 | migration 4 项与四进程恢复 1 项通过；7 项 PostgreSQL lease 合同因固定 Run 时间晚于未注入的 RunStore 时钟而在 fixture 准备阶段报“时间倒退”，没有放宽领域校验 |
+| 给 PostgreSQL 合同注入既有固定时钟后重跑同组 | 0 | migration 4 项、lease 合同 7 项、四进程恢复 1 项，共 12 项通过 |
+| PostgreSQL token 摘要与 recovery trigger 专项 | 0 | 9 项通过；表内只有 token SHA-256，Run/Event 插入故障回滚后下一次 scanner 收敛 |
+| 首轮完整 `backend.tests.postgres_store_integration -q` | 0 | migration 1–4、前三纵切、lease/recovery 共 75 项通过；预期 pool timeout，无 ResourceWarning |
+| 首轮受影响 Run/Store/Coordinator/LangGraph 回归 | 0 | 129 项通过；三条既有 notifier 负向日志，无原始异常文本 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过 |
+| `scripts/verify.ps1`（沙箱首轮） | 1 | 后端 393 项通过、1 项既有 Windows symlink 跳过；Code Agent 与依赖通过；Vue `tsbuildinfo` 报 `TS5033`/`EPERM`，MCP/Compose 尚未执行 |
+| 相同完整脚本（批准工作区构建权限后） | 0 | 后端 393 项通过、1 项跳过；Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| 聚焦锁序复审后的内存/PostgreSQL 专项 | 0 / 0 | 内存 lease/recovery 13 项、PostgreSQL lease/recovery 11 项通过；heartbeat 固定 Run row→lease row 锁序，终态 Run 不能续约 |
+| 最终完整 PostgreSQL / 受影响回归 | 0 / 0 | PostgreSQL 76 项、Run/Store/Coordinator/LangGraph 131 项通过；预期 pool timeout与三条 notifier 负向日志保持 |
+| 锁序修正后的最终 `scripts/verify.ps1`（已批准权限） | 0 | 后端 394 项通过、1 项跳过；Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| `scripts/check-continuity.ps1` / `git diff --check` | 0 / 0 | 52 个稳定任务、79 个 Markdown 通过；无 whitespace 错误，仅有 Git 的 LF/CRLF 转换提示 |
+
+### 实现、并发与隐私证据
+
+- 新增 async `RunLeaseStore`、repr-safe `LeaseToken`、内存参考实现、`0004_run_leases.sql` 和 `PostgresRunLeaseStore`。只有 running owned Run 能 acquire，每 Run 一条记录；普通 executor 不覆盖过期租约。
+- PostgreSQL 使用 `clock_timestamp()` 判断 acquire/heartbeat/release/scan 的时间，表只保存 token SHA-256。heartbeat 先锁 Run row 再锁 lease row，并要求 running、未过期、token/version 全部匹配；旧 handle 统一 `run_lease_lost`。
+- `claim_expired()` 有界排序并使用 `FOR UPDATE SKIP LOCKED` 轮换 recovery token。prepare 进程创建 execution lease 后以 17 退出，两个 scanner 进程并发时只有一个返回 recovered，第四个审计进程确认 Run failed、running tool unknown、pending tool cancelled、单一终态事件和 lease release；stdout 不含 token、参数、key 或结果。
+- 显式 `RunRecoveryService` 先结算 ToolExecution，再用现有 `TerminalCommit` 提交 `failed + run.failed`，最后 release。真实触发器拒绝 recovery event 时 Run 更新整事务回滚而工具保持 unknown；recovery lease 再过期后下一次扫描完成 Run 终态。
+- terminal 或 waiting approval Run 只清理 lease，不伪造 `run_orphaned`。取消和非 Store 程序错误不被吞掉；StoreError 只记录稳定 code，凭证和数据库异常文本不越界。
+
+### 失败、警告与未验证范围
+
+- 初次 ADR 路径使用推测文件名、两次窄 `apply_patch` 上下文不匹配和一次 Windows 路径正则无匹配均未修改文件；改按实际路径/上下文后继续。PostgreSQL 合同首轮 fixture 时钟错误保留，注入与既有合同一致的固定时钟后通过，未修改领域时间不变量。
+- 完整门首次仍受沙箱 Vue `tsbuildinfo` EPERM 影响，批准后通过；锁序复审后最终完整门再次通过。后端保留一条既有 `StarletteDeprecationWarning` 和 1 项 Windows symlink 跳过，数据库不可达负向用例保留预期 pool timeout。
+- ToolExecution 结算、Run/Event 终态和 lease release 是分离事务；触发器测试证明可收敛，不等于原子快照或外部副作用 exactly-once。恢复期间可短暂观察到工具已终态而 Run 仍 running。
+- 本纵切不把 lease 注入默认 Container/RunCoordinator，不运行 heartbeat 任务或 lifespan scanner，也不证明统一应用重启恢复、同步 Approval/Memory 的 async 线程/取消、生产鉴权/TLS/持久卷/备份/高可用/容量或跨主机能力。
+- 没有读取 Key、调用在线模型或产生费用；本轮外部执行只有用户已启动且 localhost-only 的本机 PostgreSQL 测试容器。
+
+### 结论
+
+- M11-T1 第四个真实 PostgreSQL 纵切达到本地 E3：数据库时钟 lease、opaque token 摘要、heartbeat/version CAS、多进程 scanner 单赢家、running ToolExecution/Run fail-closed 和故障后收敛均可复现，不是 Fake/Mock 证据。
+- `KI-004` 与 `KI-016` 保持 mitigated，`KI-023` 保持 open；M11-T1 继续 `in_progress`。下一条原子动作只做显式注入的 RunCoordinator lease 生命周期，不迁移默认 Container/HTTP，不合并同步 Approval/Memory async 边界，也不进入 M11-T2。

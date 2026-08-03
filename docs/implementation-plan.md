@@ -571,6 +571,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 真实 PostgreSQL 跨进程 probe 覆盖 terminal commit 后进程异常退出但恢复读到 completed，以及遗留 running 显式转为 terminal unknown；触发器故障证明 settlement 失败回滚且不保存结果。
 - 尚未完成：默认 Container/Runtime 接线、同步 Approval/Memory 的 async 线程与取消边界、ToolExecution 与 Run/Event/checkpoint/外部副作用的共同事务、lease/heartbeat/recovery scanning。因此 M11-T1 保持 `in_progress`，不宣称 exactly-once，也不进入 M11-T2。
 
+#### M11-T1 第四个真实纵切边界
+
+- 新增 async `RunLeaseStore` 共同合同、内存参考实现、`0004_run_leases.sql` 和 PostgreSQL 适配器。Store 生成 opaque token，handle 的字符串与安全摘要不暴露原值，数据库只保存 SHA-256；PostgreSQL 以数据库时钟判断过期。
+- acquire 只允许 running owned Run 且不覆盖过期记录；heartbeat/release 必须匹配未过期 token/version。scanner 使用 `FOR UPDATE SKIP LOCKED` 轮换 recovery token，旧执行者不能复活租约。
+- 显式 `RunRecoveryService` 把 running ToolExecution 终结为 unknown、pending/waiting 终结为 cancelled，再提交非重试 `run_orphaned` Run 终态；跨 Store 故障靠 recovery lease 再过期继续收敛，不宣称共同事务或 exactly-once。
+- 真实 PostgreSQL 四进程 probe 证明崩溃持有者留下的过期租约在两个 scanner 竞争时只有一个恢复者；触发器故障证明工具先收敛而 Run/Event 回滚，下一次扫描可完成终态。
+- 尚未完成：默认 Container/Coordinator 的 acquire/heartbeat/release 与 scanner 调度、同步 Approval/Memory 的 async 线程和取消边界、统一应用重启恢复及跨外部系统 exactly-once。因此 M11-T1 保持 `in_progress`，不进入 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。

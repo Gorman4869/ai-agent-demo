@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import selectors
 import subprocess
 import sys
 import unittest
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from backend.app.domain.run import (
     RunRecord,
@@ -15,8 +16,13 @@ from backend.app.domain.run import (
     ToolExecution,
     ToolExecutionStatus,
 )
+from backend.app.services.run_recovery import (
+    RunRecoveryService,
+    RunRecoveryStatus,
+)
 from backend.app.stores import (
     EventStore,
+    RunLeaseStore,
     RunStore,
     StoreUnavailableError,
     ToolExecutionStore,
@@ -35,6 +41,11 @@ from backend.app.tools import ApprovalResponse
 from backend.tests.test_approval_store_contract import ApprovalStoreContract
 from backend.tests.test_memory_store_contract import MemoryStoreContract
 from backend.tests.test_run_store_contract import RunStoreContract, STORE_NOW
+from backend.tests.test_run_lease_store_contract import (
+    LEASE_NOW,
+    SHORT_LEASE_TTL,
+    RunLeaseStoreContract,
+)
 from backend.tests.test_tool_execution_store_contract import (
     TOOL_STORE_NOW,
     ToolExecutionStoreContract,
@@ -128,6 +139,54 @@ class PostgresToolExecutionStoreContractTest(
         await self.persistence.close()
 
 
+class PostgresRunLeaseStoreContractTest(
+    RunLeaseStoreContract,
+    unittest.IsolatedAsyncioTestCase,
+):
+    async def create_store_bundle(
+        self,
+    ) -> tuple[RunStore, RunLeaseStore]:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            clock=lambda: LEASE_NOW + timedelta(seconds=1),
+        )
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+        return self.persistence.run_store, self.persistence.run_lease_store
+
+    async def expire_short_lease(self) -> None:
+        await asyncio.sleep(SHORT_LEASE_TTL.total_seconds() + 0.2)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_raw_lease_token_is_not_persisted(self) -> None:
+        run = await self._create_running_run()
+        lease = await self.lease_store.acquire(
+            run.id,
+            owner_id=run.owner_id,
+            ttl=timedelta(seconds=10),
+        )
+        async with self.persistence.pool.connection() as connection:
+            result = await connection.execute(
+                """
+                SELECT lease_token_digest
+                FROM agent_run_leases
+                WHERE run_id = %s
+                """,
+                (run.id,),
+            )
+            row = await result.fetchone()
+
+        raw_token = lease.token.reveal()
+        self.assertIsNotNone(row)
+        self.assertNotEqual(raw_token, row["lease_token_digest"])
+        self.assertEqual(
+            hashlib.sha256(raw_token.encode("ascii")).hexdigest(),
+            row["lease_token_digest"].strip(),
+        )
+
+
 class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
@@ -140,10 +199,10 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         first = await apply_postgres_migrations(self.persistence.pool)
         second = await apply_postgres_migrations(self.persistence.pool)
 
-        self.assertEqual((1, 2, 3), first)
+        self.assertEqual((1, 2, 3, 4), first)
         self.assertEqual((), second)
         self.assertEqual(
-            [1, 2, 3],
+            [1, 2, 3, 4],
             await _applied_versions(self.persistence),
         )
 
@@ -196,7 +255,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         await apply_postgres_migrations(self.persistence.pool)
         migrations = load_sql_migrations()
         broken = SqlMigration.from_sql(
-            version=4,
+            version=5,
             name="broken_transaction",
             sql="""
             CREATE TABLE migration_should_rollback (id integer PRIMARY KEY);
@@ -211,7 +270,10 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual("migration_apply_failed", raised.exception.code)
-        self.assertEqual([1, 2, 3], await _applied_versions(self.persistence))
+        self.assertEqual(
+            [1, 2, 3, 4],
+            await _applied_versions(self.persistence),
+        )
         self.assertIsNone(
             await _relation_name(self.persistence, "migration_should_rollback")
         )
@@ -397,6 +459,157 @@ class PostgresToolExecutionProcessTest(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class PostgresRunRecoveryProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await persistence.setup()
+            await _reset_app_data(persistence)
+        finally:
+            await persistence.close()
+
+    async def test_two_process_scanners_claim_one_expired_orphan(self) -> None:
+        prepared = await _run_recovery_probe(
+            "prepare-crash",
+            expected_returncode=17,
+        )
+        await asyncio.sleep(0.6)
+        scans = await _run_recovery_scanners()
+        audited = await _run_recovery_probe("audit")
+
+        self.assertEqual("prepare-crash", prepared["phase"])
+        self.assertTrue(prepared["lease_created"])
+        self.assertEqual(1, sum(item["recovered_count"] for item in scans))
+        self.assertEqual({"scan"}, {item["phase"] for item in scans})
+        self.assertEqual(
+            4,
+            len(
+                {
+                    prepared["process_id"],
+                    scans[0]["process_id"],
+                    scans[1]["process_id"],
+                    audited["process_id"],
+                }
+            ),
+        )
+        self.assertEqual(
+            {
+                "phase": "audit",
+                "process_id": audited["process_id"],
+                "run_failed": True,
+                "running_tool_unknown": True,
+                "pending_tool_cancelled": True,
+                "single_recovery_event": True,
+                "lease_released": True,
+            },
+            audited,
+        )
+
+
+class PostgresRunRecoveryTransactionTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_terminal_event_failure_retries_after_tool_unknown(self) -> None:
+        now = datetime.now(UTC)
+        run = RunRecord.create(
+            run_id="recovery-transaction-run",
+            session_id="recovery-transaction-session",
+            owner_id="recovery-transaction-owner",
+            runtime="manual",
+            input_text="private recovery transaction input",
+            idempotency_key="private-recovery-transaction-key",
+            created_at=now,
+        )
+        await self.persistence.run_store.create(run)
+        running_run = (
+            await self.persistence.event_store.commit_start(
+                StartCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=run.version,
+                    event_id="recovery-transaction-started",
+                    event_data={"status": "running", "runtime": "manual"},
+                )
+            )
+        ).record
+        execution = ToolExecution.create(
+            execution_id="recovery-transaction-tool",
+            run_id=run.id,
+            tool_call_id="recovery-transaction-call",
+            tool_name="publish_report",
+            arguments={"document_id": "private-transaction-document"},
+            side_effecting=True,
+            idempotency_key="private-recovery-tool-key",
+            created_at=now,
+        )
+        await self.persistence.tool_execution_store.create(
+            execution,
+            owner_id=run.owner_id,
+        )
+        await self.persistence.tool_execution_store.transition(
+            execution.id,
+            owner_id=run.owner_id,
+            expected_version=execution.version,
+            target_status=ToolExecutionStatus.RUNNING,
+        )
+        await self.persistence.run_lease_store.acquire(
+            run.id,
+            owner_id=run.owner_id,
+            ttl=SHORT_LEASE_TTL,
+        )
+        await asyncio.sleep(SHORT_LEASE_TTL.total_seconds() + 0.2)
+        service = RunRecoveryService(
+            run_store=self.persistence.run_store,
+            event_store=self.persistence.event_store,
+            tool_execution_store=self.persistence.tool_execution_store,
+            run_lease_store=self.persistence.run_lease_store,
+        )
+
+        await _install_recovery_event_failure_trigger(self.persistence)
+        try:
+            first = await service.scan_once(
+                recovery_ttl=SHORT_LEASE_TTL
+            )
+        finally:
+            await _remove_recovery_event_failure_trigger(self.persistence)
+
+        self.assertEqual(RunRecoveryStatus.FAILED, first[0].status)
+        self.assertEqual("store_unavailable", first[0].error_code)
+        stored_run = await self.persistence.run_store.get(
+            run.id,
+            owner_id=run.owner_id,
+        )
+        stored_tool = await self.persistence.tool_execution_store.get(
+            execution.id,
+            owner_id=run.owner_id,
+        )
+        self.assertEqual(RunStatus.RUNNING, stored_run.status)
+        self.assertEqual(running_run.version, stored_run.version)
+        self.assertEqual(ToolExecutionStatus.UNKNOWN, stored_tool.status)
+
+        await asyncio.sleep(SHORT_LEASE_TTL.total_seconds() + 0.2)
+        second = await service.scan_once()
+
+        self.assertEqual(RunRecoveryStatus.RECOVERED, second[0].status)
+        recovered = await self.persistence.run_store.get(
+            run.id,
+            owner_id=run.owner_id,
+        )
+        events = await self.persistence.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+        self.assertEqual(RunStatus.FAILED, recovered.status)
+        self.assertEqual("run_orphaned", recovered.failure.code)
+        self.assertEqual(1, sum(event.type == "run.failed" for event in events))
+
+
 class PostgresToolExecutionTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.persistence = await PostgresPersistence.open(
@@ -577,6 +790,7 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
     async with persistence.pool.connection() as connection:
         await connection.execute(
             """
+            DROP TABLE IF EXISTS agent_run_leases CASCADE;
             DROP TABLE IF EXISTS tool_executions CASCADE;
             DROP TABLE IF EXISTS conversation_memory_facts CASCADE;
             DROP TABLE IF EXISTS conversation_messages CASCADE;
@@ -628,6 +842,48 @@ async def _remove_event_failure_trigger(
             DROP TRIGGER IF EXISTS m11_reject_fault_event_trigger
                 ON agent_run_events;
             DROP FUNCTION IF EXISTS m11_reject_fault_event();
+            """,
+            prepare=False,
+        )
+
+
+async def _install_recovery_event_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            CREATE OR REPLACE FUNCTION m11_reject_recovery_event()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.type = 'run.failed'
+                   AND NEW.data ->> 'failure_code' = 'run_orphaned' THEN
+                    RAISE EXCEPTION 'injected recovery event failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+
+            CREATE TRIGGER m11_reject_recovery_event_trigger
+            BEFORE INSERT ON agent_run_events
+            FOR EACH ROW
+            EXECUTE FUNCTION m11_reject_recovery_event();
+            """,
+            prepare=False,
+        )
+
+
+async def _remove_recovery_event_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            DROP TRIGGER IF EXISTS m11_reject_recovery_event_trigger
+                ON agent_run_events;
+            DROP FUNCTION IF EXISTS m11_reject_recovery_event();
             """,
             prepare=False,
         )
@@ -902,6 +1158,123 @@ def _run_tool_execution_probe_sync(
     lines = [line for line in stdout.splitlines() if line]
     if len(lines) != 1:
         raise AssertionError("tool execution probe output is not bounded JSON")
+    return json.loads(lines[0])
+
+
+async def _run_recovery_probe(
+    phase: str,
+    *,
+    expected_returncode: int = 0,
+) -> dict[str, object]:
+    return await asyncio.to_thread(
+        _run_recovery_probe_sync,
+        phase,
+        expected_returncode,
+    )
+
+
+def _run_recovery_probe_sync(
+    phase: str,
+    expected_returncode: int,
+) -> dict[str, object]:
+    process = subprocess.run(
+        _recovery_probe_command(phase),
+        cwd=os.getcwd(),
+        env=_recovery_probe_environment(),
+        capture_output=True,
+        check=False,
+    )
+    return _decode_recovery_probe(
+        process,
+        expected_returncode=expected_returncode,
+    )
+
+
+async def _run_recovery_scanners() -> tuple[dict[str, object], ...]:
+    return await asyncio.to_thread(_run_recovery_scanners_sync)
+
+
+def _run_recovery_scanners_sync() -> tuple[dict[str, object], ...]:
+    processes = tuple(
+        subprocess.Popen(
+            _recovery_probe_command("scan"),
+            cwd=os.getcwd(),
+            env=_recovery_probe_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for _ in range(2)
+    )
+    completed: list[subprocess.CompletedProcess[bytes]] = []
+    for process in processes:
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise AssertionError("recovery scanner probe timed out")
+        completed.append(
+            subprocess.CompletedProcess(
+                process.args,
+                process.returncode,
+                stdout,
+                stderr,
+            )
+        )
+    return tuple(
+        _decode_recovery_probe(process, expected_returncode=0)
+        for process in completed
+    )
+
+
+def _recovery_probe_command(phase: str) -> list[str]:
+    return [
+        sys.executable,
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "backend.app.stores.postgres_recovery_probe",
+        "--phase",
+        phase,
+    ]
+
+
+def _recovery_probe_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+    return environment
+
+
+def _decode_recovery_probe(
+    process: subprocess.CompletedProcess[bytes],
+    *,
+    expected_returncode: int,
+) -> dict[str, object]:
+    if process.returncode != expected_returncode:
+        raise AssertionError(
+            f"recovery probe failed with code {process.returncode}: "
+            f"{process.stderr.decode('utf-8', errors='replace')}"
+        )
+    if process.stderr:
+        raise AssertionError(
+            "recovery probe wrote stderr: "
+            + process.stderr.decode("utf-8", errors="replace")
+        )
+    stdout = process.stdout.decode("utf-8")
+    for private_value in (
+        "private orphan recovery process probe",
+        "private-recovery-run-key",
+        "private-running-document",
+        "private-pending-document",
+        "private-running-tool-key",
+        "private-pending-tool-key",
+    ):
+        if private_value in stdout:
+            raise AssertionError("recovery probe exposed private data")
+    lines = [line for line in stdout.splitlines() if line]
+    if len(lines) != 1:
+        raise AssertionError("recovery probe output is not bounded JSON")
     return json.loads(lines[0])
 
 

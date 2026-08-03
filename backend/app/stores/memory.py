@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import islice
 
 from backend.app.domain.run import (
@@ -30,6 +31,21 @@ from backend.app.stores.base import (
     StartCommitResult,
     TerminalCommit,
     TerminalCommitResult,
+)
+from backend.app.stores.run_lease import (
+    RunLease,
+    RunLeaseLostError,
+    RunLeaseMode,
+    RunLeaseUnavailableError,
+    TokenFactory,
+    _as_utc,
+    _issue_token,
+    _require_lease,
+    _require_scan_limit,
+    _require_ttl,
+    _StoredRunLease,
+    _to_handle,
+    _token_digest,
 )
 from backend.app.stores.tool_execution import (
     CreateToolExecutionResult,
@@ -148,6 +164,179 @@ class InMemoryRunStore:
         if record is None or record.owner_id != owner_id:
             return None
         return record
+
+
+class InMemoryRunLeaseStore:
+    """Single-event-loop lease arbitration bound to an in-memory Run Store."""
+
+    def __init__(
+        self,
+        run_store: InMemoryRunStore,
+        *,
+        clock: Clock | None = None,
+        token_factory: TokenFactory | None = None,
+    ) -> None:
+        self._run_store = run_store
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._token_factory = token_factory
+        self._lock = asyncio.Lock()
+        self._leases: dict[str, _StoredRunLease] = {}
+
+    async def acquire(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        ttl: timedelta,
+    ) -> RunLease:
+        ttl = _require_ttl(ttl)
+        token = _issue_token(self._token_factory)
+        async with self._run_store._lock:
+            run = self._run_store._get_owned_unlocked(
+                run_id,
+                owner_id=owner_id,
+            )
+            if run is None:
+                raise RunNotFoundError()
+            if run.status is not RunStatus.RUNNING:
+                raise InvalidRunTransitionError()
+            async with self._lock:
+                if run_id in self._leases:
+                    raise RunLeaseUnavailableError()
+                now = _as_utc(self._clock(), "lease clock")
+                stored = _StoredRunLease(
+                    run_id=run_id,
+                    mode=RunLeaseMode.EXECUTION,
+                    token_digest=_token_digest(token),
+                    version=0,
+                    acquired_at=now,
+                    heartbeat_at=now,
+                    expires_at=now + ttl,
+                )
+                self._leases[run_id] = stored
+                return _to_handle(
+                    stored,
+                    owner_id=owner_id,
+                    token=token,
+                )
+
+    async def heartbeat(
+        self,
+        lease: RunLease,
+        *,
+        ttl: timedelta,
+    ) -> RunLease:
+        lease = _require_lease(lease)
+        ttl = _require_ttl(ttl)
+        async with self._run_store._lock:
+            run = self._run_store._get_owned_unlocked(
+                lease.run_id,
+                owner_id=lease.owner_id,
+            )
+            async with self._lock:
+                now = _as_utc(self._clock(), "lease clock")
+                current = self._leases.get(lease.run_id)
+                if (
+                    run is None
+                    or run.status is not RunStatus.RUNNING
+                    or not _lease_matches(current, lease)
+                    or current.expires_at <= now
+                ):
+                    raise RunLeaseLostError()
+                if now < current.heartbeat_at:
+                    raise ValueError("lease clock must not move backwards")
+                updated = _StoredRunLease(
+                    run_id=current.run_id,
+                    mode=current.mode,
+                    token_digest=current.token_digest,
+                    version=current.version + 1,
+                    acquired_at=current.acquired_at,
+                    heartbeat_at=now,
+                    expires_at=now + ttl,
+                )
+                self._leases[lease.run_id] = updated
+                return _to_handle(
+                    updated,
+                    owner_id=lease.owner_id,
+                    token=lease.token,
+                )
+
+    async def release(self, lease: RunLease) -> None:
+        lease = _require_lease(lease)
+        async with self._run_store._lock:
+            run = self._run_store._get_owned_unlocked(
+                lease.run_id,
+                owner_id=lease.owner_id,
+            )
+            async with self._lock:
+                now = _as_utc(self._clock(), "lease clock")
+                current = self._leases.get(lease.run_id)
+                if (
+                    run is None
+                    or not _lease_matches(current, lease)
+                    or current.expires_at <= now
+                ):
+                    raise RunLeaseLostError()
+                self._leases.pop(lease.run_id)
+
+    async def claim_expired(
+        self,
+        *,
+        limit: int,
+        ttl: timedelta,
+    ) -> tuple[RunLease, ...]:
+        limit = _require_scan_limit(limit)
+        ttl = _require_ttl(ttl)
+        async with self._run_store._lock:
+            async with self._lock:
+                now = _as_utc(self._clock(), "lease clock")
+                expired = sorted(
+                    (
+                        stored
+                        for stored in self._leases.values()
+                        if stored.expires_at <= now
+                    ),
+                    key=lambda stored: (stored.expires_at, stored.run_id),
+                )[:limit]
+                claimed: list[RunLease] = []
+                for current in expired:
+                    run = self._run_store._runs.get(current.run_id)
+                    if run is None:
+                        self._leases.pop(current.run_id, None)
+                        continue
+                    token = _issue_token(self._token_factory)
+                    updated = _StoredRunLease(
+                        run_id=current.run_id,
+                        mode=RunLeaseMode.RECOVERY,
+                        token_digest=_token_digest(token),
+                        version=current.version + 1,
+                        acquired_at=now,
+                        heartbeat_at=now,
+                        expires_at=now + ttl,
+                    )
+                    self._leases[current.run_id] = updated
+                    claimed.append(
+                        _to_handle(
+                            updated,
+                            owner_id=run.owner_id,
+                            token=token,
+                        )
+                    )
+                return tuple(claimed)
+
+
+def _lease_matches(
+    stored: _StoredRunLease | None,
+    lease: RunLease,
+) -> bool:
+    return (
+        stored is not None
+        and stored.version == lease.version
+        and hmac.compare_digest(
+            stored.token_digest,
+            _token_digest(lease.token),
+        )
+    )
 
 
 class InMemoryToolExecutionStore:
