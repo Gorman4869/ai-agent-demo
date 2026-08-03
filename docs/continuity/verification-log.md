@@ -1680,3 +1680,25 @@
 
 - M11-T1 第四个真实 PostgreSQL 纵切达到本地 E3：数据库时钟 lease、opaque token 摘要、heartbeat/version CAS、多进程 scanner 单赢家、running ToolExecution/Run fail-closed 和故障后收敛均可复现，不是 Fake/Mock 证据。
 - `KI-004` 与 `KI-016` 保持 mitigated，`KI-023` 保持 open；M11-T1 继续 `in_progress`。下一条原子动作只做显式注入的 RunCoordinator lease 生命周期，不迁移默认 Container/HTTP，不合并同步 Approval/Memory async 边界，也不进入 M11-T2。
+
+## V-20260803-006：M11-T1 Run lease/recovery 实现提交后恢复锚点
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-03，Asia/Shanghai
+- 验证目标：实现提交 `1fc55fb`（`feat: recover orphaned runs with postgres leases`）
+- 模式：本地真实 PostgreSQL E3；复用 healthy 的 localhost-only 测试容器。没有读取 Key、调用在线模型或产生费用
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: recover orphaned runs with postgres leases"` | 0 | 18 个本任务文件固定为实现提交 `1fc55fb`，2553 行新增、16 行删除 |
+| `git status --short` / `docker exec ... pg_isready` | 0 / 0 | 提交后工作区干净；本地 PostgreSQL accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 实现提交上真实 PostgreSQL 76 项通过；不可达数据库负向用例保留预期 pool timeout，无 ResourceWarning |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过 |
+| 新增提交锚点后的 `scripts/check-continuity.ps1` / `git diff --check` | 0 / 0 | 52 个稳定任务、80 个 Markdown 通过；无 whitespace 错误，仅有 Git 的 LF/CRLF 转换提示 |
+
+### 结论
+
+- M11-T1 PostgreSQL Run lease/orphan recovery 第四纵切实现提交固定为 `1fc55fb`；`V-20260803-005` 的 PostgreSQL 76 项、受影响 131 项、完整后端门 394 项、四进程竞争、触发器故障、失败尝试和未验证范围不变。
+- 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只做显式注入的 RunCoordinator lease 生命周期，不重做前四个纵切，不迁移默认 Container/HTTP，不合并同步 Approval/Memory async 边界，也不进入 M11-T2。

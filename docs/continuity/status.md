@@ -3,7 +3,7 @@
 - 更新时间：2026-08-03，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`0de735d`
+- 最近已确认实现提交：`1fc55fb`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -27,7 +27,7 @@
 - M11-T1 首个纵切验证基线提交：`8af705b`；实现提交：`8c6b011`
 - M11-T1 第二纵切验证基线提交：`bf875be`；实现提交：`cb4fd52`
 - M11-T1 第三纵切验证基线提交：`bb36875`；实现提交：`0de735d`
-- M11-T1 第四纵切验证基线提交：`1219737`；实现提交由后续本地 commit 固定
+- M11-T1 第四纵切验证基线提交：`1219737`；实现提交：`1fc55fb`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -41,7 +41,7 @@
 | 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015`、`ADR-0016` 与现有 Store Protocol |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | 已完成 M11-T1 第四个真实 PostgreSQL 纵切：数据库时钟 lease/heartbeat、token/version CAS、`SKIP LOCKED` orphan scanner 与显式 RunRecoveryService；两个 scanner 进程竞争同一崩溃持有者时只有一个恢复 running ToolExecution/Run，真实触发器故障可由下一轮扫描收敛 |
-| 前置证据 | `V-20260803-005`、`V-20260803-004`、`V-20260803-003`、`V-20260803-002`、`V-20260803-001`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
+| 前置证据 | `V-20260803-006`、`V-20260803-005`、`V-20260803-004`、`V-20260803-003`、`V-20260803-002`、`V-20260803-001`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
 | 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现显式注入的 RunCoordinator lease 生命周期，固定 acquire/start、heartbeat、pause/terminal/cancel release 与 lease-lost fail-closed；暂不迁移默认 Container/HTTP、不解决同步 Approval/Memory 的 async 线程边界，也不进入 M11-T2 pgvector |
 
 ## 里程碑状态
@@ -121,4 +121,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-run-lease-recovery.md`，再核对 `V-20260803-005`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 76 项、M1 7 项和连续性检查；若一致，不要重做前四个纵切，下一步只做显式 RunCoordinator lease 生命周期。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container/HTTP、扩大到同步 Approval/Memory async 边界或 M11-T2。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-run-lease-recovery-anchor.md`，再核对 `V-20260803-006`、`V-20260803-005`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 76 项、M1 7 项和连续性检查；若一致，不要重做前四个纵切，下一步只做显式 RunCoordinator lease 生命周期。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container/HTTP、扩大到同步 Approval/Memory async 边界或 M11-T2。
