@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from backend.app.tools import InMemoryApprovalStore, ToolExecutionContext
+from backend.app.tools import ApprovalStore, InMemoryApprovalStore, ToolExecutionContext
 
 
 AUTH_CONFIG_ENV = "AI_AGENT_DEMO_AUTH_JSON"
@@ -19,7 +19,7 @@ class AuthenticationError(ValueError):
 class Principal:
     principal_id: str
     roles: frozenset[str] = field(default_factory=frozenset)
-    approval_store: InMemoryApprovalStore | None = field(
+    approval_store: ApprovalStore | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -112,7 +112,7 @@ def _parse_principals(config: Mapping[str, Any]) -> dict[str, Principal]:
 
 
 def _grant_configured_approval(
-    approval_store: InMemoryApprovalStore,
+    approval_store: ApprovalStore,
     *,
     principal_id: str,
     raw_approval: object,

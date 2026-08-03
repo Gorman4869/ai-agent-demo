@@ -13,7 +13,11 @@ from backend.app.agent.approval_runtime import (
 )
 from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.services.run_coordinator import RunCoordinator
-from backend.app.stores import InMemoryEventStore, InMemoryRunStore
+from backend.app.stores import (
+    InMemoryEventStore,
+    InMemoryRunStore,
+    StoreUnavailableError,
+)
 from backend.app.tools import (
     ApprovalResolutionError,
     InMemoryApprovalStore,
@@ -96,6 +100,31 @@ class LangGraphApprovalResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("approval_expired", failed.failure.code)
         self.assertEqual("expired", events[-2].data["decision"])
         self.assertEqual([], self.side_effects)
+
+    async def test_approval_store_failure_propagates_without_false_terminal(
+        self,
+    ) -> None:
+        self.approval_store = _UnavailableApprovalStore()
+        self.runtime = self._runtime()
+        self.coordinator = self._coordinator(self.runtime)
+        self.context = ToolExecutionContext(
+            principal_id=self.run.owner_id,
+            roles=frozenset({"editor"}),
+            approval_store=self.approval_store,
+        )
+
+        with self.assertRaises(StoreUnavailableError):
+            await self._pause()
+
+        stored = await self.run_store.get(
+            self.run.id,
+            owner_id=self.run.owner_id,
+        )
+        self.assertEqual(RunStatus.RUNNING, stored.status)
+        self.assertEqual(
+            ["run.started"],
+            [event.type for event in await self._events()],
+        )
 
     async def test_duplicate_resume_across_coordinators_executes_once(self) -> None:
         await self._pause()
@@ -308,6 +337,12 @@ class ImmediateResumeNotifier:
             )
         )
         await asyncio.sleep(0)
+
+
+class _UnavailableApprovalStore(InMemoryApprovalStore):
+    def request(self, **kwargs):
+        del kwargs
+        raise StoreUnavailableError()
 
 
 def _registry(side_effects: list[str]) -> ToolRegistry:

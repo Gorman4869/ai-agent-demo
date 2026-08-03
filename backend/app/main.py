@@ -35,7 +35,7 @@ from backend.app.knowledge import (
     InMemoryKnowledgeBase,
     KnowledgeBase,
 )
-from backend.app.memory import ConversationMemory, MemoryScope
+from backend.app.memory import ConversationMemory, MemoryScope, MemoryStore
 from backend.app.observability import RunObservation
 from backend.app.security import (
     AuthenticationError,
@@ -55,7 +55,7 @@ logger = logging.getLogger("ai_agent.api")
 def create_app(
     run_service: InMemoryRunService | None = None,
     knowledge_base: KnowledgeBase | None = None,
-    memory: ConversationMemory | None = None,
+    memory: MemoryStore | None = None,
     authenticator: StaticTokenAuthenticator | None = None,
     *,
     settings: Settings | None = None,

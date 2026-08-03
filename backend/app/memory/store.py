@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 from uuid import uuid4
 
 from backend.app.domain import Message
@@ -19,6 +20,26 @@ class MemoryFact:
     key: str
     value: str
     scope: MemoryScope
+
+
+class MemoryStore(Protocol):
+    def append_message(self, session_id: str, message: Message) -> None: ...
+
+    def messages(self, session_id: str) -> tuple[Message, ...]: ...
+
+    def remember(
+        self,
+        *,
+        owner_id: str,
+        key: str,
+        value: str,
+        scope: MemoryScope,
+        approved: bool,
+    ) -> MemoryFact: ...
+
+    def facts(self, owner_id: str) -> tuple[MemoryFact, ...]: ...
+
+    def forget(self, fact_id: str, *, owner_id: str) -> bool: ...
 
 
 class ConversationMemory:
@@ -52,12 +73,13 @@ class ConversationMemory:
             raise PermissionError("long-term memory requires explicit approval")
         if not key.strip() or not value.strip():
             raise ValueError("memory key and value must not be empty")
+        checked_scope = MemoryScope(scope)
         fact = MemoryFact(
             id=str(uuid4()),
             owner_id=owner_id,
             key=key.strip(),
             value=value.strip(),
-            scope=scope,
+            scope=checked_scope,
         )
         self._facts[fact.id] = fact
         return fact

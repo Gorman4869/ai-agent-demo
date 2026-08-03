@@ -555,7 +555,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 已实现工作区纵切：固定 `psycopg[binary,pool]` 与官方 `langgraph-checkpoint-postgres`，新增带校验和和 advisory transaction lock 的应用 migration，并由共享异步连接池提供 PostgreSQL Run/Event Store 与 `AsyncPostgresSaver`。
 - 已实现工作区证据：PostgreSQL Run/Event 继承 M8 的适配器无关合同；每 Run 计数器分配事件序号，start/pause/resume/terminal 的状态与事件在一个数据库事务内提交。migration 首次/重复、校验和漂移、失败回滚和 event INSERT 故障回滚均走真实数据库。
 - 已实现工作区恢复：两个 PID 不同的 Python 进程使用相同可信 thread，从 PostgreSQL 读取 checkpoint 并把 invocation count 从 0 推进到 1、再推进到 2；数据库不可用返回稳定 `store_unavailable`，不回退内存。
-- 尚未完成：PostgreSQL Approval/Memory Store、持久私有审批参数、ToolExecution 仲裁、lease/recovery scanning、默认 Container 迁移和完整 M11-T1 验收。首个纵切只能把 M11-T1 保持为 `in_progress`，不能关闭 `KI-004`、`KI-014`、`KI-015` 或 `KI-016`。
+- 首个纵切结束时尚未完成 PostgreSQL Approval/Memory Store、持久私有审批参数、ToolExecution 仲裁、lease/recovery scanning、默认 Container 迁移和完整 M11-T1 验收；其中 Approval/Memory 由下面的第二纵切承接。当时 M11-T1 只能保持为 `in_progress`，不能关闭 `KI-004`、`KI-014`、`KI-015` 或 `KI-016`。
+
+#### M11-T1 第二个真实纵切边界
+
+- 新增同步 `ApprovalStore`/`MemoryStore` Protocol，保留现有 ToolRegistry、记忆 API 和默认内存 Container；PostgreSQL persistence 用同一 DSN 统一管理原异步 pool 与 Approval/Memory 共享同步 pool，两类 pool 之间不宣称共同事务。
+- `0002_approval_memory_store.sql` 分离私有审批 request 与精确 grant；resolve 与 grant 同事务，consume 使用 row lock。消息按 session 计数器分配顺序并在追加事务中裁剪，长期事实保持显式批准和 owner 隔离。
+- 内存与 PostgreSQL 运行同一 Approval/Memory 合同；两个 PID 不同的进程实际恢复私有参数、决议后单次消费、消息和长期事实，probe 不输出这些内容。
+- 尚未完成：默认 async 主链接线及同步数据库调用的线程/取消边界、持久 ToolExecution 结果仲裁、lease/recovery scanning 和跨 pool 一致性。因此 M11-T1 继续保持 `in_progress`，不提前进入 M11-T2。
 
 ### M11-T2：真实 pgvector 文档与检索闭环
 

@@ -13,7 +13,7 @@ from backend.app.integrations.mcp import (
     default_mcp_server_configs,
 )
 from backend.app.knowledge import InMemoryKnowledgeBase, KnowledgeBase
-from backend.app.memory import ConversationMemory
+from backend.app.memory import ConversationMemory, MemoryStore
 from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import InMemoryRunService, RunCoordinator
 from backend.app.services.run_service import (
@@ -47,7 +47,7 @@ class ApplicationContainer:
     run_coordinator: RunCoordinator
     mcp_clients: McpClientManager
     knowledge_base: KnowledgeBase
-    memory: ConversationMemory
+    memory: MemoryStore
     authenticator: StaticTokenAuthenticator
 
     @classmethod
@@ -62,7 +62,7 @@ class ApplicationContainer:
         mcp_clients: McpClientManager | None = None,
         mcp_server_configs: Mapping[str, McpServerConfig] | None = None,
         knowledge_base: KnowledgeBase | None = None,
-        memory: ConversationMemory | None = None,
+        memory: MemoryStore | None = None,
         authenticator: StaticTokenAuthenticator | None = None,
     ) -> ApplicationContainer:
         if (run_store is None) != (event_store is None):

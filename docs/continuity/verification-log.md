@@ -1462,3 +1462,65 @@
 
 - M11-T1 首个 PostgreSQL 纵切实现提交固定为 `8c6b011`；`V-20260722-009` 的 35 项集成、71 项受影响回归、完整发布门、失败尝试和本地 E3 边界不变。
 - 当前任务保持 `M11-T1 / in_progress`；下一条原子动作只做 PostgreSQL ApprovalStore/MemoryStore 和审批恢复私有参数，不重做 Run/Event/checkpoint，也不提前进入 ToolExecution/lease、默认 Container 或 M11-T2。
+
+## V-20260803-001：M11-T1 PostgreSQL Approval/Memory 第二纵切
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-03，Asia/Shanghai
+- 验证目标：HEAD `bf875be` 上的 M11-T1 第二纵切工作区；实现提交由后续本地 commit 固定
+- 任务等级：A 类身份授权、私有数据、迁移、事务和跨进程恢复边界，时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；经本轮批准启动仓库已有 localhost-only 测试容器。没有读取真实 API Key、访问模型 Provider 或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；继续使用已固定的 `psycopg[binary,pool]==3.3.4` 与 `langgraph-checkpoint-postgres==3.1.0`
+
+### 恢复、漂移与设计边界
+
+- 开始时 `git status --short` 干净；最近提交为 `bf875be`、`8c6b011`、`8af705b`、`1766875`、`07741db`、`1e332f3`，没有重做 M10 或 M11-T1 首个纵切。
+- 按强制顺序阅读 AGENTS、continuity README/status/playbook、实施计划 M11-T1 及依赖、ADR-0004/0006/0011/0012、最新 handoff、V-009/V-010、后端规约和实际 Approval/Memory/PostgreSQL 代码。首次按标题猜测四个 ADR 路径均不存在，随后用 `rg --files` 按稳定编号找到真实文件；错误路径没有用于结论或修改。
+- Docker 沙箱只读检查因 Docker config/API 权限退出 1；批准后 Docker Engine 29.3.1 可用。原测试容器不存在，经批准执行仓库 Compose 后 PostgreSQL 容器健康。
+- handoff 恢复集通过：真实 PostgreSQL 35 项、M1 7 项、52 个稳定任务/73 个 Markdown。PostgreSQL 首轮有一条 Windows asyncio 0.125 秒慢任务诊断和预期 pool timeout，无 ResourceWarning。
+- 恢复审计先登记 `KI-022`：`status.md` 顶部最近实现提交仍为 M10 的 `1e332f3`，而 Git、专项字段、handoff 与 V-010 均为 `8c6b011`。本轮修正后关闭，未改写历史 handoff。
+- `ADR-0014` 固定同步 Approval/Memory Protocol 与双 pool 边界：同一 DSN/lifecycle，不同连接池，不宣称跨 pool 事务；默认 Container、HTTP 和 M10 Runtime 不迁移。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 | 初始工作区干净，基线 `bf875be`，提交边界正确 |
+| 首次错误 ADR `Get-Content` / `rg --files` 后真实 ADR 读取 | 1 / 0 | 仅文件名猜测错误；按稳定编号纠正并完成必读，不据失败命令推断设计 |
+| `docker version`（沙箱/批准后） | 1 / 0 | 沙箱拒绝 Docker config/API；批准后 Client/Server 29.3.1 可用 |
+| `docker compose ... ps` / `up -d --wait` | 0 / 0 | 初始无容器；经批准启动既有 localhost-only PostgreSQL 测试服务并达到 healthy |
+| handoff 的 PostgreSQL、M1 与连续性恢复命令 | 0 | 35 项、7 项、52 个任务/73 个 Markdown 通过；一条非持续慢任务诊断，无 ResourceWarning |
+| 新内存合同、既有 approval/memory/tool 回归首轮 | 0 | 41 项通过；既有审批用例出现一条 Windows asyncio 0.187 秒慢任务诊断，不是 ResourceWarning |
+| PostgreSQL 集成首轮 | 0 | 51 项通过：Approval/Memory 共同合同、两个进程私有状态恢复与既有 Run/Event/checkpoint/migration 均执行 |
+| approval grant 触发器故障专项 | 0 | request resolution 更新与 grant INSERT 同事务回滚；无 resolution、无可消费 grant |
+| 首轮完整 PostgreSQL 集成 / grant 事务故障补测 | 0 / 0 | 51 项通过；补一项真实 trigger 故障，证明 resolution 与 grant 同事务回滚 |
+| 聚焦复审后的最终 `backend.tests.postgres_store_integration -q` | 0 | 补 forged resolution 读取拒绝合同后，真实 PostgreSQL 53 项通过；不可达数据库负向用例保留一条预期 pool timeout，无 ResourceWarning |
+| Approval/Memory/Runtime/API/Container 等受影响定向回归 | 0 | 最终 80 项通过；只有既有 `StarletteDeprecationWarning` |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过，PostgreSQL 专用模块保持显式导入 |
+| `scripts/verify.ps1`（沙箱首轮） | 1 | 后端 370 项通过、1 项既有 Windows symlink 跳过；Code Agent 与依赖检查通过；Vue `tsbuildinfo` 写入报 `TS5033`/`EPERM`，MCP/Compose 尚未执行 |
+| 相同完整脚本（批准工作区构建权限后） | 0 | 后端 370 项通过、1 项跳过；Code Agent、依赖、Vue 生产构建、MCP TypeScript 和 Compose 配置全部通过 |
+| forged resolution 语义修正后的相同完整脚本 | 0 | 最终后端 371 项通过、1 项跳过；Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置再次全部通过 |
+| `scripts/check-continuity.ps1` / `git diff --check` | 0 / 0 | 新 ADR/handoff 后 52 个稳定任务、75 个 Markdown 通过；无 whitespace 错误，仅有 Git 的 LF/CRLF 转换提示 |
+
+### 实现、事务与隐私证据
+
+- 新增同步 `ApprovalStore`/`MemoryStore` Protocol；现有内存实现、ToolExecutionContext、审批 Runtime、Container 和 `create_app()` 依赖抽象。审批 Store 故障从 Runtime 原样传播，测试证明 Run 留在 running 且不伪造终态。
+- `0002_approval_memory_store.sql` 分离 request 私有参数与精确 grant；私有参数限制为 64,000 UTF-8 字节，公开 dataclass/checkpoint/event/probe 不包含参数。resolve 锁 request row 并与 grant 写入同事务；consume 锁 grant row，并发合同只有一个赢家。
+- PostgreSQL MemoryStore 使用 per-session 计数器，在追加消息事务内裁剪窗口；长期事实要求显式批准，按 owner 读取和删除。内存与 PostgreSQL 分别运行同一 11 项 Approval 和 5 项 Memory 合同，包括伪造 approved resolution 不能读取未决私有参数。
+- `PostgresPersistence` 统一打开/关闭异步 Run/Event/checkpoint pool 与同步 Approval/Memory pool。两者同 DSN但没有共同连接或跨 pool 事务声明，默认 Container 保持内存。
+- 两个 PID 不同的 Python 进程依次写入和恢复 request 私有参数、决议/单次消费、完整 Message 与长期事实；子进程内部核对真实内容，stdout 仅允许 phase、PID、ID、计数、布尔结果和稳定 replay reason。
+- 数据库、pool 和触发器故障只越界为稳定 StoreError；没有内存 fallback、DSN、原始参数、消息、事实或数据库异常文本进入应用输出。
+
+### 失败、警告与未验证范围
+
+- ADR 路径猜测、Docker 沙箱拒绝、Vue 沙箱 EPERM、两条非持续 Windows asyncio 慢任务诊断和一次窄 `apply_patch` 权限审查超时均保留；相同窄 patch 重试成功。最终真实 PostgreSQL、聚焦回归、M1 与完整门均退出 0。
+- 后端仍有一条既有 `StarletteDeprecationWarning`，Windows 环境仍跳过 1 项真实 symlink 能力用例；数据库不可达负向测试仍输出一条不含 DSN 的 pool timeout 诊断。
+- 跨进程证据证明 Approval/Memory Store 数据可恢复，不证明默认应用、M10 Approval Runtime、HTTP 或 ContextAssembler 已切换 PostgreSQL。同步适配器尚无 async event-loop 线程隔离、取消、超时或 pool 耗尽证据，`KI-023` open。
+- Approval 与 Run/Event/checkpoint 使用不同 pool，不提供跨 pool 原子性、持久 ToolExecution 结果仲裁、lease/heartbeat、恢复扫描或 exactly-once。默认 Container、M11-T2 pgvector、Embedding 和 RAG 未实现。
+- 私有参数和记忆在本地测试数据库中为明文；没有应用层加密、生产 TLS、持久卷、备份、数据保留、高可用或容量证据。
+- 没有读取 Key、调用在线模型或产生付费调用；本轮只有本机 Docker 数据库通信。
+
+### 结论
+
+- M11-T1 第二个真实 PostgreSQL 纵切达到可运行、可恢复和可复现：Approval/Memory 不是 Fake/Mock，私有参数、同事务 grant、并发单次消费、消息窗口、长期事实与两个 OS 进程恢复均有真实数据库证据。
+- `KI-014` 进入 mitigated，`KI-022` closed，新增 `KI-023` 记录同步数据库适配器接入 async 主链前的线程/取消缺口。M11-T1 保持 `in_progress`；下一条原子动作只做 PostgreSQL ToolExecution 结果仲裁，不合并 lease、默认 Container 或 M11-T2。

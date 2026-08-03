@@ -3,6 +3,7 @@ from .registry import (
     ApprovalResolutionError,
     ApprovalResolutionStatus,
     ApprovalResponse,
+    ApprovalStore,
     InMemoryApprovalStore,
     ToolApproval,
     ToolApprovalRequest,
@@ -12,6 +13,7 @@ from .registry import (
     ToolRegistry,
     ToolResult,
     ToolRisk,
+    copy_tool_arguments,
     tool_arguments_digest,
 )
 
@@ -20,6 +22,7 @@ __all__ = [
     "ApprovalResolutionError",
     "ApprovalResolutionStatus",
     "ApprovalResponse",
+    "ApprovalStore",
     "InMemoryApprovalStore",
     "ToolApproval",
     "ToolApprovalRequest",
@@ -29,5 +32,6 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "ToolRisk",
+    "copy_tool_arguments",
     "tool_arguments_digest",
 ]

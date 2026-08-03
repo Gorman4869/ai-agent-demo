@@ -9,12 +9,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum, StrEnum
 from threading import Lock
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 
 ToolHandler = Callable[[dict[str, Any]], Any]
 ApprovalClock = Callable[[], datetime]
+_MAX_APPROVAL_ARGUMENT_BYTES = 64_000
 
 
 class ToolRisk(str, Enum):
@@ -74,6 +75,65 @@ class ToolApprovalRequest:
 class ToolApprovalResolution:
     request: ToolApprovalRequest
     status: ApprovalResolutionStatus
+
+
+class ApprovalStore(Protocol):
+    def grant(
+        self,
+        *,
+        principal_id: str,
+        run_id: str | None = None,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        expires_at: datetime | None = None,
+    ) -> ToolApproval: ...
+
+    def request(
+        self,
+        *,
+        run_id: str,
+        principal_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        expires_in: timedelta | None = None,
+    ) -> ToolApprovalRequest: ...
+
+    def resolve(
+        self,
+        *,
+        approval_id: str,
+        run_id: str,
+        principal_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments_digest: str,
+        decision: ApprovalResponse | str,
+    ) -> ToolApprovalResolution: ...
+
+    def get_resolution(
+        self,
+        *,
+        approval_id: str,
+        run_id: str,
+        principal_id: str,
+    ) -> ToolApprovalResolution | None: ...
+
+    def approved_arguments(
+        self,
+        resolution: ToolApprovalResolution,
+    ) -> dict[str, Any]: ...
+
+    def consume(
+        self,
+        *,
+        principal_id: str,
+        run_id: str | None = None,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> ApprovalDecision: ...
 
 
 class InMemoryApprovalStore:
@@ -144,7 +204,7 @@ class InMemoryApprovalStore:
         checked_principal_id = _required_name(principal_id, "principal_id")
         checked_call_id = _required_name(tool_call_id, "tool_call_id")
         checked_tool_name = _required_name(tool_name, "tool_name")
-        detached_arguments = _detached_arguments(arguments)
+        detached_arguments = copy_tool_arguments(arguments)
         arguments_digest = tool_arguments_digest(detached_arguments)
         request_key = (
             checked_run_id,
@@ -260,7 +320,7 @@ class InMemoryApprovalStore:
             arguments = self._request_arguments.get(resolution.request.id)
             if arguments is None:
                 raise ApprovalResolutionError("approval_arguments_unavailable")
-            return _detached_arguments(arguments)
+            return copy_tool_arguments(arguments)
 
     def consume(
         self,
@@ -300,7 +360,7 @@ class ToolExecutionContext:
 
     principal_id: str = "anonymous"
     roles: frozenset[str] = field(default_factory=frozenset)
-    approval_store: InMemoryApprovalStore | None = field(
+    approval_store: ApprovalStore | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -562,16 +622,13 @@ def _approval_denied(
 
 
 def tool_arguments_digest(arguments: Mapping[str, Any]) -> str:
-    try:
-        payload = json.dumps(
-            dict(arguments),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as error:
-        raise ValueError("tool arguments must be JSON serializable") from error
+    payload = json.dumps(
+        copy_tool_arguments(arguments),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -616,7 +673,7 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def _detached_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
+def copy_tool_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(arguments, Mapping):
         raise ValueError("tool arguments must be a mapping")
     try:
@@ -628,8 +685,10 @@ def _detached_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
             allow_nan=False,
         )
         detached = json.loads(payload)
-    except (TypeError, ValueError) as error:
+    except (RecursionError, TypeError, ValueError) as error:
         raise ValueError("tool arguments must be JSON serializable") from error
+    if len(payload.encode("utf-8")) > _MAX_APPROVAL_ARGUMENT_BYTES:
+        raise ValueError("tool arguments exceed the approval storage limit")
     if not isinstance(detached, dict):
         raise ValueError("tool arguments must be an object")
     return detached

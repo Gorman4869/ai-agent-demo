@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg import AsyncConnection, Error as PsycopgError
+from psycopg import AsyncConnection, Connection, Error as PsycopgError
 from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from psycopg_pool import AsyncConnectionPool, ConnectionPool, PoolTimeout
 
 from backend.app.domain.run import (
     InvalidRunTransition,
@@ -18,6 +18,7 @@ from backend.app.domain.run import (
     RunStatus,
     StoredRunEvent,
 )
+from backend.app.memory.postgres import PostgresMemoryStore
 from backend.app.stores.base import (
     AppendEventResult,
     ConcurrentWriteError,
@@ -38,10 +39,12 @@ from backend.app.stores.base import (
     TerminalCommitResult,
 )
 from backend.app.stores.postgres_migrations import apply_postgres_migrations
+from backend.app.stores.postgres_approval import PostgresApprovalStore
 
 
 Clock = Callable[[], datetime]
 Pool = AsyncConnectionPool[AsyncConnection[DictRow]]
+SyncPool = ConnectionPool[Connection[DictRow]]
 
 _RUN_COLUMNS = """
     id,
@@ -70,10 +73,18 @@ _RUN_COLUMNS = """
 
 
 class PostgresPersistence:
-    """Own one async pool shared by Stores and the LangGraph checkpointer."""
+    """Own PostgreSQL pools and every explicit persistent adapter."""
 
-    def __init__(self, pool: Pool, *, clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        pool: Pool,
+        sync_pool: SyncPool,
+        *,
+        clock: Clock | None = None,
+        message_limit: int = 20,
+    ) -> None:
         self.pool = pool
+        self.sync_pool = sync_pool
         self.run_store = PostgresRunStore(pool, clock=clock)
         self.event_store = PostgresEventStore(
             self.run_store,
@@ -81,6 +92,12 @@ class PostgresPersistence:
             clock=clock,
         )
         self.checkpointer = AsyncPostgresSaver(pool)
+        self.approval_store = PostgresApprovalStore(sync_pool, clock=clock)
+        self.memory_store = PostgresMemoryStore(
+            sync_pool,
+            message_limit=message_limit,
+            clock=clock,
+        )
 
     @classmethod
     async def open(
@@ -91,6 +108,7 @@ class PostgresPersistence:
         min_size: int = 1,
         max_size: int = 4,
         timeout: float = 10.0,
+        message_limit: int = 20,
     ) -> PostgresPersistence:
         if not isinstance(conninfo, str) or not conninfo.strip():
             raise ValueError("PostgreSQL conninfo must not be empty")
@@ -106,14 +124,35 @@ class PostgresPersistence:
                 "row_factory": dict_row,
             },
         )
+        sync_pool: SyncPool = ConnectionPool(
+            conninfo=conninfo,
+            min_size=min_size,
+            max_size=max_size,
+            open=False,
+            timeout=timeout,
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": 0,
+                "row_factory": dict_row,
+            },
+        )
         try:
             await pool.open(wait=True, timeout=timeout)
+            await asyncio.to_thread(sync_pool.open, wait=True, timeout=timeout)
         except asyncio.CancelledError:
+            await asyncio.to_thread(sync_pool.close)
+            await pool.close()
             raise
         except (PsycopgError, PoolTimeout, OSError):
+            await asyncio.to_thread(sync_pool.close)
             await pool.close()
             raise StoreUnavailableError() from None
-        return cls(pool, clock=clock)
+        return cls(
+            pool,
+            sync_pool,
+            clock=clock,
+            message_limit=message_limit,
+        )
 
     async def setup(self) -> None:
         await apply_postgres_migrations(self.pool)
@@ -125,7 +164,10 @@ class PostgresPersistence:
             raise StoreUnavailableError() from None
 
     async def close(self) -> None:
-        await self.pool.close()
+        try:
+            await asyncio.to_thread(self.sync_pool.close)
+        finally:
+            await self.pool.close()
 
     async def __aenter__(self) -> PostgresPersistence:
         return self

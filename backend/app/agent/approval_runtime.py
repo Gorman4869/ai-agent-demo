@@ -24,10 +24,11 @@ from backend.app.agent.runtime import (
     RuntimeResult,
 )
 from backend.app.domain.run import RunFailure, RunStatus
+from backend.app.stores import StoreError
 from backend.app.tools import (
+    ApprovalStore,
     ApprovalResolutionError,
     ApprovalResolutionStatus,
-    InMemoryApprovalStore,
     ToolApprovalRequest,
     ToolRegistry,
     ToolApprovalResolution,
@@ -76,7 +77,7 @@ class _ApprovalState(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class _ApprovalContext:
-    approval_store: InMemoryApprovalStore = field(repr=False)
+    approval_store: ApprovalStore = field(repr=False)
     registry: ToolRegistry = field(repr=False)
     request: RuntimeRequest = field(repr=False)
     control: RuntimeControl = field(repr=False)
@@ -99,7 +100,7 @@ class ApprovalLangGraphRuntime:
         self,
         *,
         registry: ToolRegistry,
-        approval_store: InMemoryApprovalStore,
+        approval_store: ApprovalStore,
         planner: ToolCallPlanner,
         approval_ttl: timedelta = timedelta(minutes=15),
         checkpointer: BaseCheckpointSaver | None = None,
@@ -344,6 +345,8 @@ class ApprovalLangGraphRuntime:
             )
             return _state_outcome(final_state)
         except asyncio.CancelledError:
+            raise
+        except StoreError:
             raise
         except ApprovalResolutionError:
             return _failure_result(
