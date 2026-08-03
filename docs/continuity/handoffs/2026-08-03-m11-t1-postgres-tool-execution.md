@@ -5,8 +5,8 @@
 - 当前状态：`in_progress`
 - 里程碑状态：`M11 / in_progress`
 - 验证基线 HEAD：`bb36875`
-- 第三纵切实现提交：待本轮本地 commit 固定
-- 验证记录：`V-20260803-003`
+- 第三纵切实现提交：`0de735d`
+- 验证记录：`V-20260803-003`、`V-20260803-004`
 - 关联决策：`ADR-0015`
 - 分支：`main`
 - 任务等级：A 类副作用、持久化、幂等、事务和跨进程恢复边界，时间盒 2–4 小时
@@ -52,6 +52,7 @@
 - 受影响回归：Run/Store/Coordinator/LangGraph 108 项通过；M1 禁用 `site-packages` 后 7 项通过。
 - 完整门：沙箱首轮后端 381 项通过、1 项跳过，Code Agent 与依赖通过后因 Vue `tsbuildinfo` EPERM 退出 1；相同脚本获批后后端、Vue、MCP TypeScript 和 Compose 配置全部通过。
 - 连续性与 diff：52 个稳定任务、77 个 Markdown 通过；`git diff --check` 无 whitespace 错误。
+- 提交后恢复：实现提交 `0de735d` 上真实 PostgreSQL 65 项、M1 7 项和连续性 52/77 再次通过；工作区干净，预期 pool timeout 仍无 ResourceWarning。
 
 ## 失败、警告与边界
 
@@ -64,7 +65,7 @@
 
 ## 未提交改动
 
-上述代码、migration、测试、ADR、规约和连续性记录均在工作区，尚待第三纵切本地提交固定。没有任务外改动，没有读取密钥，没有在线模型或付费调用，没有远程 Git 操作。本地 PostgreSQL 测试容器保持运行。
+上述代码、migration、测试、ADR、规约和 `V-20260803-003` 已由实现提交 `0de735d` 固定；当前仅 `V-20260803-004`、status 和 handoff 的提交后锚点待本地文档提交。没有任务外改动，没有读取密钥，没有在线模型或付费调用，没有远程 Git 操作。本地 PostgreSQL 测试容器保持运行。
 
 ## 下一条原子动作
 

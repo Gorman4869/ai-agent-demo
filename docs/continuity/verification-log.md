@@ -1602,3 +1602,24 @@
 
 - M11-T1 第三个真实 PostgreSQL 纵切达到本地 E3：ToolExecution 共同合同、真实 migration、跨连接 CAS、单次结果结算、提交后异常退出恢复与 fail-closed unknown 均可复现，不是 Fake/Mock 证据。
 - `KI-004` 与 `KI-015` 继续保持 mitigated；持久 ToolExecution 缺口已关闭，但 lease/recovery scanning、Run/Event 连接结果未知、默认主链和跨域一致性仍未关闭。M11-T1 保持 `in_progress`，下一动作只做 lease/heartbeat 与 orphan recovery scanning。
+
+## V-20260803-004：M11-T1 ToolExecution 实现提交后恢复锚点
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-03，Asia/Shanghai
+- 验证目标：实现提交 `0de735d`（`feat: arbitrate tool executions in postgres`）
+- 模式：本地真实 PostgreSQL E3；复用 healthy 的 localhost-only 测试容器。没有读取 Key、调用在线模型或产生费用
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: arbitrate tool executions in postgres"` | 0 | 16 个本任务文件固定为实现提交 `0de735d`，2115 行新增、20 行删除 |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 实现提交上真实 PostgreSQL 65 项通过；不可达数据库负向用例保留预期 pool timeout，无 ResourceWarning |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 手写 Loop 7 项通过 |
+| `scripts/check-continuity.ps1` / `git status --short` | 0 / 0 | 52 个稳定任务、77 个 Markdown 通过；实现提交后工作区干净 |
+
+### 结论
+
+- M11-T1 PostgreSQL ToolExecution 第三纵切实现提交固定为 `0de735d`；`V-20260803-003` 的 65 项真实数据库集成、108 项受影响回归、381 项完整后端门、失败尝试和未验证范围不变。
+- 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只做 lease/heartbeat 与 orphan recovery scanning，不重做前三个纵切，不迁移默认 Container，也不进入 M11-T2。

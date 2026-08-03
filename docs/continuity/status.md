@@ -3,7 +3,7 @@
 - 更新时间：2026-08-03，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`cb4fd52`
+- 最近已确认实现提交：`0de735d`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -26,7 +26,7 @@
 - M10-T6 验证基线提交：`07741db`；课程提交：`1766875`
 - M11-T1 首个纵切验证基线提交：`8af705b`；实现提交：`8c6b011`
 - M11-T1 第二纵切验证基线提交：`bf875be`；实现提交：`cb4fd52`
-- M11-T1 第三纵切验证基线提交：`bb36875`；实现提交待本轮本地 commit 固定
+- M11-T1 第三纵切验证基线提交：`bb36875`；实现提交：`0de735d`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -40,7 +40,7 @@
 | 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015` 与现有 Store Protocol |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | 已完成 M11-T1 第三个真实 PostgreSQL 纵切：async ToolExecution 共同合同、`0003` migration、owner/幂等/CAS/单次结算与 unknown 仲裁；结果 commit 后进程异常退出和遗留 running 恢复均由真实 PostgreSQL 跨进程验证 |
-| 前置证据 | `V-20260803-003`、`V-20260803-002`、`V-20260803-001`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
+| 前置证据 | `V-20260803-004`、`V-20260803-003`、`V-20260803-002`、`V-20260803-001`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
 | 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现 PostgreSQL lease/heartbeat 与 orphan recovery scanning，固定租约 token、过期 CAS 和 running Run/ToolExecution 的 fail-closed 恢复；暂不迁移默认 Container，也不进入 M11-T2 pgvector |
 
 ## 里程碑状态
@@ -115,4 +115,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-tool-execution.md`，再核对 `V-20260803-003`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 65 项、M1 7 项和连续性检查；若一致，不要重做前三个纵切，下一步只做 lease/heartbeat 与 orphan recovery scanning。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container 或扩大到 M11-T2。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-tool-execution.md`，再核对 `V-20260803-004`、`V-20260803-003`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 65 项、M1 7 项和连续性检查；若一致，不要重做前三个纵切，下一步只做 lease/heartbeat 与 orphan recovery scanning。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container 或扩大到 M11-T2。
