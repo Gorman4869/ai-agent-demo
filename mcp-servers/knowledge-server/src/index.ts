@@ -31,6 +31,17 @@ server.registerTool(
   }),
 )
 
+server.registerTool(
+  'list_concepts',
+  {
+    description: 'List all AI Agent course concepts.',
+    inputSchema: {},
+  },
+  async() =>({
+    content: [{type:'text',text:JSON.stringify(Object.keys(knowledge))}],
+  })
+)
+
 async function main(): Promise<void> {
   const transport = new StdioServerTransport()
   await server.connect(transport)

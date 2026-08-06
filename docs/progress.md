@@ -50,9 +50,9 @@
 
 ## 单次复盘
 
-- 本次可运行产物：
-- 我能独立重做的部分：
-- 仍需参考的部分：
-- 失败现象与根因：
-- 下次先检查什么：
-- 能迁移到哪个工作场景：
+- 本次可运行产物：`list_concepts` MCP 工具及其直接调用测试；已验证 M2 框架测试 3 项、手写 Agent Loop 测试 10 项通过，`git diff --check` 通过。
+- 我能独立重做的部分：区分本地函数测试与 MCP 协议测试；说明 `initialize → list_tools → call_tool`；区分 Tool、Resource、Prompt 的发现与使用链路；理解 TypeScript `server.registerTool`、无参 `inputSchema: {}` 和 `content` 返回结构。
+- 仍需参考的部分：TypeScript MCP Server 中无参 `list_concepts` 的完整实现与测试写法；Skill 如何组合 Prompt、Resource 与 Tool。
+- 失败现象与根因：无。已知直接调用 `list_concepts()` 不能证明 `@mcp.tool()` 注册有效，原因是它绕过了 MCP Client 的发现与协议调用链。
+- 下次先检查什么：先确认 Git 未提交改动均被保留，再阅读当前课程文件；从“Skill 不是可直接 `call_tool` 的第四种 MCP 协议能力，而是可复用工作说明书”继续。
+- 能迁移到哪个工作场景：为前端业务助手设计稳定的工具契约、只读知识资源、标准提示模板，并将权限校验保留在 Server。

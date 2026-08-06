@@ -4,7 +4,7 @@ import unittest
 
 from backend.app.agent.graph_runtime import create_research_graph
 from backend.app.agent.sdk_runtime import create_openai_learning_agent
-from backend.app.mcp_server import lookup_concept
+from backend.app.mcp_server import lookup_concept, list_concepts
 
 
 class FrameworkRuntimeTest(unittest.TestCase):
@@ -24,3 +24,4 @@ class FrameworkRuntimeTest(unittest.TestCase):
     def test_mcp_tool_function_uses_local_knowledge(self) -> None:
         self.assertIn("统一协议", lookup_concept("MCP"))
         self.assertEqual("未找到该概念", lookup_concept("missing"))
+        self.assertEqual(["agent", "mcp", "rag"], list_concepts())

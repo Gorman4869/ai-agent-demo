@@ -17,6 +17,10 @@ def lookup_concept(name: str) -> str:
     """Look up one AI Agent course concept by its lowercase name."""
     return KNOWLEDGE.get(name.strip().lower(), "未找到该概念")
 
+@mcp.tool()
+def list_concepts() -> list[str]:
+    """List all AI Agent course concepts."""
+    return list(KNOWLEDGE.keys())
 
 if __name__ == "__main__":
     mcp.run()

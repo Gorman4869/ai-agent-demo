@@ -159,6 +159,68 @@ class ManualAgentLoopTest(unittest.TestCase):
         self.assertEqual([], calls)
         self.assertNotIn("tool.started", _event_types(result))
 
+    def test_transform_temperature_success(self) -> None:
+        model = MockModel(
+            [
+                ModelDecision(
+                    tool_call=ToolCall(
+                        id="call-1",
+                        name="convert_temperature",
+                        arguments={"value": 100, "from_unit": "C", "to_unit": "F"},
+                    )
+                ),
+                ModelDecision(final_answer="100°C = 212°F"),
+            ]
+        )
+        result = ManualAgentLoop(model, create_default_registry()).run("转换温度")
+        self.assertEqual("completed", result.status)
+        self.assertIn('"value": 212.0', result.messages[-2].content)
+        self.assertEqual(
+            ["run.started", "tool.started", "tool.completed", "run.completed"],
+            _event_types(result),
+        )
+
+    def test_transform_temperature_invalid_arguments(self) -> None:
+        model = MockModel(
+            [
+                ModelDecision(
+                    tool_call=ToolCall(
+                        id="call-2",
+                        name="convert_temperature",
+                        arguments={"value": 1, "from_unit": "C"},
+                    )
+                ),
+                ModelDecision(final_answer="缺少 to_unit 参数"),
+            ]
+        )
+        result = ManualAgentLoop(model, create_default_registry()).run("转换温度")
+        self.assertEqual("completed", result.status)
+        self.assertIn("invalid_arguments", result.messages[-2].content)
+        self.assertEqual(
+            ["run.started", "tool.started", "tool.failed", "run.completed"],
+            _event_types(result),
+        )
+
+    def test_transform_temperature_unsupported_unit(self) -> None:
+        model = MockModel(
+            [
+                ModelDecision(
+                    tool_call=ToolCall(
+                        id="call-3",
+                        name="convert_temperature",
+                        arguments={"value": 1, "from_unit": "C", "to_unit": "X"},
+                    )
+                ),
+                ModelDecision(final_answer="无法转换到未知单位"),
+            ]
+        )
+        result = ManualAgentLoop(model, create_default_registry()).run("转换温度")
+        self.assertEqual("completed", result.status)
+        self.assertIn("tool_execution_failed", result.messages[-2].content)
+        self.assertEqual(
+            ["run.started", "tool.started", "tool.failed", "run.completed"],
+            _event_types(result),
+        )
 
 class ScriptedClock:
     def __init__(self, values: Iterable[float]) -> None:
