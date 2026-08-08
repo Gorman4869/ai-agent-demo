@@ -10,6 +10,7 @@ from psycopg import AsyncConnection, Error as PsycopgError
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
+from backend.app.domain.run import RunStatus
 from backend.app.stores.base import (
     InvalidRunTransitionError,
     RunNotFoundError,
@@ -26,6 +27,7 @@ from backend.app.stores.run_lease import (
     _StoredRunLease,
     _issue_token,
     _require_lease,
+    _require_reservation_status,
     _require_scan_limit,
     _require_ttl,
     _to_handle,
@@ -58,6 +60,41 @@ class PostgresRunLeaseStore:
         self._pool = pool
         self._token_factory = token_factory
 
+    async def reserve_execution(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        expected_status: RunStatus,
+        ttl: timedelta,
+    ) -> RunLease:
+        expected_status = _require_reservation_status(expected_status)
+        ttl = _require_ttl(ttl)
+        try:
+            async with self._pool.connection() as connection:
+                async with connection.transaction():
+                    run_status = await _select_owned_run_status_for_update(
+                        connection,
+                        run_id=run_id,
+                        owner_id=owner_id,
+                    )
+                    if run_status is None:
+                        raise RunNotFoundError()
+                    if run_status != expected_status.value:
+                        raise InvalidRunTransitionError()
+                    return await self._insert_execution_lease(
+                        connection,
+                        run_id=run_id,
+                        owner_id=owner_id,
+                        ttl=ttl,
+                    )
+        except StoreError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except (PsycopgError, PoolTimeout):
+            raise StoreUnavailableError() from None
+
     async def acquire(
         self,
         run_id: str,
@@ -66,7 +103,6 @@ class PostgresRunLeaseStore:
         ttl: timedelta,
     ) -> RunLease:
         ttl = _require_ttl(ttl)
-        token = _issue_token(self._token_factory)
         try:
             async with self._pool.connection() as connection:
                 async with connection.transaction():
@@ -79,35 +115,11 @@ class PostgresRunLeaseStore:
                         raise RunNotFoundError()
                     if run_status != "running":
                         raise InvalidRunTransitionError()
-                    existing = await connection.execute(
-                        "SELECT 1 FROM agent_run_leases WHERE run_id = %s",
-                        (run_id,),
-                    )
-                    if await existing.fetchone() is not None:
-                        raise RunLeaseUnavailableError()
-                    now = await _database_now(connection)
-                    result = await connection.execute(
-                        f"""
-                        INSERT INTO agent_run_leases ({_LEASE_COLUMNS})
-                        VALUES (%s, %s, %s, 0, %s, %s, %s)
-                        RETURNING {_LEASE_COLUMNS}
-                        """,
-                        (
-                            run_id,
-                            RunLeaseMode.EXECUTION.value,
-                            _token_digest(token),
-                            now,
-                            now,
-                            now + ttl,
-                        ),
-                    )
-                    row = await result.fetchone()
-                    if row is None:
-                        raise StoreUnavailableError()
-                    return _row_to_handle(
-                        row,
+                    return await self._insert_execution_lease(
+                        connection,
+                        run_id=run_id,
                         owner_id=owner_id,
-                        token=token,
+                        ttl=ttl,
                     )
         except StoreError:
             raise
@@ -115,6 +127,46 @@ class PostgresRunLeaseStore:
             raise
         except (PsycopgError, PoolTimeout):
             raise StoreUnavailableError() from None
+
+    async def _insert_execution_lease(
+        self,
+        connection: AsyncConnection[DictRow],
+        *,
+        run_id: str,
+        owner_id: str,
+        ttl: timedelta,
+    ) -> RunLease:
+        existing = await connection.execute(
+            "SELECT 1 FROM agent_run_leases WHERE run_id = %s",
+            (run_id,),
+        )
+        if await existing.fetchone() is not None:
+            raise RunLeaseUnavailableError()
+        token = _issue_token(self._token_factory)
+        now = await _database_now(connection)
+        result = await connection.execute(
+            f"""
+            INSERT INTO agent_run_leases ({_LEASE_COLUMNS})
+            VALUES (%s, %s, %s, 0, %s, %s, %s)
+            RETURNING {_LEASE_COLUMNS}
+            """,
+            (
+                run_id,
+                RunLeaseMode.EXECUTION.value,
+                _token_digest(token),
+                now,
+                now,
+                now + ttl,
+            ),
+        )
+        row = await result.fetchone()
+        if row is None:
+            raise StoreUnavailableError()
+        return _row_to_handle(
+            row,
+            owner_id=owner_id,
+            token=token,
+        )
 
     async def heartbeat(
         self,

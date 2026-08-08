@@ -10,6 +10,7 @@ import sys
 import unittest
 from datetime import UTC, datetime, timedelta
 
+from backend.app.agent import RuntimeResult
 from backend.app.domain.run import (
     RunRecord,
     RunStatus,
@@ -20,8 +21,10 @@ from backend.app.services.run_recovery import (
     RunRecoveryService,
     RunRecoveryStatus,
 )
+from backend.app.services.run_coordinator import RunCoordinator
 from backend.app.stores import (
     EventStore,
+    RunLeaseLostError,
     RunLeaseStore,
     RunStore,
     StoreUnavailableError,
@@ -185,6 +188,134 @@ class PostgresRunLeaseStoreContractTest(
             hashlib.sha256(raw_token.encode("ascii")).hexdigest(),
             row["lease_token_digest"].strip(),
         )
+
+
+class PostgresRunCoordinatorLeaseTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            clock=lambda: LEASE_NOW + timedelta(seconds=1),
+        )
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_coordinator_heartbeats_and_releases_real_postgres_lease(
+        self,
+    ) -> None:
+        run = await self._create_run(run_id="coordinator-heartbeat")
+        runtime = PostgresGatedRuntime()
+        coordinator = self._coordinator(runtime)
+        execution = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+
+        version = await self._wait_for_lease_version(run.id, minimum=1)
+        runtime.release.set()
+        completed = await asyncio.wait_for(execution, timeout=1)
+
+        self.assertGreaterEqual(version, 1)
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(0, await self._lease_count(run.id))
+
+    async def test_lost_postgres_lease_fails_closed_then_scanner_recovers(
+        self,
+    ) -> None:
+        run = await self._create_run(run_id="coordinator-lease-lost")
+        runtime = PostgresSleepingRuntime()
+        coordinator = self._coordinator(runtime)
+        execution = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+        await self._expire_lease(run.id)
+
+        with self.assertRaises(RunLeaseLostError):
+            await asyncio.wait_for(execution, timeout=1)
+        running = await self.persistence.run_store.get(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        recovered = await RunRecoveryService(
+            run_store=self.persistence.run_store,
+            event_store=self.persistence.event_store,
+            tool_execution_store=self.persistence.tool_execution_store,
+            run_lease_store=self.persistence.run_lease_store,
+        ).scan_once(limit=1, recovery_ttl=timedelta(seconds=1))
+        stored = await self.persistence.run_store.get(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertTrue(runtime.cancelled.is_set())
+        self.assertEqual(RunStatus.RUNNING, running.status)
+        self.assertEqual(RunRecoveryStatus.RECOVERED, recovered[0].status)
+        self.assertEqual(RunStatus.FAILED, stored.status)
+        self.assertEqual("run_orphaned", stored.failure.code)
+        self.assertEqual(0, await self._lease_count(run.id))
+
+    async def _create_run(self, *, run_id: str) -> RunRecord:
+        run = RunRecord.create(
+            run_id=run_id,
+            session_id="coordinator-session",
+            owner_id="coordinator-owner",
+            runtime="manual",
+            input_text="private coordinator input",
+            idempotency_key=f"{run_id}-key",
+            created_at=LEASE_NOW,
+        )
+        return (await self.persistence.run_store.create(run)).record
+
+    def _coordinator(self, runtime) -> RunCoordinator:
+        return RunCoordinator(
+            run_store=self.persistence.run_store,
+            event_store=self.persistence.event_store,
+            runtimes={"manual": runtime},
+            run_lease_store=self.persistence.run_lease_store,
+            run_timeout_ms=2_000,
+            lease_ttl_ms=500,
+            lease_heartbeat_interval_ms=50,
+        )
+
+    async def _wait_for_lease_version(self, run_id: str, *, minimum: int) -> int:
+        deadline = asyncio.get_running_loop().time() + 1
+        while asyncio.get_running_loop().time() < deadline:
+            async with self.persistence.pool.connection() as connection:
+                result = await connection.execute(
+                    "SELECT version FROM agent_run_leases WHERE run_id = %s",
+                    (run_id,),
+                )
+                row = await result.fetchone()
+            if row is not None and row["version"] >= minimum:
+                return row["version"]
+            await asyncio.sleep(0.01)
+        self.fail("lease heartbeat version did not advance")
+
+    async def _expire_lease(self, run_id: str) -> None:
+        async with self.persistence.pool.connection() as connection:
+            await connection.execute(
+                """
+                UPDATE agent_run_leases
+                SET acquired_at = clock_timestamp() - INTERVAL '3 seconds',
+                    heartbeat_at = clock_timestamp() - INTERVAL '2 seconds',
+                    expires_at = clock_timestamp() - INTERVAL '1 second'
+                WHERE run_id = %s
+                """,
+                (run_id,),
+            )
+
+    async def _lease_count(self, run_id: str) -> int:
+        async with self.persistence.pool.connection() as connection:
+            result = await connection.execute(
+                "SELECT COUNT(*) AS count FROM agent_run_leases WHERE run_id = %s",
+                (run_id,),
+            )
+            row = await result.fetchone()
+        return row["count"]
 
 
 class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
@@ -757,6 +888,33 @@ class PostgresUnavailableTest(unittest.IsolatedAsyncioTestCase):
             await PostgresPersistence.open(unavailable, timeout=0.2)
 
         self.assertEqual("store_unavailable", raised.exception.code)
+
+
+class PostgresGatedRuntime:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run(self, request, *, emit, control) -> RuntimeResult:
+        del request, emit, control
+        self.started.set()
+        await self.release.wait()
+        return RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+
+
+class PostgresSleepingRuntime:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def run(self, request, *, emit, control) -> RuntimeResult:
+        del request, emit, control
+        self.started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
 
 
 async def _reset_app_data(persistence: PostgresPersistence) -> None:

@@ -41,6 +41,7 @@ from backend.app.stores.run_lease import (
     _as_utc,
     _issue_token,
     _require_lease,
+    _require_reservation_status,
     _require_scan_limit,
     _require_ttl,
     _StoredRunLease,
@@ -182,6 +183,32 @@ class InMemoryRunLeaseStore:
         self._lock = asyncio.Lock()
         self._leases: dict[str, _StoredRunLease] = {}
 
+    async def reserve_execution(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        expected_status: RunStatus,
+        ttl: timedelta,
+    ) -> RunLease:
+        expected_status = _require_reservation_status(expected_status)
+        ttl = _require_ttl(ttl)
+        async with self._run_store._lock:
+            run = self._run_store._get_owned_unlocked(
+                run_id,
+                owner_id=owner_id,
+            )
+            if run is None:
+                raise RunNotFoundError()
+            if run.status is not expected_status:
+                raise InvalidRunTransitionError()
+            async with self._lock:
+                return self._create_execution_lease_unlocked(
+                    run_id,
+                    owner_id=owner_id,
+                    ttl=ttl,
+                )
+
     async def acquire(
         self,
         run_id: str,
@@ -190,7 +217,6 @@ class InMemoryRunLeaseStore:
         ttl: timedelta,
     ) -> RunLease:
         ttl = _require_ttl(ttl)
-        token = _issue_token(self._token_factory)
         async with self._run_store._lock:
             run = self._run_store._get_owned_unlocked(
                 run_id,
@@ -201,23 +227,10 @@ class InMemoryRunLeaseStore:
             if run.status is not RunStatus.RUNNING:
                 raise InvalidRunTransitionError()
             async with self._lock:
-                if run_id in self._leases:
-                    raise RunLeaseUnavailableError()
-                now = _as_utc(self._clock(), "lease clock")
-                stored = _StoredRunLease(
-                    run_id=run_id,
-                    mode=RunLeaseMode.EXECUTION,
-                    token_digest=_token_digest(token),
-                    version=0,
-                    acquired_at=now,
-                    heartbeat_at=now,
-                    expires_at=now + ttl,
-                )
-                self._leases[run_id] = stored
-                return _to_handle(
-                    stored,
+                return self._create_execution_lease_unlocked(
+                    run_id,
                     owner_id=owner_id,
-                    token=token,
+                    ttl=ttl,
                 )
 
     async def heartbeat(
@@ -323,6 +336,33 @@ class InMemoryRunLeaseStore:
                         )
                     )
                 return tuple(claimed)
+
+    def _create_execution_lease_unlocked(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        ttl: timedelta,
+    ) -> RunLease:
+        if run_id in self._leases:
+            raise RunLeaseUnavailableError()
+        token = _issue_token(self._token_factory)
+        now = _as_utc(self._clock(), "lease clock")
+        stored = _StoredRunLease(
+            run_id=run_id,
+            mode=RunLeaseMode.EXECUTION,
+            token_digest=_token_digest(token),
+            version=0,
+            acquired_at=now,
+            heartbeat_at=now,
+            expires_at=now + ttl,
+        )
+        self._leases[run_id] = stored
+        return _to_handle(
+            stored,
+            owner_id=owner_id,
+            token=token,
+        )
 
 
 def _lease_matches(

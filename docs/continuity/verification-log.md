@@ -1702,3 +1702,27 @@
 
 - M11-T1 PostgreSQL Run lease/orphan recovery 第四纵切实现提交固定为 `1fc55fb`；`V-20260803-005` 的 PostgreSQL 76 项、受影响 131 项、完整后端门 394 项、四进程竞争、触发器故障、失败尝试和未验证范围不变。
 - 当前任务保持 `M11-T1 / in_progress`。下一条原子动作只做显式注入的 RunCoordinator lease 生命周期，不重做前四个纵切，不迁移默认 Container/HTTP，不合并同步 Approval/Memory async 边界，也不进入 M11-T2。
+
+## V-20260808-001：M11-T1 Coordinator lease 纵切恢复基线
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：HEAD `beefc1a`；M11 第四纵切实现仍为 `1fc55fb`，其后的学习者提交只修改 M1/M2 练习与 `docs/progress.md`
+- 任务等级：A 类并发、持久化租约、取消与 fail-closed，时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；没有读取 Key、调用在线模型或产生付费调用，费用 0
+
+### 恢复结果与漂移
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `beefc1a`，M11 最近实现提交仍为 `1fc55fb` |
+| `docker exec ... pg_isready`（首次） | 1 | Docker Engine 未运行；启动已安装的 Docker Desktop 后发现既有测试容器停止 |
+| `docker start ai-agent-demo-m11-postgres-1` / `docker exec ... pg_isready` | 0 / 0 | 仅启动既有 localhost 测试容器；数据库 accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 真实 PostgreSQL 76 项通过；不可达数据库负向用例保留预期 pool timeout |
+| `python -S ... test_manual_agent_loop -q` | 0 | 10 项通过；`beefc1a` 在旧 handoff 的 7 项之后新增 3 项学习者用例 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、80 个 Markdown 通过 |
+
+### 结论
+
+- M11 PostgreSQL 恢复基线与 `V-20260803-006` 一致，可以继续显式 Coordinator lease 生命周期，不重做前四个纵切。
+- 旧 handoff 是不可变历史快照，其 M1 “7 项”预期已被后续学习者提交自然取代；当前可复现基线为 10 项，登记为 `KI-024` 后继续。

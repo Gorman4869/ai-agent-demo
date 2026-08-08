@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Callable, Protocol
 
+from backend.app.domain.run import RunStatus
 from backend.app.stores.base import StoreError
 
 
@@ -111,6 +112,17 @@ class RunLease:
 class RunLeaseStore(Protocol):
     """Server-owned lease arbitration for running durable Runs."""
 
+    async def reserve_execution(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        expected_status: RunStatus,
+        ttl: timedelta,
+    ) -> RunLease:
+        """Reserve execution before a start or resume lifecycle commit."""
+        ...
+
     async def acquire(
         self,
         run_id: str,
@@ -207,6 +219,16 @@ def _require_scan_limit(value: object) -> int:
     ):
         raise ValueError("lease scan limit must be between 1 and 100")
     return value
+
+
+def _require_reservation_status(value: object) -> RunStatus:
+    try:
+        status = RunStatus(value)
+    except (TypeError, ValueError):
+        raise ValueError("lease reservation status is not supported") from None
+    if status not in {RunStatus.QUEUED, RunStatus.WAITING_APPROVAL}:
+        raise ValueError("lease reservation requires a pre-execution run status")
+    return status
 
 
 def _require_identifier(value: object, label: str) -> None:

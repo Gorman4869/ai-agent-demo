@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from backend.app.agent import RuntimeEvent, RuntimeResult
+from backend.app.agent import RuntimeApprovalPause, RuntimeEvent, RuntimeResult
 from backend.app.domain.run import RunFailure, RunRecord, RunStatus, StoredRunEvent
 from backend.app.services.run_coordinator import (
     EventNotifier,
@@ -13,11 +13,17 @@ from backend.app.services.run_coordinator import (
 )
 from backend.app.stores import (
     InMemoryEventStore,
+    InMemoryRunLeaseStore,
     InMemoryRunStore,
+    RunLeaseLostError,
     RunNotFoundError,
     StoreUnavailableError,
 )
-from backend.app.tools import ToolExecutionContext
+from backend.app.tools import (
+    ApprovalResponse,
+    InMemoryApprovalStore,
+    ToolExecutionContext,
+)
 
 
 NOW = datetime(2026, 7, 16, 5, 0, tzinfo=UTC)
@@ -465,6 +471,275 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class RunCoordinatorLeaseTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.run_store = InMemoryRunStore()
+        self.order: list[str] = []
+        self.event_store = RecordingLifecycleEventStore(
+            self.run_store,
+            order=self.order,
+        )
+        self.lease_store = RecordingRunLeaseStore(
+            self.run_store,
+            order=self.order,
+        )
+
+    async def test_reserves_before_start_heartbeats_and_releases_after_terminal(
+        self,
+    ) -> None:
+        run = await self._create_run()
+        runtime = GatedRuntime()
+        coordinator = self._coordinator(runtime)
+
+        execution = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+        await asyncio.wait_for(self.lease_store.heartbeat_seen.wait(), timeout=1)
+        runtime.release.set()
+        result = await asyncio.wait_for(execution, timeout=1)
+
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(1, self.lease_store.release_calls)
+        self.assertLess(self.order.index("lease.reserve:queued"), self.order.index("run.start"))
+        self.assertLess(self.order.index("run.terminal"), self.order.index("lease.release"))
+
+    async def test_unknown_start_commit_keeps_reservation_for_recovery(self) -> None:
+        run_store = InMemoryRunStore()
+        event_store = FailingStartEventStore(run_store)
+        lease_store = RecordingRunLeaseStore(run_store)
+        run = _new_run()
+        await run_store.create(run)
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={
+                "manual": StaticRuntime(
+                    RuntimeResult(status=RunStatus.COMPLETED, answer="unused")
+                )
+            },
+            run_lease_store=lease_store,
+            run_timeout_ms=1_000,
+            lease_ttl_ms=30,
+            lease_heartbeat_interval_ms=10,
+        )
+
+        with self.assertRaises(StoreUnavailableError):
+            await coordinator.execute(run.id, owner_id=run.owner_id)
+        await asyncio.sleep(0.04)
+        claimed = await lease_store.claim_expired(limit=1, ttl=timedelta(seconds=1))
+
+        stored = await run_store.get(run.id, owner_id=run.owner_id)
+        self.assertEqual(RunStatus.QUEUED, stored.status)
+        self.assertEqual(0, lease_store.release_calls)
+        self.assertEqual(1, len(claimed))
+        await lease_store.release(claimed[0])
+
+    async def test_lease_loss_cancels_runtime_and_leaves_run_for_recovery(self) -> None:
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
+        lease_store = LostHeartbeatRunLeaseStore(run_store)
+        run = _new_run()
+        await run_store.create(run)
+        runtime = SleepingRuntime()
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={"manual": runtime},
+            run_lease_store=lease_store,
+            run_timeout_ms=1_000,
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=5,
+        )
+
+        with self.assertRaises(RunLeaseLostError):
+            await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        stored = await run_store.get(run.id, owner_id=run.owner_id)
+        events = await event_store.list_for_run(run.id, owner_id=run.owner_id)
+        self.assertEqual(RunStatus.RUNNING, stored.status)
+        self.assertEqual(["run.started"], _types(events))
+        self.assertTrue(runtime.cancelled.is_set())
+        self.assertEqual(0, lease_store.release_calls)
+
+    async def test_heartbeat_unavailable_propagates_without_terminal_commit(
+        self,
+    ) -> None:
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
+        lease_store = UnavailableHeartbeatRunLeaseStore(run_store)
+        run = _new_run()
+        await run_store.create(run)
+        runtime = SleepingRuntime()
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={"manual": runtime},
+            run_lease_store=lease_store,
+            run_timeout_ms=1_000,
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=5,
+        )
+
+        with self.assertRaises(StoreUnavailableError):
+            await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        stored = await run_store.get(run.id, owner_id=run.owner_id)
+        self.assertEqual(RunStatus.RUNNING, stored.status)
+        self.assertTrue(runtime.cancelled.is_set())
+        self.assertEqual(0, lease_store.release_calls)
+
+    async def test_pause_and_resume_each_own_and_release_a_reservation(self) -> None:
+        run = await self._create_run()
+        approval_store = InMemoryApprovalStore()
+        request = approval_store.request(
+            run_id=run.id,
+            principal_id=run.owner_id,
+            tool_call_id="call-1",
+            tool_name="publish_report",
+            arguments={"report_id": "report-1"},
+        )
+        pause = RuntimeApprovalPause(
+            approval_id=request.id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments_digest=request.arguments_digest,
+            step=1,
+        )
+        runtime = PauseThenCompleteRuntime(pause)
+        coordinator = self._coordinator(runtime)
+        context = ToolExecutionContext(
+            principal_id=run.owner_id,
+            approval_store=approval_store,
+        )
+
+        waiting = await coordinator.execute(
+            run.id,
+            owner_id=run.owner_id,
+            execution_context=context,
+        )
+        completed = await coordinator.resume_approval(
+            run.id,
+            owner_id=run.owner_id,
+            approval_id=request.id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments_digest=request.arguments_digest,
+            decision=ApprovalResponse.APPROVE,
+            execution_context=context,
+        )
+
+        self.assertEqual(RunStatus.WAITING_APPROVAL, waiting.status)
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(
+            [RunStatus.QUEUED, RunStatus.WAITING_APPROVAL],
+            self.lease_store.reservation_statuses,
+        )
+        self.assertEqual(2, self.lease_store.release_calls)
+
+    async def test_cancel_stops_heartbeat_and_releases_active_lease(self) -> None:
+        run = await self._create_run()
+        runtime = CancellationAwareRuntime()
+        coordinator = self._coordinator(runtime)
+        execution = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+        await asyncio.wait_for(self.lease_store.heartbeat_seen.wait(), timeout=1)
+
+        accepted = await coordinator.cancel(run.id, owner_id=run.owner_id)
+        result = await asyncio.wait_for(execution, timeout=1)
+        heartbeat_calls = self.lease_store.heartbeat_calls
+        await asyncio.sleep(0.02)
+
+        self.assertTrue(accepted)
+        self.assertEqual(RunStatus.CANCELLED, result.status)
+        self.assertEqual(1, self.lease_store.release_calls)
+        self.assertEqual(heartbeat_calls, self.lease_store.heartbeat_calls)
+
+    async def test_release_failure_does_not_rewrite_durable_terminal_result(
+        self,
+    ) -> None:
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
+        lease_store = UnavailableReleaseRunLeaseStore(run_store)
+        run = _new_run()
+        await run_store.create(run)
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={
+                "manual": StaticRuntime(
+                    RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+                )
+            },
+            run_lease_store=lease_store,
+            run_timeout_ms=1_000,
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=5,
+        )
+
+        completed = await coordinator.execute(run.id, owner_id=run.owner_id)
+        stored = await run_store.get(run.id, owner_id=run.owner_id)
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(RunStatus.COMPLETED, stored.status)
+        self.assertEqual(1, lease_store.release_calls)
+
+    async def test_two_lease_aware_coordinators_run_the_runtime_once(self) -> None:
+        run = await self._create_run()
+        runtime = GatedRuntime()
+        first = self._coordinator(runtime)
+        second = self._coordinator(runtime)
+
+        first_execution = asyncio.create_task(
+            first.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+        second_execution = asyncio.create_task(
+            second.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.sleep(0)
+        runtime.release.set()
+        first_result, second_result = await asyncio.gather(
+            first_execution,
+            second_execution,
+        )
+
+        self.assertEqual(1, runtime.calls)
+        self.assertEqual(first_result, second_result)
+        self.assertEqual(1, self.lease_store.release_calls)
+
+    async def test_lease_timing_configuration_fails_before_execution(self) -> None:
+        for heartbeat_ms, ttl_ms in ((0, 100), (100, 100), (101, 100)):
+            with self.subTest(heartbeat_ms=heartbeat_ms, ttl_ms=ttl_ms):
+                with self.assertRaises(ValueError):
+                    RunCoordinator(
+                        run_store=self.run_store,
+                        event_store=self.event_store,
+                        runtimes={},
+                        run_lease_store=self.lease_store,
+                        lease_ttl_ms=ttl_ms,
+                        lease_heartbeat_interval_ms=heartbeat_ms,
+                    )
+
+    async def _create_run(self) -> RunRecord:
+        run = _new_run()
+        await self.run_store.create(run)
+        return run
+
+    def _coordinator(self, runtime) -> RunCoordinator:
+        return RunCoordinator(
+            run_store=self.run_store,
+            event_store=self.event_store,
+            runtimes={"manual": runtime},
+            run_lease_store=self.lease_store,
+            run_timeout_ms=1_000,
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=5,
+        )
+
+
 class PersistentEventEmitterTest(unittest.IsolatedAsyncioTestCase):
     async def test_duplicate_event_is_persisted_once_and_notified_once(self) -> None:
         run_store = InMemoryRunStore()
@@ -574,6 +849,99 @@ class GatedRuntime:
         self.started.set()
         await self.release.wait()
         return RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+
+
+class PauseThenCompleteRuntime:
+    def __init__(self, pause: RuntimeApprovalPause) -> None:
+        self.pause = pause
+
+    async def run(self, request, *, emit, control):
+        del request, emit, control
+        return self.pause
+
+    async def resume(self, request, *, approval, emit, control):
+        del request, emit, control
+        if approval.approval_id != self.pause.approval_id:
+            raise AssertionError("resume approval does not match the pause")
+        return RuntimeResult(status=RunStatus.COMPLETED, answer="approved")
+
+
+class RecordingLifecycleEventStore(InMemoryEventStore):
+    def __init__(self, run_store, *, order: list[str]) -> None:
+        super().__init__(run_store)
+        self.order = order
+
+    async def commit_start(self, command):
+        result = await super().commit_start(command)
+        self.order.append("run.start")
+        return result
+
+    async def commit_resume(self, command):
+        result = await super().commit_resume(command)
+        self.order.append("run.resume")
+        return result
+
+    async def commit_pause(self, command):
+        result = await super().commit_pause(command)
+        self.order.append("run.pause")
+        return result
+
+    async def commit_terminal(self, command):
+        result = await super().commit_terminal(command)
+        self.order.append("run.terminal")
+        return result
+
+
+class RecordingRunLeaseStore(InMemoryRunLeaseStore):
+    def __init__(self, run_store, *, order: list[str] | None = None) -> None:
+        super().__init__(run_store)
+        self.order = order if order is not None else []
+        self.reservation_statuses: list[RunStatus] = []
+        self.heartbeat_calls = 0
+        self.release_calls = 0
+        self.heartbeat_seen = asyncio.Event()
+
+    async def reserve_execution(self, run_id, **kwargs):
+        lease = await super().reserve_execution(run_id, **kwargs)
+        expected_status = kwargs["expected_status"]
+        self.reservation_statuses.append(expected_status)
+        self.order.append(f"lease.reserve:{expected_status.value}")
+        return lease
+
+    async def heartbeat(self, lease, **kwargs):
+        heartbeat = await super().heartbeat(lease, **kwargs)
+        self.heartbeat_calls += 1
+        self.order.append("lease.heartbeat")
+        self.heartbeat_seen.set()
+        return heartbeat
+
+    async def release(self, lease):
+        await super().release(lease)
+        self.release_calls += 1
+        self.order.append("lease.release")
+
+
+class LostHeartbeatRunLeaseStore(RecordingRunLeaseStore):
+    async def heartbeat(self, lease, **kwargs):
+        del lease, kwargs
+        self.heartbeat_calls += 1
+        self.heartbeat_seen.set()
+        raise RunLeaseLostError()
+
+
+class UnavailableHeartbeatRunLeaseStore(RecordingRunLeaseStore):
+    async def heartbeat(self, lease, **kwargs):
+        del lease, kwargs
+        self.heartbeat_calls += 1
+        self.heartbeat_seen.set()
+        raise StoreUnavailableError()
+
+
+class UnavailableReleaseRunLeaseStore(RecordingRunLeaseStore):
+    async def release(self, lease):
+        del lease
+        self.release_calls += 1
+        raise StoreUnavailableError()
 
 
 class RecordingNotifier:

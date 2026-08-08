@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Protocol
 
 from backend.app.agent import (
@@ -34,6 +35,10 @@ from backend.app.stores import (
     InvalidRunTransitionError,
     PauseCommit,
     ResumeCommit,
+    RunLease,
+    RunLeaseLostError,
+    RunLeaseStore,
+    RunLeaseUnavailableError,
     RunNotFoundError,
     RunStore,
     StartCommit,
@@ -129,10 +134,127 @@ class PersistentEventEmitter:
         return f"event-{digest}"
 
 
+class _RunLeaseSession:
+    """Own one Coordinator reservation, heartbeat task, and release attempt."""
+
+    def __init__(
+        self,
+        *,
+        store: RunLeaseStore | None,
+        ttl: timedelta,
+        heartbeat_interval: float,
+    ) -> None:
+        self._store = store
+        self._ttl = ttl
+        self._heartbeat_interval = heartbeat_interval
+        self._lease: RunLease | None = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
+        self._stop_event = asyncio.Event()
+        self._failure_event = asyncio.Event()
+        self._failure: Exception | None = None
+        self._operation_lock = asyncio.Lock()
+        self._released = False
+
+    @property
+    def enabled(self) -> bool:
+        return self._store is not None
+
+    async def reserve_execution(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        expected_status: RunStatus,
+    ) -> None:
+        if self._store is None:
+            return
+        async with self._operation_lock:
+            if self._released:
+                raise RunLeaseLostError()
+            self._lease = await self._store.reserve_execution(
+                run_id,
+                owner_id=owner_id,
+                expected_status=expected_status,
+                ttl=self._ttl,
+            )
+
+    def start_heartbeat(self) -> None:
+        if self._store is None:
+            return
+        if self._lease is None or self._released:
+            raise RunLeaseLostError()
+        if self._heartbeat_task is not None:
+            raise RuntimeError("run lease heartbeat already started")
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+    async def wait_for_failure(self) -> Exception:
+        await self._failure_event.wait()
+        if self._failure is None:
+            raise RuntimeError("run lease failure signal has no error")
+        return self._failure
+
+    async def stop_heartbeat(self, *, require_healthy: bool) -> None:
+        self._stop_event.set()
+        task = self._heartbeat_task
+        if task is not None and task is not asyncio.current_task():
+            await task
+        if require_healthy and self._failure is not None:
+            raise self._failure
+
+    async def release_after_transition(self) -> None:
+        await self.stop_heartbeat(require_healthy=False)
+        async with self._operation_lock:
+            if self._released:
+                return
+            lease = self._lease
+            self._released = True
+            if self._store is None or lease is None:
+                return
+            try:
+                await self._store.release(lease)
+            except StoreError as exc:
+                LOGGER.warning(
+                    "run lease release failed",
+                    extra={"run_id": lease.run_id, "error_code": exc.code},
+                )
+
+    async def abandon(self) -> None:
+        await self.stop_heartbeat(require_healthy=False)
+
+    async def _heartbeat_loop(self) -> None:
+        if self._store is None:
+            return
+        while True:
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(),
+                    timeout=self._heartbeat_interval,
+                )
+                return
+            except TimeoutError:
+                pass
+
+            async with self._operation_lock:
+                if self._released or self._lease is None:
+                    return
+                try:
+                    self._lease = await self._store.heartbeat(
+                        self._lease,
+                        ttl=self._ttl,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._failure = exc
+                    self._failure_event.set()
+                    return
+
+
 @dataclass(frozen=True)
 class _ActiveRun:
     kind: str
     control: RuntimeControl
+    lease_session: _RunLeaseSession
     task: asyncio.Task[RunRecord]
 
 
@@ -158,6 +280,9 @@ class RunCoordinator:
         notifier: EventNotifier | None = None,
         run_timeout_ms: int = 30_000,
         notify_timeout_ms: int | None = None,
+        run_lease_store: RunLeaseStore | None = None,
+        lease_ttl_ms: int = 30_000,
+        lease_heartbeat_interval_ms: int = 10_000,
     ) -> None:
         if (
             not isinstance(run_timeout_ms, int)
@@ -181,6 +306,25 @@ class RunCoordinator:
             or self._notify_timeout_ms < 1
         ):
             raise ValueError("notify_timeout_ms must be a positive integer")
+        for value, label in (
+            (lease_ttl_ms, "lease_ttl_ms"),
+            (lease_heartbeat_interval_ms, "lease_heartbeat_interval_ms"),
+        ):
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 1
+            ):
+                raise ValueError(f"{label} must be a positive integer")
+        if lease_ttl_ms > 86_400_000:
+            raise ValueError("lease_ttl_ms must not exceed one day")
+        if lease_heartbeat_interval_ms >= lease_ttl_ms:
+            raise ValueError(
+                "lease_heartbeat_interval_ms must be less than lease_ttl_ms"
+            )
+        self._run_lease_store = run_lease_store
+        self._lease_ttl = timedelta(milliseconds=lease_ttl_ms)
+        self._lease_heartbeat_interval = lease_heartbeat_interval_ms / 1_000
         self._active: dict[tuple[str, str], _ActiveRun] = {}
         self._active_lock = asyncio.Lock()
 
@@ -208,6 +352,7 @@ class RunCoordinator:
                 control = RuntimeControl(
                     CancellationToken(timeout_ms=self._run_timeout_ms)
                 )
+                lease_session = self._new_lease_session()
                 task = asyncio.create_task(
                     self._execute_once(
                         run_id,
@@ -215,9 +360,15 @@ class RunCoordinator:
                         execution_context=execution_context,
                         control=control,
                         deadline=deadline,
+                        lease_session=lease_session,
                     )
                 )
-                active = _ActiveRun(kind="execute", control=control, task=task)
+                active = _ActiveRun(
+                    kind="execute",
+                    control=control,
+                    lease_session=lease_session,
+                    task=task,
+                )
                 self._active[key] = active
                 task.add_done_callback(
                     lambda completed, run_key=key: asyncio.create_task(
@@ -265,6 +416,7 @@ class RunCoordinator:
                     control = RuntimeControl(
                         CancellationToken(timeout_ms=self._run_timeout_ms)
                     )
+                    lease_session = self._new_lease_session()
                     task = asyncio.create_task(
                         self._resume_once(
                             run_id,
@@ -277,11 +429,13 @@ class RunCoordinator:
                             execution_context=bound_context,
                             control=control,
                             deadline=deadline,
+                            lease_session=lease_session,
                         )
                     )
                     active = _ActiveRun(
                         kind="resume",
                         control=control,
+                        lease_session=lease_session,
                         task=task,
                     )
                     self._active[key] = active
@@ -308,6 +462,7 @@ class RunCoordinator:
         active_execution = active is not None and not active.task.done()
         if active_execution:
             active.control.cancellation_token.cancel("cancelled_by_user")
+            await active.lease_session.stop_heartbeat(require_healthy=False)
         elif current.status not in {
             RunStatus.QUEUED,
             RunStatus.WAITING_APPROVAL,
@@ -318,6 +473,8 @@ class RunCoordinator:
         emitter = self._emitter(run_id, owner_id=owner_id)
         for _ in range(2):
             if current.status.is_terminal:
+                if active_execution:
+                    await active.lease_session.release_after_transition()
                 return current.status is RunStatus.CANCELLED
             if current.status not in {
                 RunStatus.QUEUED,
@@ -349,11 +506,15 @@ class RunCoordinator:
                     raise RunNotFoundError()
                 current = refreshed
                 continue
+            if active_execution:
+                await active.lease_session.release_after_transition()
             await emitter.notify_committed(
                 committed.event,
                 created=committed.created,
             )
             return True
+        if active_execution and current.status.is_terminal:
+            await active.lease_session.release_after_transition()
         return current.status is RunStatus.CANCELLED
 
     async def _execute_once(
@@ -364,14 +525,49 @@ class RunCoordinator:
         execution_context: ToolExecutionContext | None,
         control: RuntimeControl,
         deadline: float,
+        lease_session: _RunLeaseSession,
     ) -> RunRecord:
         current = await self._run_store.get(run_id, owner_id=owner_id)
         if current is None:
             raise RunNotFoundError()
         if current.status.is_terminal:
             return current
+        if lease_session.enabled and current.status in {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_APPROVAL,
+        }:
+            return await self._wait_for_existing_execution(
+                run_id,
+                owner_id=owner_id,
+                deadline=deadline,
+            )
         if current.status is not RunStatus.QUEUED:
             raise InvalidRunTransitionError()
+
+        try:
+            await lease_session.reserve_execution(
+                run_id,
+                owner_id=owner_id,
+                expected_status=RunStatus.QUEUED,
+            )
+        except (RunLeaseUnavailableError, RunLeaseLostError):
+            return await self._wait_for_existing_execution(
+                run_id,
+                owner_id=owner_id,
+                deadline=deadline,
+            )
+        except InvalidRunTransitionError:
+            winner = await self._run_store.get(run_id, owner_id=owner_id)
+            if winner is not None and (
+                winner.status.is_terminal
+                or winner.status in {RunStatus.RUNNING, RunStatus.WAITING_APPROVAL}
+            ):
+                return await self._wait_for_existing_execution(
+                    run_id,
+                    owner_id=owner_id,
+                    deadline=deadline,
+                )
+            raise
 
         emitter = self._emitter(run_id, owner_id=owner_id)
         try:
@@ -388,16 +584,28 @@ class RunCoordinator:
                 )
             )
         except ConcurrentWriteError:
+            await lease_session.release_after_transition()
             winner = await self._run_store.get(run_id, owner_id=owner_id)
-            if winner is not None and winner.status.is_terminal:
-                return winner
+            if winner is not None and (
+                winner.status.is_terminal
+                or winner.status in {RunStatus.RUNNING, RunStatus.WAITING_APPROVAL}
+            ):
+                return await self._wait_for_existing_execution(
+                    run_id,
+                    owner_id=owner_id,
+                    deadline=deadline,
+                )
             raise
-        await emitter.notify_committed(
-            started.event,
-            created=started.created,
-        )
+        except (StoreError, asyncio.CancelledError):
+            await lease_session.abandon()
+            raise
+        except Exception:
+            await lease_session.release_after_transition()
+            raise
+
         running = started.record
         if not started.created:
+            await lease_session.release_after_transition()
             if running.status.is_terminal:
                 return running
             return await self._wait_for_existing_execution(
@@ -407,29 +615,17 @@ class RunCoordinator:
             )
 
         runtime = self._runtimes.get(running.runtime)
-        if control.cancellation_token.is_cancelled:
-            result = _cancellation_result(control.cancellation_token.reason)
-        elif runtime is None:
-            result = _failed_result(
-                code="runtime_not_configured",
-                category="configuration",
-                public_message="Requested runtime is not configured",
-            )
-        else:
-            try:
-                result = await self._run_runtime(
-                    runtime,
-                    running,
-                    execution_context=execution_context,
-                    control=control,
-                    emitter=emitter,
-                    deadline=deadline,
-                )
-            except _DurableWinner as winner:
-                return winner.record
-        if isinstance(result, RuntimeApprovalPause):
-            return await self._pause(running, pause=result, emitter=emitter)
-        return await self._settle(running, result=result, emitter=emitter)
+        return await self._drive_running(
+            runtime,
+            running,
+            execution_context=execution_context,
+            control=control,
+            emitter=emitter,
+            deadline=deadline,
+            lease_session=lease_session,
+            lifecycle_event=started.event,
+            lifecycle_created=started.created,
+        )
 
     async def _resume_once(
         self,
@@ -444,6 +640,7 @@ class RunCoordinator:
         execution_context: ToolExecutionContext,
         control: RuntimeControl,
         deadline: float,
+        lease_session: _RunLeaseSession,
     ) -> RunRecord:
         current = await self._run_store.get(run_id, owner_id=owner_id)
         if current is None:
@@ -472,15 +669,51 @@ class RunCoordinator:
                 emitter=emitter,
             )
 
-        resolution = execution_context.approval_store.resolve(
-            approval_id=approval_id,
-            run_id=run_id,
-            principal_id=owner_id,
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
-            arguments_digest=arguments_digest,
-            decision=decision,
-        )
+        try:
+            await lease_session.reserve_execution(
+                run_id,
+                owner_id=owner_id,
+                expected_status=RunStatus.WAITING_APPROVAL,
+            )
+        except (RunLeaseUnavailableError, RunLeaseLostError):
+            return await self._wait_for_resumed_execution(
+                run_id,
+                owner_id=owner_id,
+                initial_version=current.version,
+                deadline=deadline,
+            )
+        except InvalidRunTransitionError:
+            winner = await self._run_store.get(run_id, owner_id=owner_id)
+            if winner is None:
+                raise RunNotFoundError()
+            if winner.status.is_terminal:
+                return winner
+            if winner.status is RunStatus.RUNNING:
+                return await self._wait_for_terminal(
+                    run_id,
+                    owner_id=owner_id,
+                    deadline=deadline,
+                )
+            if (
+                winner.status is RunStatus.WAITING_APPROVAL
+                and winner.version != current.version
+            ):
+                return winner
+            raise
+
+        try:
+            resolution = execution_context.approval_store.resolve(
+                approval_id=approval_id,
+                run_id=run_id,
+                principal_id=owner_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                arguments_digest=arguments_digest,
+                decision=decision,
+            )
+        except Exception:
+            await lease_session.release_after_transition()
+            raise
         approval = RuntimeApprovalResume(
             approval_id=resolution.request.id,
             tool_call_id=resolution.request.tool_call_id,
@@ -507,6 +740,7 @@ class RunCoordinator:
                 )
             )
         except ConcurrentWriteError:
+            await lease_session.release_after_transition()
             winner = await self._run_store.get(run_id, owner_id=owner_id)
             if winner is None:
                 raise RunNotFoundError()
@@ -518,40 +752,106 @@ class RunCoordinator:
                     owner_id=owner_id,
                     deadline=deadline,
                 )
+            if (
+                winner.status is RunStatus.WAITING_APPROVAL
+                and winner.version != current.version
+            ):
+                return winner
             raise
-        await emitter.notify_committed(resumed.event, created=resumed.created)
+        except (StoreError, asyncio.CancelledError):
+            await lease_session.abandon()
+            raise
+        except Exception:
+            await lease_session.release_after_transition()
+            raise
+
         if not resumed.created:
+            await lease_session.release_after_transition()
             if resumed.record.status.is_terminal:
                 return resumed.record
-            return await self._wait_for_terminal(
+            return await self._wait_for_resumed_execution(
                 run_id,
                 owner_id=owner_id,
+                initial_version=current.version,
                 deadline=deadline,
             )
 
-        try:
-            result = await self._run_runtime(
-                runtime,
-                resumed.record,
-                execution_context=execution_context,
-                control=control,
-                emitter=emitter,
-                deadline=deadline,
-                approval=approval,
-            )
-        except _DurableWinner as winner:
-            return winner.record
-        if isinstance(result, RuntimeApprovalPause):
-            return await self._pause(
-                resumed.record,
-                pause=result,
-                emitter=emitter,
-            )
-        return await self._settle(
+        return await self._drive_running(
+            runtime,
             resumed.record,
-            result=result,
+            execution_context=execution_context,
+            control=control,
             emitter=emitter,
+            deadline=deadline,
+            lease_session=lease_session,
+            lifecycle_event=resumed.event,
+            lifecycle_created=resumed.created,
+            approval=approval,
         )
+
+    async def _drive_running(
+        self,
+        runtime: AgentRuntime | None,
+        running: RunRecord,
+        *,
+        execution_context: ToolExecutionContext | None,
+        control: RuntimeControl,
+        emitter: PersistentEventEmitter,
+        deadline: float,
+        lease_session: _RunLeaseSession,
+        lifecycle_event: StoredRunEvent,
+        lifecycle_created: bool,
+        approval: RuntimeApprovalResume | None = None,
+    ) -> RunRecord:
+        lease_session.start_heartbeat()
+        try:
+            await emitter.notify_committed(
+                lifecycle_event,
+                created=lifecycle_created,
+            )
+            if control.cancellation_token.is_cancelled:
+                result: RuntimeResult | RuntimeApprovalPause = _cancellation_result(
+                    control.cancellation_token.reason
+                )
+            elif runtime is None:
+                result = _failed_result(
+                    code="runtime_not_configured",
+                    category="configuration",
+                    public_message="Requested runtime is not configured",
+                )
+            else:
+                result = await self._run_runtime(
+                    runtime,
+                    running,
+                    execution_context=execution_context,
+                    control=control,
+                    emitter=emitter,
+                    deadline=deadline,
+                    lease_session=lease_session,
+                    approval=approval,
+                )
+            await lease_session.stop_heartbeat(require_healthy=True)
+            if isinstance(result, RuntimeApprovalPause):
+                record = await self._pause(
+                    running,
+                    pause=result,
+                    emitter=emitter,
+                )
+            else:
+                record = await self._settle(
+                    running,
+                    result=result,
+                    emitter=emitter,
+                )
+        except _DurableWinner as winner:
+            await lease_session.release_after_transition()
+            return winner.record
+        except BaseException:
+            await lease_session.abandon()
+            raise
+
+        await lease_session.release_after_transition()
+        return record
 
     async def _run_runtime(
         self,
@@ -562,6 +862,7 @@ class RunCoordinator:
         control: RuntimeControl,
         emitter: PersistentEventEmitter,
         deadline: float,
+        lease_session: _RunLeaseSession,
         approval: RuntimeApprovalResume | None = None,
     ) -> RuntimeResult | RuntimeApprovalPause:
         async def emit(event: RuntimeEvent) -> None:
@@ -590,10 +891,8 @@ class RunCoordinator:
                     ),
                 )
                 if approval is None:
-                    result = await runtime.run(
-                        runtime_request,
-                        emit=emit,
-                        control=control,
+                    invocation = runtime.run(
+                        runtime_request, emit=emit, control=control
                     )
                 else:
                     if not isinstance(runtime, ApprovalResumableRuntime):
@@ -602,12 +901,18 @@ class RunCoordinator:
                             category="configuration",
                             public_message="Requested runtime cannot resume approvals",
                         )
-                    result = await runtime.resume(
+                    invocation = runtime.resume(
                         runtime_request,
                         approval=approval,
                         emit=emit,
                         control=control,
                     )
+                result = await self._await_runtime_with_lease(
+                    invocation,
+                    running=running,
+                    control=control,
+                    lease_session=lease_session,
+                )
         except TimeoutError:
             control.cancellation_token.cancel("deadline_exceeded")
             return _timeout_result()
@@ -643,6 +948,48 @@ class RunCoordinator:
             return _cancellation_result(control.cancellation_token.reason)
         return result
 
+    async def _await_runtime_with_lease(
+        self,
+        invocation: Awaitable[RuntimeResult | RuntimeApprovalPause],
+        *,
+        running: RunRecord,
+        control: RuntimeControl,
+        lease_session: _RunLeaseSession,
+    ) -> RuntimeResult | RuntimeApprovalPause:
+        if not lease_session.enabled:
+            return await invocation
+
+        runtime_task = asyncio.create_task(invocation)
+        failure_task = asyncio.create_task(lease_session.wait_for_failure())
+        try:
+            completed, _ = await asyncio.wait(
+                {runtime_task, failure_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if failure_task in completed:
+                failure = failure_task.result()
+                control.cancellation_token.cancel("run_lease_lost")
+                runtime_task.cancel()
+                await asyncio.gather(runtime_task, return_exceptions=True)
+                winner = await self._run_store.get(
+                    running.id,
+                    owner_id=running.owner_id,
+                )
+                if winner is not None and (
+                    winner.status.is_terminal
+                    or winner.status is RunStatus.WAITING_APPROVAL
+                ):
+                    raise _DurableWinner(winner)
+                raise failure
+            return await runtime_task
+        except asyncio.CancelledError:
+            runtime_task.cancel()
+            await asyncio.gather(runtime_task, return_exceptions=True)
+            raise
+        finally:
+            failure_task.cancel()
+            await asyncio.gather(failure_task, return_exceptions=True)
+
     async def _wait_for_existing_execution(
         self,
         run_id: str,
@@ -671,6 +1018,28 @@ class RunCoordinator:
             if current is None:
                 raise RunNotFoundError()
             if current.status.is_terminal:
+                return current
+            await asyncio.sleep(0.01)
+        raise ConcurrentWriteError()
+
+    async def _wait_for_resumed_execution(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        initial_version: int,
+        deadline: float,
+    ) -> RunRecord:
+        while asyncio.get_running_loop().time() < deadline:
+            current = await self._run_store.get(run_id, owner_id=owner_id)
+            if current is None:
+                raise RunNotFoundError()
+            if current.status.is_terminal:
+                return current
+            if (
+                current.status is RunStatus.WAITING_APPROVAL
+                and current.version != initial_version
+            ):
                 return current
             await asyncio.sleep(0.01)
         raise ConcurrentWriteError()
@@ -770,6 +1139,13 @@ class RunCoordinator:
             owner_id=owner_id,
             notifier=self._notifier,
             notify_timeout_ms=self._notify_timeout_ms,
+        )
+
+    def _new_lease_session(self) -> _RunLeaseSession:
+        return _RunLeaseSession(
+            store=self._run_lease_store,
+            ttl=self._lease_ttl,
+            heartbeat_interval=self._lease_heartbeat_interval,
         )
 
     async def _remove_active(

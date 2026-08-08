@@ -38,6 +38,110 @@ class RunLeaseStoreContract:
     async def expire_short_lease(self) -> None:
         raise NotImplementedError
 
+    async def test_execution_reservation_precedes_start_and_then_heartbeats(
+        self,
+    ) -> None:
+        queued = await self._create_queued_run()
+        reservation = await self.lease_store.reserve_execution(
+            queued.id,
+            owner_id=queued.owner_id,
+            expected_status=RunStatus.QUEUED,
+            ttl=LEASE_TTL,
+        )
+
+        running = await self._start_run(queued)
+        heartbeat = await self.lease_store.heartbeat(
+            reservation,
+            ttl=LEASE_TTL,
+        )
+
+        self.assertEqual(RunStatus.RUNNING, running.status)
+        self.assertEqual(reservation.version + 1, heartbeat.version)
+        await self.lease_store.release(heartbeat)
+
+    async def test_execution_reservation_requires_exact_owned_predecessor(
+        self,
+    ) -> None:
+        queued = await self._create_queued_run()
+
+        with self.assertRaises(RunNotFoundError):
+            await self.lease_store.reserve_execution(
+                queued.id,
+                owner_id="owner-2",
+                expected_status=RunStatus.QUEUED,
+                ttl=LEASE_TTL,
+            )
+        with self.assertRaises(InvalidRunTransitionError):
+            await self.lease_store.reserve_execution(
+                queued.id,
+                owner_id=queued.owner_id,
+                expected_status=RunStatus.WAITING_APPROVAL,
+                ttl=LEASE_TTL,
+            )
+        with self.assertRaises(ValueError):
+            await self.lease_store.reserve_execution(
+                queued.id,
+                owner_id=queued.owner_id,
+                expected_status=RunStatus.RUNNING,
+                ttl=LEASE_TTL,
+            )
+
+        reservation = await self.lease_store.reserve_execution(
+            queued.id,
+            owner_id=queued.owner_id,
+            expected_status=RunStatus.QUEUED,
+            ttl=LEASE_TTL,
+        )
+        await self.lease_store.release(reservation)
+
+    async def test_waiting_approval_can_reserve_resume_execution(self) -> None:
+        running = await self._create_running_run()
+        waiting = await self.run_store.transition(
+            running.id,
+            owner_id=running.owner_id,
+            expected_version=running.version,
+            target_status=RunStatus.WAITING_APPROVAL,
+        )
+
+        reservation = await self.lease_store.reserve_execution(
+            waiting.id,
+            owner_id=waiting.owner_id,
+            expected_status=RunStatus.WAITING_APPROVAL,
+            ttl=LEASE_TTL,
+        )
+
+        self.assertEqual(RunLeaseMode.EXECUTION, reservation.mode)
+        await self.lease_store.release(reservation)
+
+    async def test_expired_pre_start_reservation_requires_recovery_claim(
+        self,
+    ) -> None:
+        queued = await self._create_queued_run()
+        reservation = await self.lease_store.reserve_execution(
+            queued.id,
+            owner_id=queued.owner_id,
+            expected_status=RunStatus.QUEUED,
+            ttl=SHORT_LEASE_TTL,
+        )
+        await self.expire_short_lease()
+
+        with self.assertRaises(RunLeaseUnavailableError):
+            await self.lease_store.reserve_execution(
+                queued.id,
+                owner_id=queued.owner_id,
+                expected_status=RunStatus.QUEUED,
+                ttl=LEASE_TTL,
+            )
+        claimed = await self.lease_store.claim_expired(
+            limit=1,
+            ttl=LEASE_TTL,
+        )
+
+        self.assertEqual(1, len(claimed))
+        self.assertEqual(reservation.version + 1, claimed[0].version)
+        self.assertEqual(RunLeaseMode.RECOVERY, claimed[0].mode)
+        await self.lease_store.release(claimed[0])
+
     async def test_acquire_requires_an_owned_running_run(self) -> None:
         queued = await self._create_queued_run()
 
