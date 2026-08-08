@@ -579,6 +579,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 真实 PostgreSQL 四进程 probe 证明崩溃持有者留下的过期租约在两个 scanner 竞争时只有一个恢复者；触发器故障证明工具先收敛而 Run/Event 回滚，下一次扫描可完成终态。
 - 尚未完成：默认 Container/Coordinator 的 acquire/heartbeat/release 与 scanner 调度、同步 Approval/Memory 的 async 线程和取消边界、统一应用重启恢复及跨外部系统 exactly-once。因此 M11-T1 保持 `in_progress`，不进入 M11-T2。
 
+#### M11-T1 第五个真实纵切边界
+
+- `RunLeaseStore` 增加只接受 `queued`/`waiting_approval` 精确前置状态的 execution reservation；显式注入 lease 的 Coordinator 在 `run.started`/`run.resumed` 前先保留租约，关闭 running Run 从未创建 lease row 的不可扫描窗口，既有 running-only `acquire()` 保持兼容。
+- 每个 execute/resume 拥有独立 heartbeat session；正常路径按 reservation、生命周期提交、heartbeat、Runtime、停止 heartbeat、pause/terminal、release 排序。heartbeat 丢失或数据库不可用会取消 Runtime 并保留 running Run 给 scanner，不能由失去执行权的 Coordinator 伪造终态。
+- 内存风险合同覆盖 start 结果未知、双 Coordinator 单 Runtime、pause/resume、cancel、lease-lost、heartbeat unavailable 和 release failure；真实 PostgreSQL 纵切证明 heartbeat version 推进、terminal release，以及数据库强制过期后由现有 scanner 收敛为 `run_orphaned`。
+- 尚未完成：默认 Container/HTTP 注入、定时 scanner/lifespan 调度、统一应用进程重启恢复、同步 Approval/Memory async 线程边界和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。

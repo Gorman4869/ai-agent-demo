@@ -1726,3 +1726,92 @@
 
 - M11 PostgreSQL 恢复基线与 `V-20260803-006` 一致，可以继续显式 Coordinator lease 生命周期，不重做前四个纵切。
 - 旧 handoff 是不可变历史快照，其 M1 “7 项”预期已被后续学习者提交自然取代；当前可复现基线为 10 项，登记为 `KI-024` 后继续。
+
+## V-20260808-002：M11-T1 显式 RunCoordinator lease 生命周期
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：HEAD `beefc1a` 上的第五纵切工作区；实现提交随后固定为 `003c7be`
+- 任务等级：A 类并发、持久化租约、取消、公共 Store 契约与 fail-closed，时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问模型 Provider 或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；默认 Container/HTTP 未迁移
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `py_compile` 四个修改模块 | 1 | `py_compile` 尝试写 `backend/app/services/__pycache__` 时权限拒绝；改用不落盘 `compile()` 后四个模块 syntax-ok，不把权限失败描述成代码失败 |
+| 既有 Coordinator + 内存 lease 合同 | 0 | 首轮 28 项通过；新增 reservation 合同后 39 项通过 |
+| 新增 PostgreSQL lease/Coordinator 专项首轮 | 1 | 15 项中 14 项通过；故障夹具只回拨 `expires_at`，触发既有 `agent_run_leases_time_check`，生产路径尚未执行 |
+| 修正夹具保持 acquired < heartbeat < expires 后重跑 | 0 | PostgreSQL lease 共同合同与真实 Coordinator 共 15 项通过 |
+| 完整 `backend.tests.postgres_store_integration -q` | 0 | migration 1–4、前四纵切、reservation/Coordinator 共 82 项通过；不可达数据库负向用例保留预期 pool timeout，无 ResourceWarning |
+| 最终 Coordinator + lease 合同 | 0 | 41 项通过；覆盖 start 结果未知、reservation 顺序、heartbeat、pause/resume、cancel、双 Coordinator、lease lost、store unavailable 与 release failure |
+| Run/Store/Coordinator/LangGraph 核心定向回归 | 0 | 134 项通过；三条既有 notifier 负向日志和一条新增 release 负向稳定日志符合预期 |
+| API、Container、OpenAI SDK、framework runtime 回归 | 0 | 68 项通过；保留一条既有 `StarletteDeprecationWarning` |
+| 首轮 `scripts/verify.ps1`（沙箱） | 1 | 后端 410 项通过、1 项既有 Windows symlink 跳过；Code Agent 与依赖检查通过；Vue `tsconfig.app.tsbuildinfo` 以 `TS5033`/`EPERM` 失败，后续门未执行 |
+| 相同 `scripts/verify.ps1`（工作区构建权限） | 0 | 后端 410 项通过、1 项跳过；Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有仓库既有 LF/CRLF 转换提示 |
+
+### 实现与风险证据
+
+- `reserve_execution()` 只接受 owned `queued` 或 `waiting_approval` Run；旧 `acquire()` 仍只接受 running。内存与 PostgreSQL 使用同一合同，expired reservation 仍只能由 recovery scanner 轮换，普通 executor 不能覆盖。
+- 显式 Coordinator 顺序固定为 reservation → start/resume lifecycle commit → heartbeat → Runtime → stop heartbeat → pause/terminal → release。两个 lease-aware Coordinator 共享同一 Store 时只有一个 Runtime 调用。
+- start/resume 提交 CAS 明确失败时释放 reservation；StoreError、取消或连接结果未知时保留租约。scanner 可据真实 Run 状态清理 queued/waiting reservation，或把 running Run 收敛为 `run_orphaned`。
+- heartbeat 的 token/version 更新串行化；`run_lease_lost` 或 `store_unavailable` 会取消 Runtime 且不提交伪终态。真实 PostgreSQL 强制过期后，Coordinator 返回 `run_lease_lost`、Run 先保持 running，显式 scanner 随后提交 `run_orphaned` 并释放 recovery lease。
+- pause、terminal 和 cancel 停止 heartbeat 后提交 durable 生命周期，再尝试 release；release StoreError 不回滚已提交状态，只记录 stable code 并等待过期 scanner 清理。
+- 聚焦复审发现 cancel 在连续两次 CAS 冲突后读到终态的尾部分支可能漏 release，已补 terminal 检查；重跑定向和全量门通过。
+
+### 未验证范围
+
+- 本纵切是显式注入的 Coordinator + 真实 PostgreSQL E3，不迁移默认 Container/HTTP，也没有应用 lifespan scanner、统一应用进程重启或定时恢复调度。
+- 没有把 PostgreSQL Approval/Memory 同步 pool 接入 async 主链；线程隔离、取消、超时和 pool 耗尽仍由 `KI-023` 跟踪。
+- lease 仲裁数据库执行资格，不包含外部副作用与数据库的分布式 exactly-once；running ToolExecution 结果未知仍按 `ADR-0015` 终结为 unknown。
+- 完整门首轮 Vue 写权限失败与最终通过均保留；后端仍有一条既有 Starlette 警告和一项 Windows symlink 能力跳过。
+- 没有读取 Key、调用在线模型、访问远程服务、产生费用、配置 remote 或执行 push。
+
+### 结论
+
+- M11-T1 第五个真实纵切达到本地 E3，`ADR-0017` 的 reservation/heartbeat/release/fail-closed 顺序可由内存合同和真实 PostgreSQL 复现。
+- `KI-004`、`KI-016` 保持 mitigated，`KI-023` 保持 open；M11-T1 继续 `in_progress`。下一原子动作只做显式 recovery scanner 调度生命周期，不迁移默认 Container/HTTP，不进入 M11-T2。
+
+## V-20260808-003：M11-T1 Coordinator lease 实现提交后恢复锚点
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `003c7be`（`feat: coordinate runs with postgres leases`）
+- 模式：本地真实 PostgreSQL E3；没有读取 Key、调用在线模型或产生费用
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: coordinate runs with postgres leases"` | 0 | 11 个本任务文件固定为实现提交 `003c7be`，1345 行新增、115 行删除 |
+| `git status --short` / `docker exec ... pg_isready` | 0 / 0 | 实现提交后工作区干净；本地 PostgreSQL accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 实现提交上真实 PostgreSQL 82 项通过；不可达数据库负向用例保留预期 pool timeout，无 ResourceWarning |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后学习者当前 M1 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 新增 ADR 后 52 个稳定任务、81 个 Markdown 通过 |
+
+### 结论
+
+- `003c7be` 可从干净工作区恢复；`V-20260808-002` 的 134 项核心回归、68 项 API/Container/SDK 回归、后端 410 项完整门、Vue/MCP/Compose 结果与未验证范围不变。
+- 当前任务保持 `M11-T1 / in_progress`。下一原子动作只设计并实现显式 recovery scanner 调度生命周期，不迁移默认 Container/HTTP、不合并同步 Approval/Memory async 边界，也不进入 M11-T2。
+
+## V-20260808-004：M11-T1 Coordinator lease 连续性闭环
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `003c7be` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、82 个 Markdown 通过；新增 ADR/handoff 引用和任务状态一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| 定向搜索旧“下一步/四纵切/76+7 恢复基线”措辞 | 1 | 指定动态 status、实施计划第五纵切和新 handoff 中无旧命中；退出 1 表示 `rg` 未匹配，不是检查失败 |
+
+### 结论
+
+- implementation plan、ADR、known issue、status、verification 和新 handoff 已分别记录第五纵切事实、残余边界与下一条 scanner 调度原子动作。
+- 本步骤没有代码或行为变化，因此不重复运行后端/前端业务测试；实现提交 `003c7be` 的 PostgreSQL 82、核心 134、API/Container/SDK 68 与完整门 410 项证据继续引用 `V-20260808-002`/`003`。

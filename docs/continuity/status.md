@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-08-03，Asia/Shanghai
+- 更新时间：2026-08-08，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`1fc55fb`
+- 最近已确认实现提交：`003c7be`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -28,6 +28,7 @@
 - M11-T1 第二纵切验证基线提交：`bf875be`；实现提交：`cb4fd52`
 - M11-T1 第三纵切验证基线提交：`bb36875`；实现提交：`0de735d`
 - M11-T1 第四纵切验证基线提交：`1219737`；实现提交：`1fc55fb`
+- M11-T1 第五纵切验证基线提交：`beefc1a`；实现提交：`003c7be`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -38,11 +39,11 @@
 | 任务 ID | `M11-T1` |
 | 状态 | `in_progress` |
 | 目标 | 设计并实现版本化 PostgreSQL migration、Run/Event/Approval/Memory Store、LangGraph checkpointer、连接生命周期和事务边界 |
-| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015`、`ADR-0016` 与现有 Store Protocol |
+| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0007`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015`、`ADR-0016`、`ADR-0017` 与现有 Store Protocol |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 已完成 M11-T1 第四个真实 PostgreSQL 纵切：数据库时钟 lease/heartbeat、token/version CAS、`SKIP LOCKED` orphan scanner 与显式 RunRecoveryService；两个 scanner 进程竞争同一崩溃持有者时只有一个恢复 running ToolExecution/Run，真实触发器故障可由下一轮扫描收敛 |
-| 前置证据 | `V-20260803-006`、`V-20260803-005`、`V-20260803-004`、`V-20260803-003`、`V-20260803-002`、`V-20260803-001`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006` |
-| 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现显式注入的 RunCoordinator lease 生命周期，固定 acquire/start、heartbeat、pause/terminal/cancel release 与 lease-lost fail-closed；暂不迁移默认 Container/HTTP、不解决同步 Approval/Memory 的 async 线程边界，也不进入 M11-T2 pgvector |
+| 当前修改 | 已完成 M11-T1 第五个真实 PostgreSQL 纵切：显式 RunCoordinator 在 start/resume 前 reservation、运行中 heartbeat、pause/terminal/cancel 后 release；heartbeat 丢失会取消 Runtime 并保留 running Run，由真实 PostgreSQL scanner 收敛 `run_orphaned` |
+| 前置证据 | `V-20260808-004`、`V-20260808-003`、`V-20260808-002`、`V-20260808-001`、`V-20260803-006`、`V-20260803-005`、`ADR-0017`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0007`、`ADR-0006` |
+| 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现显式 recovery scanner 调度生命周期，固定单进程 start/close、禁止重叠 scan、取消/关闭清理和失败后下一轮收敛；暂不迁移默认 Container/HTTP、不解决同步 Approval/Memory 的 async 线程边界，也不进入 M11-T2 pgvector |
 
 ## 里程碑状态
 
@@ -53,19 +54,23 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 的 Run/Event/checkpoint、Approval/Memory、ToolExecution 与 lease/recovery 四个 PostgreSQL 纵切已通过真实容器、故障事务和跨进程验证；Coordinator lease 生命周期、默认主链及 M11-T2 以后任务尚未完成 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 的 Run/Event/checkpoint、Approval/Memory、ToolExecution、lease/recovery 与显式 Coordinator lease 生命周期五个 PostgreSQL 纵切已通过真实容器、故障事务和跨进程/真实协调器验证；scanner 调度、默认主链及 M11-T2 以后任务尚未完成 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- Docker Engine 已由用户启动，本轮授权的本地 PostgreSQL 17.10 测试容器健康运行；这不是持续可用或生产部署证据，后续会话仍须先检查实际状态。
+- Docker Engine 与本地 PostgreSQL 17.10 测试容器在本轮恢复后健康运行；这不是持续可用或生产部署证据，后续会话仍须先检查实际状态。
 - 真实模型在线冒烟测试尚未获得单次执行授权；不阻塞离线实现与测试。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
 ## 未验证范围
 
+- M11-T1 第五纵切见 `V-20260808-002`/`003`：内存 Coordinator/lease 41 项、真实 PostgreSQL 82 项、核心 Run/Store/Coordinator/LangGraph 134 项、API/Container/SDK 68 项和 M1 隔离 10 项通过；公共 Store 契约变化触发完整门，后端 410 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
+- 真实 PostgreSQL Coordinator 已证明 queued reservation 早于 `run.started`、heartbeat version 推进、terminal release；数据库强制过期时 Runtime 被取消且旧执行者不提交终态，显式 scanner 随后把 Run 收敛为 `run_orphaned`。它不是默认应用、自动调度或外部副作用 exactly-once 证据。
+- 第五纵切没有迁移默认 Container/HTTP，没有 lifespan scanner、统一应用进程重启恢复或同步 Approval/Memory async 线程边界。release 在 durable pause/terminal/cancel 后失败时不回滚状态，陈旧 lease 依赖后续 scanner 清理；`KI-004`、`KI-016` 保持 mitigated，`KI-023` 保持 open。
+- 第五纵切完整门沙箱首轮在后端 410 项、Code Agent 和依赖通过后因 Vue `tsconfig.app.tsbuildinfo` 写入 `TS5033`/`EPERM` 退出 1；相同脚本获工作区构建权限后退出 0。后端仍有一条既有 `StarletteDeprecationWarning` 和一项 Windows symlink 能力跳过。
 - M11-T1 第四纵切见 `V-20260803-005`：内存 lease/recovery 13 项、完整真实 PostgreSQL 76 项、受影响 Run/Store/Coordinator/LangGraph 131 项和 M1 隔离 7 项通过；最终完整门后端 394 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
 - 四个 PID 不同的 probe 进程证明持有 execution lease 的进程以 17 退出后，两个 scanner 竞争同一过期记录时只有一个恢复者；审计进程读取到 running ToolExecution=unknown、pending=cancelled、Run=`run_orphaned` 且租约已释放。它证明本地数据库仲裁，不证明默认应用已调度 scanner 或外部副作用 exactly-once。
 - PostgreSQL 只保存 lease token SHA-256，过期判断使用数据库时钟；heartbeat/release 绑定未过期 token/version 和 Run 状态。ToolExecution、Run/Event 和 lease release 仍是分离事务，真实触发器故障证明中间状态可由下一次扫描收敛，但收敛前可能短暂观察到工具已终态而 Run 仍 running。
@@ -121,4 +126,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-03-m11-t1-postgres-run-lease-recovery-anchor.md`，再核对 `V-20260803-006`、`V-20260803-005`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0006`、实施计划 M11-T1 和实际 PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 76 项、M1 7 项和连续性检查；若一致，不要重做前四个纵切，下一步只做显式 RunCoordinator lease 生命周期。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container/HTTP、扩大到同步 Approval/Memory async 边界或 M11-T2。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-08-m11-t1-coordinator-lease-lifecycle.md`，再核对 `V-20260808-003`、`V-20260808-002`、`V-20260808-001`、`ADR-0017`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0007`、`ADR-0006`、实施计划 M11-T1 和实际 Coordinator/PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 82 项、M1 10 项和连续性检查；若一致，不要重做前五个纵切，下一步只做显式 recovery scanner 调度生命周期。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container/HTTP、扩大到同步 Approval/Memory async 边界或 M11-T2。

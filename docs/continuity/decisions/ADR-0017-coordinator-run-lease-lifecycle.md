@@ -48,7 +48,7 @@ reserve waiting_approval
 
 每个 active execute/resume 拥有独立 lease session 和 heartbeat task。heartbeat 使用最新 token/version handle 串行续约；stop 会等待正在进行的 heartbeat 完成，避免 release 使用已知的旧 version。
 
-heartbeat 返回 `run_lease_lost`、`store_unavailable` 或其他失败时，Coordinator 取消当前 Runtime task并设置协作取消信号。若 Store 已存在 terminal/waiting durable winner则返回赢家；否则原错误继续越界，Run 保持 running，不能伪造 completed、cancelled 或 failed，由 lease scanner 收敛。
+heartbeat 返回 `run_lease_lost`、`store_unavailable` 或其他失败时，Coordinator 取消当前 Runtime task 并设置协作取消信号。若 Store 已存在 terminal/waiting durable winner 则返回赢家；否则原错误继续越界，Run 保持 running，不能伪造 completed、cancelled 或 failed，由 lease scanner 收敛。
 
 ### 4. pause、terminal 与 cancel 后再释放
 
