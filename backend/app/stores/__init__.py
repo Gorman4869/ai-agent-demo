@@ -22,6 +22,12 @@ from .base import (
     TerminalCommitResult,
     TerminalRunCommitter,
 )
+from .async_facade import (
+    AsyncApprovalStore,
+    AsyncLocalApprovalStore,
+    AsyncLocalMemoryStore,
+    AsyncMemoryStore,
+)
 from .memory import (
     InMemoryEventStore,
     InMemoryRunLeaseStore,
@@ -46,6 +52,10 @@ from .tool_execution import (
 
 __all__ = [
     "AppendEventResult",
+    "AsyncApprovalStore",
+    "AsyncLocalApprovalStore",
+    "AsyncLocalMemoryStore",
+    "AsyncMemoryStore",
     "ApprovalLifecycleCommitter",
     "ConcurrentWriteError",
     "CreateRunResult",

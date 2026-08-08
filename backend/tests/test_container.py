@@ -5,12 +5,17 @@ import os
 import socket
 import unittest
 from datetime import UTC, datetime
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
 from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.agent.sdk_runtime import OpenAIAgentsRuntime
+from backend.app.application_lifecycle import (
+    ApplicationAdmissionState,
+    ApplicationLifecycleState,
+)
 from backend.app.container import ApplicationContainer
 from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.integrations.mcp import McpClientState
@@ -22,7 +27,13 @@ from backend.app.services import InMemoryRunService, RunCoordinator
 from backend.app.settings import Settings
 from backend.app.settings import SettingsError
 from backend.app.skills import SkillAwareRuntime
-from backend.app.stores import InMemoryEventStore, InMemoryRunStore
+from backend.app.stores import (
+    AsyncLocalApprovalStore,
+    AsyncLocalMemoryStore,
+    InMemoryEventStore,
+    InMemoryRunStore,
+)
+from backend.app.tools import InMemoryApprovalStore
 
 
 class ApplicationContainerTest(unittest.TestCase):
@@ -202,6 +213,19 @@ class ApplicationContainerTest(unittest.TestCase):
                 settings=Settings.from_environment({}),
             )
 
+    def test_postgres_container_requires_async_open(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": (
+                    "postgresql://course@127.0.0.1:55432/agent_test"
+                ),
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires await"):
+            ApplicationContainer.create(settings=settings)
+
     def test_default_authenticator_still_reads_legacy_auth_environment(self) -> None:
         token = "configured-test-token"
         auth_config = json.dumps(
@@ -240,6 +264,116 @@ class ApplicationContainerTest(unittest.TestCase):
 
 
 class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
+    async def test_postgres_open_failure_preserves_error_and_closes_composition(
+        self,
+    ) -> None:
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": (
+                    "postgresql://course@127.0.0.1:55432/agent_test"
+                ),
+            }
+        )
+        composition = SimpleNamespace(
+            persistence=SimpleNamespace(
+                approval_store=InMemoryApprovalStore(),
+            ),
+            close=AsyncMock(side_effect=RuntimeError("cleanup failed")),
+        )
+
+        with (
+            patch(
+                "backend.app.postgres_execution."
+                "PostgresExecutionComposition.open",
+                new=AsyncMock(return_value=composition),
+            ),
+            patch(
+                "backend.app.container."
+                "StaticTokenAuthenticator.from_environment",
+                side_effect=ValueError("invalid auth config"),
+            ),
+            self.assertLogs("application.container", level="ERROR") as logs,
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid auth config"):
+                await ApplicationContainer.open(settings=settings)
+
+        composition.close.assert_awaited_once()
+        self.assertEqual(
+            ["ERROR:application.container:PostgreSQL container startup cleanup failed"],
+            logs.output,
+        )
+
+    async def test_postgres_open_binds_composition_and_async_facades(self) -> None:
+        dsn = "postgresql://course@127.0.0.1:55432/agent_test"
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": dsn,
+            }
+        )
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
+        memory = ConversationMemory()
+        approvals = InMemoryApprovalStore()
+
+        persistence = SimpleNamespace(
+            run_store=run_store,
+            event_store=event_store,
+            memory_store=memory,
+            approval_store=approvals,
+            async_memory_store=AsyncLocalMemoryStore(memory),
+            async_approval_store=AsyncLocalApprovalStore(approvals),
+        )
+        coordinator = Mock(spec=RunCoordinator)
+        composition = SimpleNamespace(
+            persistence=persistence,
+            coordinator=coordinator,
+            close=AsyncMock(),
+        )
+        open_composition = AsyncMock(return_value=composition)
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "backend.app.postgres_execution."
+                "PostgresExecutionComposition.open",
+                new=open_composition,
+            ),
+        ):
+            container = await ApplicationContainer.open(settings=settings)
+
+        self.assertIs(run_store, container.run_store)
+        self.assertIs(event_store, container.event_store)
+        self.assertIs(memory, container.memory)
+        self.assertIs(approvals, container.approval_store)
+        self.assertIs(
+            persistence.async_memory_store,
+            container.async_memory_store,
+        )
+        self.assertIs(
+            persistence.async_approval_store,
+            container.async_approval_store,
+        )
+        self.assertIs(coordinator, container.run_coordinator)
+        self.assertEqual(ApplicationLifecycleState.CREATED, container.lifecycle_state)
+        self.assertEqual(ApplicationAdmissionState.CREATED, container.admission.state)
+        self.assertNotIn(dsn, repr(container))
+        open_composition.assert_awaited_once()
+        self.assertEqual(dsn, open_composition.await_args.args[0])
+
+        await container.start()
+        self.assertEqual(ApplicationLifecycleState.RUNNING, container.lifecycle_state)
+        self.assertEqual(
+            ApplicationAdmissionState.ACCEPTING,
+            container.admission.state,
+        )
+        await container.close()
+
+        composition.close.assert_awaited_once()
+        self.assertEqual(ApplicationLifecycleState.CLOSED, container.lifecycle_state)
+        self.assertEqual(McpClientState.CLOSED, container.mcp_clients.state)
+
     async def test_default_event_store_is_bound_to_default_run_store(self) -> None:
         now = datetime(2026, 7, 16, 4, 0, tzinfo=UTC)
         container = ApplicationContainer.create(

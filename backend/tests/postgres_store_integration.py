@@ -10,8 +10,15 @@ import sys
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
+from uuid import uuid4
+
+from fastapi.testclient import TestClient
 
 from backend.app.agent import RuntimeResult
+from backend.app.application_lifecycle import ApplicationLifecycleState
+from backend.app.container import ApplicationContainer
+from backend.app.main import create_app
 from backend.app.domain import Message
 from backend.app.domain.run import (
     RunRecord,
@@ -30,6 +37,8 @@ from backend.app.services.run_recovery_supervisor import (
     RunRecoverySupervisorState,
 )
 from backend.app.services.run_coordinator import RunCoordinator
+from backend.app.security import StaticTokenAuthenticator
+from backend.app.settings import Settings
 from backend.app.stores import (
     EventStore,
     RunLeaseLostError,
@@ -40,7 +49,10 @@ from backend.app.stores import (
 )
 from backend.app.stores.base import StartCommit
 from backend.app.stores.postgres import PostgresPersistence
-from backend.app.stores.postgres_async import PostgresSyncStoreBridgeState
+from backend.app.stores.postgres_async import (
+    AsyncPostgresMemoryStore,
+    PostgresSyncStoreBridgeState,
+)
 from backend.app.stores.postgres_migrations import (
     MigrationApplyError,
     MigrationChecksumError,
@@ -127,6 +139,120 @@ class PostgresMemoryStoreContractTest(
 
     async def asyncTearDown(self) -> None:
         await self.persistence.close()
+
+
+class PostgresFastApiApplicationTest(unittest.TestCase):
+    def test_lifespan_persists_memory_across_application_restart(self) -> None:
+        token = "postgres-application-token"
+        auth_config = json.dumps(
+            {
+                token: {
+                    "principal_id": "postgres-application-owner",
+                    "roles": [],
+                }
+            }
+        )
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN,
+            }
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        with patch.dict(
+            os.environ,
+            {"AI_AGENT_DEMO_AUTH_JSON": auth_config},
+            clear=False,
+        ):
+            first_app = create_app(settings=settings)
+            self.assertIsNone(first_app.state.container)
+            with TestClient(first_app) as client:
+                created = client.post(
+                    "/api/memories",
+                    headers=headers,
+                    json={
+                        "key": "restart-proof",
+                        "value": "postgres",
+                        "scope": "user",
+                        "approved": True,
+                    },
+                )
+                first_container = first_app.state.container
+                self.assertEqual(201, created.status_code)
+                self.assertEqual(
+                    "PostgresRunStore",
+                    type(first_container.run_store).__name__,
+                )
+                self.assertIsInstance(
+                    first_container.async_memory_store,
+                    AsyncPostgresMemoryStore,
+                )
+                fact_id = created.json()["id"]
+
+            self.assertEqual(
+                ApplicationLifecycleState.CLOSED,
+                first_container.lifecycle_state,
+            )
+
+            second_app = create_app(settings=settings)
+            with TestClient(second_app) as client:
+                deleted = client.delete(
+                    f"/api/memories/{fact_id}",
+                    headers=headers,
+                )
+                second_container = second_app.state.container
+                self.assertEqual(204, deleted.status_code)
+
+            self.assertEqual(
+                ApplicationLifecycleState.CLOSED,
+                second_container.lifecycle_state,
+            )
+
+
+class PostgresApplicationContainerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_approval_is_granted_and_consumed_through_async_facade(
+        self,
+    ) -> None:
+        tool_call_id = f"application-approval-{uuid4()}"
+        arguments = {"report_id": "application-report"}
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN,
+            }
+        )
+
+        container = await ApplicationContainer.open(
+            settings=settings,
+            authenticator=StaticTokenAuthenticator(),
+        )
+        await container.start()
+        try:
+            await container.async_approval_store.grant(
+                principal_id="postgres-approval-owner",
+                tool_call_id=tool_call_id,
+                tool_name="publish_report",
+                arguments=arguments,
+            )
+            first = await container.async_approval_store.consume(
+                principal_id="postgres-approval-owner",
+                tool_call_id=tool_call_id,
+                tool_name="publish_report",
+                arguments=arguments,
+            )
+            replay = await container.async_approval_store.consume(
+                principal_id="postgres-approval-owner",
+                tool_call_id=tool_call_id,
+                tool_name="publish_report",
+                arguments=arguments,
+            )
+        finally:
+            await container.close()
+
+        self.assertTrue(first.approved)
+        self.assertFalse(replay.approved)
+        self.assertEqual(ApplicationLifecycleState.CLOSED, container.lifecycle_state)
 
 
 class PostgresAsyncApprovalMemoryTest(unittest.IsolatedAsyncioTestCase):

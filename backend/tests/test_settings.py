@@ -31,6 +31,64 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual((), settings.mcp.server_ids)
         self.assertEqual(5_000, settings.mcp.startup_timeout_ms)
         self.assertEqual(5_000, settings.mcp.request_timeout_ms)
+        self.assertEqual("memory", settings.persistence.backend)
+        self.assertIsNone(settings.persistence.postgres_dsn)
+
+    def test_postgres_requires_explicit_backend_and_valid_dsn(self) -> None:
+        dsn = "postgresql://course@127.0.0.1:55432/agent_test"
+        inactive = Settings.from_environment({"AI_AGENT_POSTGRES_DSN": dsn})
+        enabled = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": dsn,
+            }
+        )
+
+        self.assertEqual("memory", inactive.persistence.backend)
+        self.assertEqual("postgres", enabled.persistence.backend)
+        self.assertEqual(
+            dsn,
+            enabled.persistence.postgres_dsn.get_secret_value(),
+        )
+
+    def test_invalid_postgres_configuration_fails_closed(self) -> None:
+        environments = (
+            {"AI_AGENT_PERSISTENCE": "postgres"},
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": "not a postgres conninfo",
+            },
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": "postgresql://bad\nvalue",
+            },
+            {"AI_AGENT_PERSISTENCE": "sqlite"},
+        )
+
+        for environment in environments:
+            with self.subTest(environment=environment):
+                with self.assertRaises(SettingsError):
+                    Settings.from_environment(environment)
+
+    def test_postgres_dsn_is_excluded_from_safe_outputs(self) -> None:
+        dsn = "postgresql://private-user:private-pass@localhost/private-db"
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": dsn,
+            }
+        )
+
+        self.assertNotIn(dsn, repr(settings))
+        self.assertNotIn(dsn, settings.model_dump_json())
+        self.assertNotIn(dsn, str(settings.safe_summary()))
+        self.assertEqual(
+            {
+                "backend": "postgres",
+                "postgres_dsn_configured": True,
+            },
+            settings.safe_summary()["persistence"],
+        )
 
     def test_mcp_server_selectors_and_timeout_are_parsed(self) -> None:
         settings = Settings.from_environment(
@@ -301,6 +359,8 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("\nAI_AGENT_MCP_SERVERS=\n", content)
         self.assertIn("\nAI_AGENT_MCP_STARTUP_TIMEOUT_MS=5000\n", content)
         self.assertIn("\nAI_AGENT_MCP_REQUEST_TIMEOUT_MS=5000\n", content)
+        self.assertIn("\nAI_AGENT_PERSISTENCE=memory\n", content)
+        self.assertIn("\nAI_AGENT_POSTGRES_DSN=\n", content)
         self.assertIn("\nOPENAI_API_KEY=\n", content)
         self.assertIn("\nOPENAI_MODEL=\n", content)
 

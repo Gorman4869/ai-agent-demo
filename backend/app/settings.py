@@ -5,6 +5,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -84,6 +85,64 @@ class McpClientSettings(BaseModel):
         return value
 
 
+class PersistenceSettings(BaseModel):
+    """Server-owned persistence selection and secret connection data."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+    )
+
+    backend: Literal["memory", "postgres"] = "memory"
+    postgres_dsn: SecretStr | None = Field(
+        default=None,
+        repr=False,
+        exclude=True,
+    )
+
+    @field_validator("postgres_dsn", mode="before")
+    @classmethod
+    def normalize_postgres_dsn(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, SecretStr):
+            raw_value = value.get_secret_value()
+        elif isinstance(value, str):
+            raw_value = value
+        else:
+            return value
+        normalized = raw_value.strip()
+        if not normalized:
+            return None
+        if len(normalized) > 2_048 or any(
+            _is_control_character(character) for character in normalized
+        ):
+            raise ValueError("AI_AGENT_POSTGRES_DSN has an invalid format")
+        return SecretStr(normalized)
+
+    @model_validator(mode="after")
+    def validate_postgres_gate(self) -> PersistenceSettings:
+        if self.backend != "postgres":
+            return self
+        if self.postgres_dsn is None:
+            raise ValueError("postgres persistence requires AI_AGENT_POSTGRES_DSN")
+        from psycopg import ProgrammingError
+        from psycopg.conninfo import conninfo_to_dict
+
+        try:
+            conninfo_to_dict(self.postgres_dsn.get_secret_value())
+        except ProgrammingError:
+            raise ValueError("AI_AGENT_POSTGRES_DSN has an invalid format") from None
+        return self
+
+    def safe_summary(self) -> dict[str, object]:
+        return {
+            "backend": self.backend,
+            "postgres_dsn_configured": self.postgres_dsn is not None,
+        }
+
+
 class Settings(BaseModel):
     """Immutable application configuration parsed from explicit environment data.
 
@@ -110,6 +169,7 @@ class Settings(BaseModel):
     openai_model: str | None = None
     budget: RunBudgetSettings = Field(default_factory=RunBudgetSettings)
     mcp: McpClientSettings = Field(default_factory=McpClientSettings)
+    persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)
 
     @field_validator("openai_api_key", mode="before")
     @classmethod
@@ -180,6 +240,7 @@ class Settings(BaseModel):
             "openai_model_configured": self.openai_model is not None,
             "budget": self.budget.model_dump(mode="json"),
             "mcp": self.mcp.model_dump(mode="json"),
+            "persistence": self.persistence.safe_summary(),
         }
 
     @classmethod
@@ -260,6 +321,17 @@ class Settings(BaseModel):
                         values,
                         "AI_AGENT_MCP_REQUEST_TIMEOUT_MS",
                         5_000,
+                    ),
+                ),
+                persistence=PersistenceSettings(
+                    backend=_read_name(
+                        values,
+                        "AI_AGENT_PERSISTENCE",
+                        "memory",
+                    ),
+                    postgres_dsn=_read_optional_secret(
+                        values,
+                        "AI_AGENT_POSTGRES_DSN",
                     ),
                 ),
             )
@@ -372,3 +444,7 @@ def _safe_validation_message(error: ValidationError) -> str:
 
 def _is_control_or_whitespace(character: str) -> bool:
     return character.isspace() or unicodedata.category(character).startswith("C")
+
+
+def _is_control_character(character: str) -> bool:
+    return unicodedata.category(character).startswith("C")

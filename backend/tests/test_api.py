@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 from backend.app.container import ApplicationContainer
+from backend.app.application_lifecycle import ApplicationAdmissionState
 from backend.app.knowledge import Document, InMemoryKnowledgeBase
-from backend.app.main import _wait_for_cancelled_run, create_app
+from backend.app.main import (
+    _ApplicationAdmissionMiddleware,
+    _wait_for_cancelled_run,
+    create_app,
+)
+from backend.app.memory import MemoryFact, MemoryScope
 from backend.app.security import Principal, StaticTokenAuthenticator
 from backend.app.settings import Settings
 from backend.app.tools import InMemoryApprovalStore
@@ -310,6 +319,66 @@ class ApiTest(unittest.TestCase):
             ).status_code,
         )
 
+    def test_memory_http_uses_container_async_facade(self) -> None:
+        authenticator = StaticTokenAuthenticator(
+            {"memory-token": Principal("memory-owner")}
+        )
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({}),
+            authenticator=authenticator,
+        )
+        async_memory = AsyncMock()
+        async_memory.remember.return_value = MemoryFact(
+            id="fact-async",
+            owner_id="memory-owner",
+            key="framework",
+            value="FastAPI",
+            scope=MemoryScope.USER,
+        )
+        async_memory.forget.return_value = True
+        app = create_app(
+            container=replace(container, async_memory_store=async_memory)
+        )
+        client = TestClient(app)
+
+        created = client.post(
+            "/api/memories",
+            headers=self._auth("memory-token"),
+            json={
+                "key": "framework",
+                "value": "FastAPI",
+                "scope": "user",
+                "approved": True,
+            },
+        )
+        deleted = client.delete(
+            "/api/memories/fact-async",
+            headers=self._auth("memory-token"),
+        )
+
+        self.assertEqual(201, created.status_code)
+        self.assertEqual(204, deleted.status_code)
+        async_memory.remember.assert_awaited_once()
+        async_memory.forget.assert_awaited_once_with(
+            "fact-async",
+            owner_id="memory-owner",
+        )
+
+    def test_http_admission_returns_503_after_close(self) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        asyncio.run(container.admission.close())
+        client = TestClient(create_app(container=container))
+
+        response = client.get("/health")
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual(
+            {"detail": "Application is shutting down"},
+            response.json(),
+        )
+
     def test_demo_seed_endpoint_does_not_reindex_on_each_request(self) -> None:
         knowledge = CountingKnowledgeBase()
         client = TestClient(
@@ -419,6 +488,43 @@ class CountingKnowledgeBase(InMemoryKnowledgeBase):
 
 
 class StreamLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_asgi_admission_covers_the_complete_response_body(self) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        response_started = asyncio.Event()
+        release_response = asyncio.Event()
+
+        async def streaming_app(_scope, _receive, _send) -> None:
+            response_started.set()
+            await release_response.wait()
+
+        async def receive() -> dict[str, object]:
+            return {"type": "http.disconnect"}
+
+        async def send(_message: dict[str, object]) -> None:
+            return None
+
+        middleware = _ApplicationAdmissionMiddleware(streaming_app)
+        scope = {
+            "type": "http",
+            "app": SimpleNamespace(
+                state=SimpleNamespace(container=container)
+            ),
+        }
+        response = asyncio.create_task(
+            middleware(scope, receive, send)  # type: ignore[arg-type]
+        )
+        await response_started.wait()
+        closing = asyncio.create_task(container.admission.close())
+        while container.admission.state is ApplicationAdmissionState.ACCEPTING:
+            await asyncio.sleep(0)
+
+        self.assertFalse(closing.done())
+        release_response.set()
+        await response
+        await closing
+
     async def test_cancelled_run_wait_has_a_strict_upper_bound(self) -> None:
         blocker = asyncio.Event()
 

@@ -57,7 +57,11 @@ class StaticTokenAuthenticator:
         self._principals_by_token = principals
 
     @classmethod
-    def from_environment(cls) -> StaticTokenAuthenticator:
+    def from_environment(
+        cls,
+        *,
+        approval_store: ApprovalStore | None = None,
+    ) -> StaticTokenAuthenticator:
         raw_config = os.getenv(AUTH_CONFIG_ENV)
         if raw_config is None or not raw_config.strip():
             return cls()
@@ -67,7 +71,16 @@ class StaticTokenAuthenticator:
             raise ValueError(f"{AUTH_CONFIG_ENV} must contain valid JSON") from error
         if not isinstance(config, dict):
             raise ValueError(f"{AUTH_CONFIG_ENV} must contain a JSON object")
-        return cls(_parse_principals(config))
+        return cls(
+            _parse_principals(
+                config,
+                approval_store=(
+                    approval_store
+                    if approval_store is not None
+                    else InMemoryApprovalStore()
+                ),
+            )
+        )
 
     def authenticate(self, authorization: str | None) -> Principal:
         if authorization is None:
@@ -81,9 +94,12 @@ class StaticTokenAuthenticator:
         return principal
 
 
-def _parse_principals(config: Mapping[str, Any]) -> dict[str, Principal]:
+def _parse_principals(
+    config: Mapping[str, Any],
+    *,
+    approval_store: ApprovalStore,
+) -> dict[str, Principal]:
     principals: dict[str, Principal] = {}
-    approval_store = InMemoryApprovalStore()
     for token, raw_principal in config.items():
         if not isinstance(token, str) or not isinstance(raw_principal, dict):
             raise ValueError(f"{AUTH_CONFIG_ENV} entries must map tokens to objects")

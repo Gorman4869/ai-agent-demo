@@ -7,7 +7,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.app.api.schemas import (
     DocumentRequest,
@@ -27,6 +28,7 @@ from backend.app.api.schemas import (
 )
 from backend.app.agent import CancellationToken
 from backend.app.agent.research_workflow import create_research_workflow
+from backend.app.application_lifecycle import ApplicationNotAcceptingError
 from backend.app.container import ApplicationContainer
 from backend.app.evals import EvalCase, OfflineEvaluator
 from backend.app.knowledge import (
@@ -35,7 +37,7 @@ from backend.app.knowledge import (
     InMemoryKnowledgeBase,
     KnowledgeBase,
 )
-from backend.app.memory import ConversationMemory, MemoryScope, MemoryStore
+from backend.app.memory import MemoryScope, MemoryStore
 from backend.app.observability import RunObservation
 from backend.app.security import (
     AuthenticationError,
@@ -50,6 +52,41 @@ from backend.app.tools import ToolExecutionContext
 
 
 logger = logging.getLogger("ai_agent.api")
+
+
+class _ApplicationAdmissionMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        application = scope.get("app")
+        current = getattr(getattr(application, "state", None), "container", None)
+        if not isinstance(current, ApplicationContainer):
+            await JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"detail": "Application is not ready"},
+            )(scope, receive, send)
+            return
+        try:
+            await current.admission.acquire()
+        except ApplicationNotAcceptingError:
+            await JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"detail": "Application is shutting down"},
+            )(scope, receive, send)
+            return
+        try:
+            await self._app(scope, receive, send)
+        finally:
+            await current.admission.release()
 
 
 def create_app(
@@ -67,6 +104,13 @@ def create_app(
         memory,
         authenticator,
     )
+    resolved_settings = (
+        container.settings
+        if container is not None
+        else (
+            settings if settings is not None else Settings.from_environment()
+        )
+    )
     if container is not None:
         if settings is not None or any(
             dependency is not None for dependency in legacy_dependencies
@@ -76,36 +120,72 @@ def create_app(
             )
         resolved_container = container
     else:
-        resolved_container = ApplicationContainer.create(
-            settings=settings,
-            run_service=run_service,
-            knowledge_base=knowledge_base,
-            memory=memory,
-            authenticator=authenticator,
-        )
-    service = resolved_container.run_service
-    knowledge = resolved_container.knowledge_base
-    conversation_memory = resolved_container.memory
-    token_authenticator = resolved_container.authenticator
-    demo_document_chunk_count = knowledge.add(DEMO_COURSE_DOCUMENT)
+        if resolved_settings.persistence.backend == "postgres":
+            if memory is not None:
+                raise ValueError(
+                    "memory override cannot be combined with postgres persistence"
+                )
+            resolved_container = None
+        else:
+            resolved_container = ApplicationContainer.create(
+                settings=resolved_settings,
+                run_service=run_service,
+                knowledge_base=knowledge_base,
+                memory=memory,
+                authenticator=authenticator,
+            )
+    demo_document_chunk_count = (
+        resolved_container.knowledge_base.add(DEMO_COURSE_DOCUMENT)
+        if resolved_container is not None
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        async with resolved_container.mcp_clients.lifespan():
+        nonlocal resolved_container, demo_document_chunk_count
+        if resolved_container is None:
+            assert container is None
+            resolved_container = await ApplicationContainer.open(
+                settings=resolved_settings,
+                run_service=run_service,
+                knowledge_base=knowledge_base,
+                authenticator=authenticator,
+            )
+            _app.state.container = resolved_container
+        try:
+            if demo_document_chunk_count is None:
+                demo_document_chunk_count = resolved_container.knowledge_base.add(
+                    DEMO_COURSE_DOCUMENT
+                )
+            _app.state.demo_document_chunk_count = demo_document_chunk_count
+            await resolved_container.start()
             yield
+        finally:
+            await resolved_container.close()
 
     app = FastAPI(
         title="AI Agent Learning API",
         version="0.5.0",
         lifespan=lifespan,
     )
+    app.add_middleware(_ApplicationAdmissionMiddleware)
     app.state.container = resolved_container
+    app.state.demo_document_chunk_count = demo_document_chunk_count
+
+    def current_container() -> ApplicationContainer:
+        current = app.state.container
+        if not isinstance(current, ApplicationContainer):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Application is not ready",
+            )
+        return current
 
     def current_principal(
         authorization: str | None = Header(default=None),
     ) -> Principal:
         try:
-            return token_authenticator.authenticate(authorization)
+            return current_container().authenticator.authenticate(authorization)
         except AuthenticationError as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -125,6 +205,7 @@ def create_app(
     def create_session(
         principal: Principal = Depends(current_principal),
     ) -> SessionResponse:
+        service = current_container().run_service
         created = service.create_session(
             principal_id=principal.principal_id if principal.authenticated else None
         )
@@ -141,6 +222,7 @@ def create_app(
         principal: Principal = Depends(current_principal),
         x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
     ) -> RunResponse:
+        service = current_container().run_service
         execution_principal = resolve_session_principal(
             session_id,
             principal=principal,
@@ -163,6 +245,7 @@ def create_app(
         principal: Principal = Depends(current_principal),
         x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
     ) -> StreamingResponse:
+        service = current_container().run_service
         execution_principal = resolve_session_principal(
             session_id,
             principal=principal,
@@ -217,6 +300,7 @@ def create_app(
         principal: Principal = Depends(current_principal),
         x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
     ) -> RunResponse:
+        service = current_container().run_service
         run = service.get_run(
             run_id,
             principal_id=principal.principal_id if principal.authenticated else None,
@@ -233,6 +317,7 @@ def create_app(
     def list_run_observations(
         principal: Principal = Depends(current_principal),
     ) -> list[RunObservationResponse]:
+        service = current_container().run_service
         _require_role(principal, "observer")
         observations = (
             service.observations()
@@ -286,9 +371,15 @@ def create_app(
         response_model=DocumentResponse,
     )
     def seed_demo_document() -> DocumentResponse:
+        chunk_count = app.state.demo_document_chunk_count
+        if not isinstance(chunk_count, int):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Application is not ready",
+            )
         return DocumentResponse(
             id=DEMO_COURSE_DOCUMENT.id,
-            chunk_count=demo_document_chunk_count,
+            chunk_count=chunk_count,
         )
 
     @app.post(
@@ -300,6 +391,7 @@ def create_app(
         request: DocumentRequest,
         principal: Principal = Depends(current_principal),
     ) -> DocumentResponse:
+        knowledge = current_container().knowledge_base
         _require_role(principal, "knowledge_editor")
         if request.id == DEMO_COURSE_DOCUMENT.id:
             raise HTTPException(
@@ -318,6 +410,7 @@ def create_app(
 
     @app.post("/api/research", response_model=ResearchResponse)
     def research(request: ResearchRequest) -> ResearchResponse:
+        knowledge = current_container().knowledge_base
         result = create_research_workflow(knowledge).invoke(
             {
                 "question": request.question,
@@ -338,13 +431,13 @@ def create_app(
     @app.post(
         "/api/memories", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED
     )
-    def remember(
+    async def remember(
         request: MemoryRequest,
         principal: Principal = Depends(current_principal),
     ) -> MemoryResponse:
         _require_authenticated(principal)
         try:
-            fact = conversation_memory.remember(
+            fact = await current_container().async_memory_store.remember(
                 owner_id=principal.principal_id,
                 key=request.key,
                 value=request.value,
@@ -362,12 +455,12 @@ def create_app(
         )
 
     @app.delete("/api/memories/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def forget(
+    async def forget(
         fact_id: str,
         principal: Principal = Depends(current_principal),
     ) -> None:
         _require_authenticated(principal)
-        if not conversation_memory.forget(
+        if not await current_container().async_memory_store.forget(
             fact_id,
             owner_id=principal.principal_id,
         ):
@@ -379,6 +472,7 @@ def create_app(
         principal: Principal,
         access_token: str | None,
     ) -> Principal:
+        service = current_container().run_service
         if principal.authenticated:
             if not service.has_session(
                 session_id,
