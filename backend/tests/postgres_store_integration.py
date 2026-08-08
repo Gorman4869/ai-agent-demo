@@ -718,6 +718,46 @@ class PostgresRunRecoveryProcessTest(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class PostgresExecutionCompositionProcessTest(
+    unittest.IsolatedAsyncioTestCase
+):
+    async def asyncSetUp(self) -> None:
+        persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await persistence.setup()
+            await _reset_app_data(persistence)
+        finally:
+            await persistence.close()
+
+    async def test_new_composition_process_recovers_crashed_holder(self) -> None:
+        holder = await _run_execution_composition_probe(
+            "holder-crash",
+            expected_returncode=17,
+        )
+        await asyncio.sleep(0.6)
+        recovered = await _run_execution_composition_probe("recover")
+
+        self.assertNotEqual(holder["process_id"], recovered["process_id"])
+        self.assertEqual(
+            {
+                "phase": "holder-crash",
+                "process_id": holder["process_id"],
+                "runtime_started": True,
+            },
+            holder,
+        )
+        self.assertEqual(
+            {
+                "phase": "recover",
+                "process_id": recovered["process_id"],
+                "run_failed": True,
+                "lease_released": True,
+                "single_recovery_event": True,
+            },
+            recovered,
+        )
+
+
 class PostgresRunRecoveryTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
@@ -1514,6 +1554,66 @@ def _decode_recovery_probe(
     lines = [line for line in stdout.splitlines() if line]
     if len(lines) != 1:
         raise AssertionError("recovery probe output is not bounded JSON")
+    return json.loads(lines[0])
+
+
+async def _run_execution_composition_probe(
+    phase: str,
+    *,
+    expected_returncode: int = 0,
+) -> dict[str, object]:
+    return await asyncio.to_thread(
+        _run_execution_composition_probe_sync,
+        phase,
+        expected_returncode,
+    )
+
+
+def _run_execution_composition_probe_sync(
+    phase: str,
+    expected_returncode: int,
+) -> dict[str, object]:
+    environment = os.environ.copy()
+    environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "utf8",
+            "-B",
+            "-m",
+            "backend.app.postgres_execution_probe",
+            "--phase",
+            phase,
+        ],
+        cwd=os.getcwd(),
+        env=environment,
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode != expected_returncode:
+        raise AssertionError(
+            "execution composition probe failed with code "
+            f"{process.returncode}: "
+            f"{process.stderr.decode('utf-8', errors='replace')}"
+        )
+    if process.stderr:
+        raise AssertionError(
+            "execution composition probe wrote stderr: "
+            + process.stderr.decode("utf-8", errors="replace")
+        )
+    stdout = process.stdout.decode("utf-8")
+    for private_value in (
+        "private composition recovery input",
+        "private-composition-recovery-key",
+    ):
+        if private_value in stdout:
+            raise AssertionError("execution composition probe exposed private data")
+    lines = [line for line in stdout.splitlines() if line]
+    if len(lines) != 1:
+        raise AssertionError(
+            "execution composition probe output is not bounded JSON"
+        )
     return json.loads(lines[0])
 
 

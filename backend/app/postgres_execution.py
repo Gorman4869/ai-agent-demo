@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Mapping
+from datetime import timedelta
+from enum import StrEnum
+
+from backend.app.agent import AgentRuntime
+from backend.app.domain.run import RuntimeName
+from backend.app.services.run_coordinator import EventNotifier, RunCoordinator
+from backend.app.services.run_recovery import RunRecoveryService
+from backend.app.services.run_recovery_supervisor import RunRecoverySupervisor
+from backend.app.stores.postgres import PostgresPersistence
+
+
+LOGGER = logging.getLogger("postgres.execution.composition")
+
+
+class PostgresExecutionCompositionState(StrEnum):
+    STARTING = "starting"
+    RUNNING = "running"
+    CLOSING = "closing"
+    CLOSED = "closed"
+    FAILED = "failed"
+
+
+class PostgresExecutionCompositionLifecycleError(RuntimeError):
+    code = "invalid_state"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
+class PostgresExecutionComposition:
+    """Own one explicit PostgreSQL execution and recovery lifecycle.
+
+    Callers must stop admitting work and await active coordinator operations
+    before closing the composition. This lifecycle owns the recovery scanner
+    and PostgreSQL resources; coordinator draining remains explicit.
+    """
+
+    def __init__(
+        self,
+        *,
+        persistence: PostgresPersistence,
+        coordinator: RunCoordinator,
+        recovery_supervisor: RunRecoverySupervisor,
+    ) -> None:
+        self._persistence = persistence
+        self._coordinator = coordinator
+        self._recovery_supervisor = recovery_supervisor
+        self._state = PostgresExecutionCompositionState.STARTING
+        self._close_lock = asyncio.Lock()
+
+    @classmethod
+    async def open(
+        cls,
+        conninfo: str,
+        *,
+        runtimes: Mapping[RuntimeName | str, AgentRuntime],
+        notifier: EventNotifier | None = None,
+        run_timeout_ms: int = 30_000,
+        notify_timeout_ms: int | None = None,
+        lease_ttl_ms: int = 30_000,
+        lease_heartbeat_interval_ms: int = 10_000,
+        recovery_scan_interval: timedelta = timedelta(seconds=5),
+        recovery_scan_limit: int = 25,
+        recovery_ttl: timedelta = timedelta(seconds=30),
+    ) -> PostgresExecutionComposition:
+        persistence = await PostgresPersistence.open(conninfo)
+        supervisor: RunRecoverySupervisor | None = None
+        try:
+            await persistence.setup()
+            coordinator = RunCoordinator(
+                run_store=persistence.run_store,
+                event_store=persistence.event_store,
+                runtimes=runtimes,
+                notifier=notifier,
+                run_timeout_ms=run_timeout_ms,
+                notify_timeout_ms=notify_timeout_ms,
+                run_lease_store=persistence.run_lease_store,
+                lease_ttl_ms=lease_ttl_ms,
+                lease_heartbeat_interval_ms=lease_heartbeat_interval_ms,
+            )
+            recovery = RunRecoveryService(
+                run_store=persistence.run_store,
+                event_store=persistence.event_store,
+                tool_execution_store=persistence.tool_execution_store,
+                run_lease_store=persistence.run_lease_store,
+            )
+            supervisor = RunRecoverySupervisor(
+                service=recovery,
+                scan_interval=recovery_scan_interval,
+                scan_limit=recovery_scan_limit,
+                recovery_ttl=recovery_ttl,
+            )
+            composition = cls(
+                persistence=persistence,
+                coordinator=coordinator,
+                recovery_supervisor=supervisor,
+            )
+            await supervisor.start()
+        except asyncio.CancelledError:
+            await _close_after_startup_failure(persistence, supervisor)
+            raise
+        except Exception:
+            await _close_after_startup_failure(persistence, supervisor)
+            raise
+
+        composition._state = PostgresExecutionCompositionState.RUNNING
+        return composition
+
+    @property
+    def state(self) -> PostgresExecutionCompositionState:
+        return self._state
+
+    @property
+    def persistence(self) -> PostgresPersistence:
+        return self._persistence
+
+    @property
+    def coordinator(self) -> RunCoordinator:
+        return self._coordinator
+
+    @property
+    def recovery_supervisor(self) -> RunRecoverySupervisor:
+        return self._recovery_supervisor
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            if self._state is PostgresExecutionCompositionState.CLOSED:
+                return
+            if self._state is not PostgresExecutionCompositionState.RUNNING:
+                raise PostgresExecutionCompositionLifecycleError()
+
+            self._state = PostgresExecutionCompositionState.CLOSING
+            try:
+                await self._recovery_supervisor.close()
+            except asyncio.CancelledError:
+                try:
+                    await self._persistence.close()
+                except Exception:
+                    self._state = PostgresExecutionCompositionState.FAILED
+                    raise
+                self._state = PostgresExecutionCompositionState.CLOSED
+                raise
+            except Exception:
+                try:
+                    await self._persistence.close()
+                except Exception:
+                    self._state = PostgresExecutionCompositionState.FAILED
+                    raise
+                self._state = PostgresExecutionCompositionState.FAILED
+                raise
+
+            try:
+                await self._persistence.close()
+            except asyncio.CancelledError:
+                self._state = PostgresExecutionCompositionState.FAILED
+                raise
+            except Exception:
+                self._state = PostgresExecutionCompositionState.FAILED
+                raise
+            self._state = PostgresExecutionCompositionState.CLOSED
+
+    async def __aenter__(self) -> PostgresExecutionComposition:
+        if self._state is not PostgresExecutionCompositionState.RUNNING:
+            raise PostgresExecutionCompositionLifecycleError()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
+
+
+async def _close_after_startup_failure(
+    persistence: PostgresPersistence,
+    supervisor: RunRecoverySupervisor | None,
+) -> None:
+    if supervisor is not None:
+        try:
+            await supervisor.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.error("PostgreSQL recovery supervisor startup cleanup failed")
+    try:
+        await persistence.close()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        LOGGER.error("PostgreSQL execution startup cleanup failed")
+
+
+__all__ = [
+    "PostgresExecutionComposition",
+    "PostgresExecutionCompositionLifecycleError",
+    "PostgresExecutionCompositionState",
+]
