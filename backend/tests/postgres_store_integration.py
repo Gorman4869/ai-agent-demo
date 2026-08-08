@@ -7,16 +7,19 @@ import os
 import selectors
 import subprocess
 import sys
+import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 
 from backend.app.agent import RuntimeResult
+from backend.app.domain import Message
 from backend.app.domain.run import (
     RunRecord,
     RunStatus,
     ToolExecution,
     ToolExecutionStatus,
 )
+from backend.app.memory import MemoryScope
 from backend.app.postgres_execution import PostgresExecutionComposition
 from backend.app.services.run_recovery import (
     RunRecoveryService,
@@ -37,6 +40,7 @@ from backend.app.stores import (
 )
 from backend.app.stores.base import StartCommit
 from backend.app.stores.postgres import PostgresPersistence
+from backend.app.stores.postgres_async import PostgresSyncStoreBridgeState
 from backend.app.stores.postgres_migrations import (
     MigrationApplyError,
     MigrationChecksumError,
@@ -123,6 +127,106 @@ class PostgresMemoryStoreContractTest(
 
     async def asyncTearDown(self) -> None:
         await self.persistence.close()
+
+
+class PostgresAsyncApprovalMemoryTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            min_size=1,
+            max_size=1,
+            timeout=0.05,
+            sync_operation_timeout_ms=1_000,
+        )
+        await self.persistence.setup()
+        await _reset_approval_memory_data(self.persistence)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_async_facades_execute_real_approval_and_memory_transactions(
+        self,
+    ) -> None:
+        approval = self.persistence.async_approval_store
+        memory = self.persistence.async_memory_store
+        arguments = {"document_id": "async-fixture-document"}
+        request = await approval.request(
+            run_id="async-facade-run",
+            principal_id="async-facade-owner",
+            tool_call_id="async-facade-call",
+            tool_name="publish_report",
+            arguments=arguments,
+        )
+        resolution = await approval.resolve(
+            approval_id=request.id,
+            run_id=request.run_id,
+            principal_id=request.principal_id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments_digest=request.arguments_digest,
+            decision=ApprovalResponse.APPROVE,
+        )
+        approved_arguments = await approval.approved_arguments(resolution)
+        first = await approval.consume(
+            principal_id=request.principal_id,
+            run_id=request.run_id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments=arguments,
+        )
+        second = await approval.consume(
+            principal_id=request.principal_id,
+            run_id=request.run_id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments=arguments,
+        )
+        message = Message(role="user", content="async fixture message")
+        await memory.append_message("async-facade-session", message)
+        fact = await memory.remember(
+            owner_id=request.principal_id,
+            key="language",
+            value="Chinese",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+
+        self.assertEqual(arguments, approved_arguments)
+        self.assertTrue(first.approved)
+        self.assertFalse(second.approved)
+        self.assertEqual(
+            (message,),
+            await memory.messages("async-facade-session"),
+        )
+        self.assertEqual((fact,), await memory.facts(request.principal_id))
+
+    async def test_exhausted_shared_sync_pool_returns_stable_store_error(
+        self,
+    ) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        def occupy_only_connection() -> None:
+            with self.persistence.sync_pool.connection():
+                entered.set()
+                release.wait()
+
+        holder = asyncio.create_task(asyncio.to_thread(occupy_only_connection))
+        try:
+            self.assertTrue(
+                await asyncio.wait_for(
+                    asyncio.to_thread(entered.wait, 1),
+                    timeout=1.1,
+                )
+            )
+            with self.assertRaises(StoreUnavailableError) as raised:
+                await self.persistence.async_memory_store.messages(
+                    "pool-exhaustion-session"
+                )
+            self.assertEqual("store_unavailable", raised.exception.code)
+        finally:
+            release.set()
+            await holder
 
 
 class PostgresToolExecutionStoreContractTest(
@@ -866,6 +970,54 @@ class PostgresExecutionCompositionProcessTest(
         self.assertEqual(RunStatus.FAILED, recovered.status)
         self.assertEqual("run_orphaned", recovered.failure.code)
 
+    async def test_close_waits_for_inflight_sync_store_worker(self) -> None:
+        composition = await PostgresExecutionComposition.open(
+            POSTGRES_DSN,
+            runtimes={"manual": PostgresGatedRuntime()},
+            recovery_scan_interval=timedelta(seconds=30),
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        original_messages = composition.persistence.memory_store.messages
+
+        def blocking_messages(session_id: str) -> tuple[Message, ...]:
+            entered.set()
+            release.wait()
+            return original_messages(session_id)
+
+        composition.persistence.memory_store.messages = blocking_messages
+        operation = asyncio.create_task(
+            composition.persistence.async_memory_store.messages(
+                "composition-sync-worker-session"
+            )
+        )
+        closing: asyncio.Task[None] | None = None
+        try:
+            self.assertTrue(
+                await asyncio.wait_for(
+                    asyncio.to_thread(entered.wait, 1),
+                    timeout=1.1,
+                )
+            )
+            closing = asyncio.create_task(composition.close())
+            await _wait_for_sync_bridge_state(
+                composition.persistence,
+                PostgresSyncStoreBridgeState.QUIESCING,
+            )
+            self.assertFalse(closing.done())
+
+            release.set()
+            self.assertEqual((), await asyncio.wait_for(operation, timeout=1))
+            await asyncio.wait_for(closing, timeout=1)
+        finally:
+            release.set()
+            if not operation.done():
+                await asyncio.gather(operation, return_exceptions=True)
+            if closing is None:
+                await composition.close()
+            elif not closing.done():
+                await asyncio.gather(closing, return_exceptions=True)
+
 
 class PostgresRunRecoveryTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -1202,6 +1354,18 @@ async def _composition_lease_count(
     if row is None:
         raise AssertionError("lease count query returned no row")
     return row["count"]
+
+
+async def _wait_for_sync_bridge_state(
+    persistence: PostgresPersistence,
+    expected: PostgresSyncStoreBridgeState,
+) -> None:
+    deadline = asyncio.get_running_loop().time() + 1
+    while asyncio.get_running_loop().time() < deadline:
+        if persistence.sync_store_bridge.state is expected:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"sync Store bridge did not enter {expected.value}")
 
 
 async def _reset_app_data(persistence: PostgresPersistence) -> None:

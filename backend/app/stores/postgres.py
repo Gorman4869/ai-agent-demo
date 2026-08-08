@@ -40,6 +40,11 @@ from backend.app.stores.base import (
 )
 from backend.app.stores.postgres_migrations import apply_postgres_migrations
 from backend.app.stores.postgres_approval import PostgresApprovalStore
+from backend.app.stores.postgres_async import (
+    AsyncPostgresApprovalStore,
+    AsyncPostgresMemoryStore,
+    PostgresSyncStoreBridge,
+)
 from backend.app.stores.postgres_run_lease import PostgresRunLeaseStore
 from backend.app.stores.postgres_tool_execution import (
     PostgresToolExecutionStore,
@@ -86,6 +91,8 @@ class PostgresPersistence:
         *,
         clock: Clock | None = None,
         message_limit: int = 20,
+        sync_store_workers: int | None = None,
+        sync_operation_timeout_ms: int = 10_000,
     ) -> None:
         self.pool = pool
         self.sync_pool = sync_pool
@@ -107,6 +114,22 @@ class PostgresPersistence:
             message_limit=message_limit,
             clock=clock,
         )
+        self.sync_store_bridge = PostgresSyncStoreBridge(
+            max_workers=(
+                sync_store_workers
+                if sync_store_workers is not None
+                else sync_pool.max_size
+            ),
+            operation_timeout_ms=sync_operation_timeout_ms,
+        )
+        self.async_approval_store = AsyncPostgresApprovalStore(
+            self.approval_store,
+            self.sync_store_bridge,
+        )
+        self.async_memory_store = AsyncPostgresMemoryStore(
+            self.memory_store,
+            self.sync_store_bridge,
+        )
 
     @classmethod
     async def open(
@@ -118,9 +141,16 @@ class PostgresPersistence:
         max_size: int = 4,
         timeout: float = 10.0,
         message_limit: int = 20,
+        sync_operation_timeout_ms: int = 10_000,
     ) -> PostgresPersistence:
         if not isinstance(conninfo, str) or not conninfo.strip():
             raise ValueError("PostgreSQL conninfo must not be empty")
+        if (
+            not isinstance(sync_operation_timeout_ms, int)
+            or isinstance(sync_operation_timeout_ms, bool)
+            or sync_operation_timeout_ms < 1
+        ):
+            raise ValueError("sync_operation_timeout_ms must be positive")
         pool: Pool = AsyncConnectionPool(
             conninfo=conninfo,
             min_size=min_size,
@@ -145,23 +175,41 @@ class PostgresPersistence:
                 "row_factory": dict_row,
             },
         )
+        sync_open: asyncio.Task[None] | None = None
         try:
             await pool.open(wait=True, timeout=timeout)
-            await asyncio.to_thread(sync_pool.open, wait=True, timeout=timeout)
+            sync_open = asyncio.create_task(
+                asyncio.to_thread(
+                    sync_pool.open,
+                    wait=True,
+                    timeout=timeout,
+                ),
+                name="postgres-sync-pool-open",
+            )
+            await asyncio.shield(sync_open)
         except asyncio.CancelledError:
-            await asyncio.to_thread(sync_pool.close)
-            await pool.close()
+            if sync_open is not None:
+                await asyncio.gather(sync_open, return_exceptions=True)
+            await _close_opening_pools(pool, sync_pool)
             raise
         except (PsycopgError, PoolTimeout, OSError):
-            await asyncio.to_thread(sync_pool.close)
-            await pool.close()
+            await _close_opening_pools(pool, sync_pool)
             raise StoreUnavailableError() from None
-        return cls(
-            pool,
-            sync_pool,
-            clock=clock,
-            message_limit=message_limit,
-        )
+        except Exception:
+            await _close_opening_pools(pool, sync_pool)
+            raise
+        try:
+            return cls(
+                pool,
+                sync_pool,
+                clock=clock,
+                message_limit=message_limit,
+                sync_store_workers=max_size,
+                sync_operation_timeout_ms=sync_operation_timeout_ms,
+            )
+        except Exception:
+            await _close_opening_pools(pool, sync_pool)
+            raise
 
     async def setup(self) -> None:
         await apply_postgres_migrations(self.pool)
@@ -173,16 +221,61 @@ class PostgresPersistence:
             raise StoreUnavailableError() from None
 
     async def close(self) -> None:
+        cancellation: asyncio.CancelledError | None = None
         try:
-            await asyncio.to_thread(self.sync_pool.close)
-        finally:
+            await self.sync_store_bridge.close()
+        except asyncio.CancelledError as error:
+            cancellation = error
+        except Exception:
             await self.pool.close()
+            raise
+
+        sync_error: Exception | None = None
+        sync_close = asyncio.create_task(
+            asyncio.to_thread(self.sync_pool.close),
+            name="postgres-sync-pool-close",
+        )
+        try:
+            await asyncio.shield(sync_close)
+        except asyncio.CancelledError as error:
+            await sync_close
+            if cancellation is None:
+                cancellation = error
+        except Exception as error:
+            sync_error = error
+
+        async_error: Exception | None = None
+        async_close = asyncio.create_task(
+            self.pool.close(),
+            name="postgres-async-pool-close",
+        )
+        try:
+            await asyncio.shield(async_close)
+        except asyncio.CancelledError as error:
+            await async_close
+            if cancellation is None:
+                cancellation = error
+        except Exception as error:
+            async_error = error
+        if sync_error is not None:
+            raise sync_error
+        if async_error is not None:
+            raise async_error
+        if cancellation is not None:
+            raise cancellation
 
     async def __aenter__(self) -> PostgresPersistence:
         return self
 
     async def __aexit__(self, *args: object) -> None:
         await self.close()
+
+
+async def _close_opening_pools(pool: Pool, sync_pool: SyncPool) -> None:
+    try:
+        await asyncio.to_thread(sync_pool.close)
+    finally:
+        await pool.close()
 
 
 class PostgresRunStore:
