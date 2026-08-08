@@ -1892,3 +1892,80 @@
 
 - implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第六纵切事实、显式 composition 边界与下一条原子动作。
 - 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `e63d718` 的 PostgreSQL 83、核心 154、supervisor/recovery 14、M1 10 与提交后单例证据继续引用 `V-20260808-005`。
+
+## V-20260808-007：M11-T1 显式 PostgreSQL execution composition
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：基线 HEAD `e6e53dd` 上的第七纵切工作区；实现提交 `1d4386c`（`feat: compose postgres execution lifecycle`）
+- 任务等级：A 类资源所有权、取消、持久恢复和跨进程生命周期；时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；没有修改 migration、Store Protocol、默认 Container、HTTP、FastAPI lifespan 或同步 Approval/Memory 调用边界
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `e6e53dd`，第六纵切实现提交 `e63d718` 与文档锚点存在 |
+| `docker exec ... pg_isready` | 0 | 本地测试数据库 accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 修改前真实 PostgreSQL 83 项通过；不可达数据库负向用例保留预期 pool timeout |
+| `... test_run_recovery test_run_recovery_supervisor -q` | 0 | recovery/supervisor 14 项通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 当前 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、84 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `backend.tests.test_postgres_execution -v` | 0 | composition 启动/关闭、幂等、context manager、setup/config 失败、关闭失败与取消共 8 项通过 |
+| 增加 supervisor start 失败逆序清理后重跑 | 0 | 最终 9 项生命周期合同通过 |
+| `PostgresExecutionCompositionProcessTest -v` | 0 | 1 项真实 PostgreSQL 不同 PID 自动恢复通过；旧 holder 退出 17，新 composition 自动提交 `run_orphaned`、唯一失败事件并释放 lease |
+| 系统 `python -m unittest ...` | 1 | Windows 系统 Python 报“指定的登录会话不存在”，测试未启动；改用仓库 `.venv` 后通过，未修改系统设置 |
+| `python -m py_compile ...` | 1 | 现有 `backend/app/__pycache__` 临时 pyc 写入被拒绝；该次不记为语法通过 |
+| 不落盘 `compile()` | 0 | 4 个修改 Python 文件 `syntax-ok`；单测导入和两个 probe 子进程也已实际执行相关模块 |
+| 完整 `backend.tests.postgres_store_integration -q` | 0 | migration 1–4、前六纵切和新 composition 共 84 项通过；不可达数据库负向 pool timeout 为预期输出，无 ResourceWarning |
+| composition/Run/Store/Coordinator/recovery/LangGraph 核心定向回归 | 0 | 155 项通过；既有 lease release/notifier 安全负向日志符合预期 |
+| `python -S ... test_manual_agent_loop -q` | 0 | M1 隔离 10 项通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| `git commit -m "feat: compose postgres execution lifecycle"` | 0 | 4 个实现/测试文件固定为提交 `1d4386c` |
+| 提交后 composition 单元集 / PostgreSQL 跨 PID 单例 | 0 / 0 | 9 项 / 1 项再次通过 |
+
+### 实现与风险证据
+
+- `PostgresExecutionComposition.open()` 真实执行 persistence open/setup，构造共享同一组 PostgreSQL adapters 的 lease-aware Coordinator、恢复服务和 supervisor，再启动 scanner；依赖存在或 import 成功没有被当作完成证据。
+- setup、配置或 supervisor start 失败均回收已经取得的资源；正常关闭固定 supervisor 先于 persistence，重复关闭幂等，supervisor 关闭失败仍尝试关闭 pool，调用方取消继续传播。
+- 旧 holder 与新 composition PID 不同；新进程没有手动调用 scanner，恢复完全来自 composition 启动的 supervisor。探针只输出阶段、PID 和布尔审计结果，并检查私有输入/幂等键没有泄漏。
+- 聚焦复审补齐 supervisor start 部分失败清理、测试 patch 栈自动回收和崩溃进程对 active execution task 的强引用；同时明确 composition close 不隐式改变 Coordinator 的用户取消语义。
+
+### 未验证范围与全量门说明
+
+- 调用方必须在 composition close 前停止接收 execute/resume 并等待 active Coordinator 操作结束；本纵切没有 admission stop、drain、shutdown timeout 或强制终止 Runtime 的公共合同。若违反前置条件，活跃 Runtime/heartbeat 仍可能访问即将关闭的 pool。
+- 默认 `ApplicationContainer`、`create_app()`、FastAPI lifespan 和 HTTP 未迁移，不能把显式 probe 描述成默认应用重启恢复。PostgreSQL Approval/Memory 同步 pool 的 async 线程隔离、取消、超时和耗尽仍未处理，`KI-023` 保持 open。
+- lease、ToolExecution、Run/Event 和外部副作用仍不构成 exactly-once；本地 Compose 仍是 localhost trust/tmpfs 测试实例，不是生产鉴权、TLS、持久卷、备份、高可用、跨主机或容量证据。
+- 本原子步骤没有依赖、migration、公共 Store Protocol、默认 composition/HTTP 或跨前后端契约变化，也不是里程碑验收/发布门；按课程交付协议只运行定向回归，没有重复运行 `scripts/verify.ps1`、Vue、MCP TypeScript 或 Compose 全量门。第五纵切完整门继续引用 `V-20260808-002`/`003`。
+- 没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T1 第七个真实纵切达到本地 E3；显式 PostgreSQL execution composition 的启动、失败清理、关闭顺序和跨 PID 自动恢复可以从提交 `1d4386c` 复现。
+- `KI-004`、`KI-016` 继续保持 mitigated，`KI-023` 保持 open；M11-T1 保持 `in_progress`。下一原子动作是先固定 active Coordinator quiesce/drain，再考虑默认应用接线。
+
+## V-20260808-008：M11-T1 execution composition 连续性闭环
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `1d4386c` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、86 个 Markdown 通过；新增 ADR/handoff、M11-T1 状态和引用一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| 定向搜索 `1d4386c`、`V-20260808-007`、`ADR-0019`、active execution quiesce 和 86 个 Markdown | 0 | status、known issue、实施计划、backend standards、ADR 与 handoff 的实现事实、未验证范围和下一动作相互一致 |
+
+### 结论
+
+- implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第七纵切事实、显式 composition 所有权、active Run 关闭前置条件与下一条 quiesce/drain 原子动作。
+- 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `1d4386c` 的 composition 9、PostgreSQL 84、核心 155、M1 10 与提交后跨 PID 单例证据继续引用 `V-20260808-007`。

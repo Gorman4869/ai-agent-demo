@@ -593,6 +593,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - claim 级 `StoreError` 和单 Run `FAILED` 不终止循环，下一周期继续；非 Store 程序错误保持可见。真实 PostgreSQL 纵切证明 supervisor 自动 claim 过期 lease、提交 `run_orphaned`、释放租约并关闭。
 - 尚未完成：默认 Container/HTTP/FastAPI lifespan 注入、统一应用 composition 与进程重启恢复、同步 Approval/Memory async 线程边界和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
 
+#### M11-T1 第七个真实纵切边界
+
+- 新增显式 `PostgresExecutionComposition`，按 `PostgresPersistence.open/setup -> lease-aware RunCoordinator -> RunRecoveryService/RunRecoverySupervisor -> supervisor.start` 固定启动顺序；setup、配置或 supervisor start 失败时按已取得资源逆序清理。
+- composition 固定 running/closing/closed/failed 关闭语义和 `supervisor.close -> persistence.close` 顺序。重复关闭幂等，supervisor 关闭失败仍尝试关闭 persistence，调用方取消继续传播。
+- 真实 PostgreSQL 的旧 holder 进程由 composition Coordinator 开始执行后以 17 退出；PID 不同的新 composition 只依靠自动 supervisor 把 Run 收敛为 `run_orphaned`、写入唯一失败事件并释放 lease，probe 输出保持有界和脱敏。
+- 尚未完成：composition close 前的 execute/resume admission stop 与 active Coordinator drain、默认 Container/HTTP/FastAPI lifespan 注入、同步 Approval/Memory async 线程边界和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。
