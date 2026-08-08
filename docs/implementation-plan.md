@@ -614,6 +614,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - bridge close 停止 admission 并等待 in-flight worker，persistence 再关闭 sync/async pools；同步 pool open 也采用 owned worker。真实 PostgreSQL 证明审批/记忆事务、pool exhaustion 和 composition close 等待。
 - 尚未完成：默认 Container/FastAPI lifespan、HTTP/命令 admission 与 async façade 接线，以及外部副作用 exactly-once。直接同步 compatibility 调用也不受 bridge 追踪。因此 M11-T1 继续 `in_progress`，`KI-023` 仅为 mitigated，不进入 M11-T2。
 
+#### M11-T1 第十个真实纵切与任务验收结果
+
+- `Settings` 新增默认 memory、显式 postgres 的 persistence gate；DSN 使用脱敏 `SecretStr`，仅配置 DSN 不启用数据库，缺失或无效 PostgreSQL 配置 fail closed。同步 `ApplicationContainer.create()` 只允许内存，`await ApplicationContainer.open()` 才打开 PostgreSQL composition。
+- FastAPI lifespan 固定 `PostgreSQL composition -> MCP -> admission` 启动和 `HTTP/command drain -> composition -> MCP` 关闭。纯 ASGI middleware 覆盖完整 StreamingResponse body；`ApplicationRunCommands` 与 HTTP 共用 gate，composition 继续负责 Coordinator quiesce、supervisor 与两类 pool。
+- 记忆 HTTP 只调用 `async_memory_store`，application approval 只调用 `async_approval_store`；legacy Run HTTP/同步 ToolRegistry 继续隔离且不向 durable Store 双写，统一 Run 与审批端点仍由 M12 承接。
+- 真实 PostgreSQL 91 项通过：两个完整 FastAPI lifespan 先写后删同一持久 fact，application Container 的 Approval façade 执行 grant/单次 consume；完整离线门以后端 463 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
+- M11-T1 的 migration、Run/Event/Approval/Memory Store、checkpointer、ToolExecution、lease/recovery、连接生命周期、事务边界与默认 application composition 验收满足，任务更新为 `verified`。外部副作用 exactly-once、Windows/生产部署、统一 durable Run HTTP 与 pgvector 不属于该结论；下一原子任务为 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。

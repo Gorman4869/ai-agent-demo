@@ -2123,3 +2123,87 @@
 
 - implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第九纵切事实、owned worker/结果未知边界与下一条 opt-in PostgreSQL application composition 动作。
 - 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `bffeab7` 的 async bridge 9、PostgreSQL 89、定向 56、M1 10 与提交后新增专项 12 项证据继续引用 `V-20260808-011`。
+
+## V-20260808-013：M11-T1 PostgreSQL application composition 与任务验收
+
+- 任务：`M11-T1 / verified`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：基线 HEAD `1e867bc` 上的第十纵切工作区；实现提交 `be2c818`（`feat: compose postgres application lifecycle`）
+- 任务等级：A 类默认 composition、数据库生命周期、HTTP/命令 admission 与 async/sync I/O 边界；时间盒 2–4 小时
+- 模式：默认离线 E3 与本地真实 PostgreSQL E3；复用 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；没有修改 migration、公共同步 Store Protocol、旧 Run HTTP/SSE 响应合同、前端 API 或部署 Compose
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `1e867bc`，第九纵切实现 `bffeab7` 与文档锚点存在 |
+| `docker exec ... pg_isready` | 0 | 本地测试数据库 accepting connections |
+| 设置测试 DSN 后 `backend.tests.postgres_store_integration -q` | 0 | 修改前真实 PostgreSQL 89 项通过；不可达数据库负向用例保留预期 pool timeout |
+| `test_postgres_async_stores -q` | 0 | 修改前 async bridge 9 项通过 |
+| `test_run_coordinator_quiesce test_postgres_execution -q` | 0 | 修改前 quiesce+composition 18 项通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 修改前 M1 隔离 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、90 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 新增 Settings/application lifecycle 首轮 25 项 | 1 | 24 项通过；admission close 测试只让出一次 loop 就断言 quiescing，owned close task 尚未调度。夹具改为等待明确状态，生产状态机未放宽 |
+| 新增 Settings/application lifecycle 修正后 25 项 | 0 | persistence gate、DSN 脱敏、active drain、并发 close、启动回滚、关闭顺序和命令拒绝通过 |
+| Settings、Container、API、MCP、bridge、quiesce/composition 定向回归 | 0 | 98 项通过；仅有既有 Starlette/httpx 弃用警告 |
+| 新增真实 FastAPI/PostgreSQL application 专项首轮 | 1 | 数据库操作完成，测试误用不存在的 `ApprovalDecision.allowed` 字段；改为既有 `approved` 合同，生产代码未修改 |
+| 最终完整 `backend.tests.postgres_store_integration -q` | 0 | 前九纵切与新增 application composition 共 91 项通过；两个 FastAPI lifespan 跨应用写/删同一 fact，Container Approval façade 实际 grant/consume；不可达数据库 pool timeout 为预期输出 |
+| 首轮 `scripts/verify.ps1` | 1 | 后端 462 项中 461 通过、1 项既有 Windows symlink 跳过；TypeScript MCP E2E 单项在 5 秒内 startup timeout，后续门未执行 |
+| 单独 `backend.tests.test_mcp_client_e2e -v` | 0 | 4 项在 0.964 秒内通过；未修改 MCP timeout 或生产行为 |
+| 第二轮 `scripts/verify.ps1` | 1 | 后端 462 项通过、1 项既有 symlink 跳过，Code Agent 与依赖通过；Vue 写 `tsconfig.app.tsbuildinfo` 被沙箱以 `TS5033/EPERM` 拒绝，MCP build/Compose 尚未执行 |
+| 相同完整门在工作区写权限下重跑 | 0 | 后端 462 项通过、1 项既有 symlink 跳过；Code Agent、`pip check`、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| 聚焦复审后的最终 `scripts/verify.ps1` | 0 | 增加完整 ASGI response-body admission 合同后，后端 463 项通过、1 项既有 symlink 跳过；其余完整门再次通过 |
+| 最终 `python -S ... test_manual_agent_loop -q` | 0 | M1 隔离 10 项通过 |
+| `git diff --check` / `git diff --cached --check` | 0 / 0 | 无 whitespace 错误；工作区检查只有既有 LF/CRLF 转换提示 |
+| `git commit -m "feat: compose postgres application lifecycle"` | 0 | 13 个实现、配置与测试文件固定为提交 `be2c818` |
+| 提交后 Settings/lifecycle/Container/API 与真实 PostgreSQL application 专项 | 0 | 63 项默认路径和 2 项真实 PostgreSQL 专项再次通过 |
+
+### 实现与风险证据
+
+- persistence 默认 `memory`；只有 `AI_AGENT_PERSISTENCE=postgres` 与可解析的 SecretStr DSN 同时存在时才进入异步 Container open。缺失/无效配置不连接数据库、不回退内存，安全输出不含 DSN。
+- PostgreSQL Container 绑定 composition 的真实 Run/Event Store、lease-aware Coordinator、Approval/Memory compatibility Store 与 async façade。模块 import/create_app 不打开数据库，FastAPI lifespan 才执行 open/setup/supervisor。
+- startup 固定 PostgreSQL composition 后 MCP，最后开启 admission；MCP/认证/seed 失败会清理已打开 composition 并保留原错误。shutdown 先停止并排空 HTTP/command，再按 Coordinator、supervisor、bridge/pool 关闭 composition，最后关闭 MCP。
+- admission 使用纯 ASGI middleware，直到完整响应 body 结束才 release；单元测试证明关闭会等待仍在发送的响应。`ApplicationRunCommands` 对 execute/resume/cancel 使用同一 gate。
+- memory HTTP 只 await `async_memory_store`；application approval 专项只 await `async_approval_store`。真实数据库证据不是 import、Fake 或 Mock。
+- 聚焦复审撤销了把 legacy 静态 auth grant 每次启动写入 PostgreSQL 的方案；该方案会在重启时与一次性 grant 唯一约束冲突。legacy auth 保持进程内兼容，统一持久审批端点仍由 M12 负责。
+
+### 未验证范围
+
+- 旧 `/api/sessions/.../runs` 与 SSE 仍使用 `InMemoryRunService`，没有双写 durable Store；统一 Run、审批、取消和事件 API 属于 M12，不能把本轮描述成 M12 已完成。
+- 同步 Approval/Memory compatibility adapter 仍可被显式外部调用且不受 bridge 追踪；默认 async application path 不这样调用。调用方若绕过 Container command/HTTP admission，仍须自行保证停止顺序。
+- Python worker 不能硬取消 PostgreSQL statement；running timeout/cancel 后结果可能未知，不得自动重试有副作用写操作。Approval/Memory、Run/Event/checkpoint 与外部副作用仍无跨 pool/系统 exactly-once。
+- Windows PostgreSQL host 必须在 event loop 创建前选择 Selector policy；本轮测试模块显式设置该 policy，库代码未修改全局 policy，也未新增生产启动脚本。
+- localhost trust/tmpfs 容器不是生产鉴权、TLS、持久卷、备份、高可用、跨主机、容量或硬进程终止证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T1 第十纵切达到本地 E3，任务计划中的 migration、持久 Store、checkpointer、lease/recovery、连接生命周期、事务边界和默认 opt-in application composition 均有可复现证据，任务更新为 `verified`。
+- `KI-023` 关闭；`KI-004`、`KI-014`、`KI-016` 保持 mitigated，分别继续等待统一 durable Run 重启链、Agent ContextAssembler/记忆主链和更高层故障/部署证据。下一原子动作进入 M11-T2 真实 pgvector，不在本轮实现。
+
+## V-20260808-014：M11-T1 application lifecycle 连续性闭环
+
+- 任务：`M11-T1 / verified`；下一任务 `M11-T2 / planned`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `be2c818` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、92 个 Markdown 通过；新增 ADR/handoff、M11-T1 verified、M11-T2 planned 与恢复入口一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有 LF/CRLF 转换提示 |
+| 定向搜索 `be2c818`、`V-20260808-013/014`、`ADR-0022`、`KI-023`、91/63/2/463 项与 M11-T2 下一动作 | 0 | status、known issue、实施计划、backend standards、ADR、verification 与 handoff 的事实、边界和下一动作相互一致 |
+| handoff 恢复命令类名复核 | 0 | 真实 PostgreSQL application 专项固定为 `PostgresFastApiApplicationTest` 与 `PostgresApplicationContainerTest`，没有记录不存在的测试类 |
+
+### 结论
+
+- M11-T1 的 implementation plan、ADR、backend standards、known issue、status、verification 和最新 handoff 已固定第十纵切与任务验收事实；恢复入口指向实现提交 `be2c818`、`V-20260808-013/014` 与 `ADR-0022`。
+- 本步骤没有代码或行为变化，因此没有重复运行业务测试或完整门；PostgreSQL 91 项、定向 98 项、最终完整门后端 463 项与 1 项既有 Windows symlink 跳过、M1 10 项，以及提交后 63+2 项继续引用 `V-20260808-013`。
+- 当前任务为 `M11-T2 / planned`。下一条原子动作只做真实 pgvector migration 与最小 CRUD/相似度检索纵切；不重做 M11-T1，不安装依赖，不执行在线 Embedding，不进入 M11-T3/M12。
