@@ -607,6 +607,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - `PostgresExecutionComposition.close()` 固定 `coordinator.quiesce -> supervisor.close -> persistence.close`。真实 PostgreSQL 证明自然完成后 terminal+release，及 timeout 后 running+lease 由下一 composition 自动收敛为 `run_orphaned`。
 - 尚未完成：默认 HTTP/命令入口停止、同步 PostgreSQL Approval/Memory 的 async 线程隔离、默认 Container/FastAPI lifespan 注入和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
 
+#### M11-T1 第九个真实纵切边界
+
+- 新增共享 `PostgresSyncStoreBridge` 与 Approval/Memory async façade；有界专用 worker 数对齐 sync pool 容量，参数在 submission 前脱离调用方引用，真实同步数据库调用不再阻塞 event loop。
+- queued timeout/cancel 尝试取消尚未开始的 submission；running timeout 返回稳定 `store_operation_timeout` 与 `result_unknown=true`，不硬取消线程、不自动重试或复用晚到结果。sync pool 耗尽继续越界为稳定 `store_unavailable`。
+- bridge close 停止 admission 并等待 in-flight worker，persistence 再关闭 sync/async pools；同步 pool open 也采用 owned worker。真实 PostgreSQL 证明审批/记忆事务、pool exhaustion 和 composition close 等待。
+- 尚未完成：默认 Container/FastAPI lifespan、HTTP/命令 admission 与 async façade 接线，以及外部副作用 exactly-once。直接同步 compatibility 调用也不受 bridge 追踪。因此 M11-T1 继续 `in_progress`，`KI-023` 仅为 mitigated，不进入 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。

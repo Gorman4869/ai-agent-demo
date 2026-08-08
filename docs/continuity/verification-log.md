@@ -2047,3 +2047,79 @@
 
 - implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第八纵切事实、Coordinator quiesce 所有权、shutdown 结果未知边界与下一条同步 Store async 隔离动作。
 - 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `2e94640` 的专用 18、PostgreSQL 86、核心 164、API/Container 68、M1 10 与提交后真实 composition 3 项证据继续引用 `V-20260808-009`。
+
+## V-20260808-011：M11-T1 PostgreSQL 同步 Store async 隔离
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：基线 HEAD `0c30a28` 上的第九纵切工作区；实现提交 `bffeab7`（`feat: isolate postgres sync stores`）
+- 任务等级：A 类同步数据库 I/O、线程取消、结果未知和资源关闭；时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；没有修改 migration、同步 Approval/Memory Protocol、默认 Container、HTTP 或 FastAPI lifespan
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `0c30a28`，第八纵切实现 `2e94640` 与文档锚点存在 |
+| `docker exec ... pg_isready` | 0 | 本地测试数据库 accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 修改前真实 PostgreSQL 86 项通过；不可达数据库负向用例保留预期 pool timeout |
+| `... test_run_coordinator_quiesce test_postgres_execution -q` | 0 | 修改前 quiesce+composition 18 项通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、88 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `backend.tests.test_postgres_async_stores -v` | 1 | 7 项中 6 项通过；共享 40 ms timeout 也使占位读返回预期 timeout，但夹具清理错误地期待成功。修正清理断言，没有放宽生产行为 |
+| 最终 `backend.tests.test_postgres_async_stores -q` | 0 | 9 项通过：配置、事件循环非阻塞、排队取消、running 结果未知、调用方取消、参数快照、owned open、in-flight close 和双 pool 异常清理 |
+| 新增真实 PostgreSQL async façade/pool exhaustion/composition close 专项 | 0 | 3 项通过；真实审批/记忆事务、共享 sync pool 耗尽 `store_unavailable`、composition 等待 in-flight worker 均实际执行 |
+| 完整 `backend.tests.postgres_store_integration -q` | 0 | migration 1–4、前八纵切和本 async 隔离共 89 项通过；不可达数据库负向 pool timeout 为预期输出，无 ResourceWarning |
+| async bridge、quiesce/composition、Approval/Memory 合同与 Runtime 定向回归 | 0 | 56 项通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | M1 隔离 10 项通过 |
+| 不落盘 `compile()` / `git diff --check` | 0 / 0 | 4 个修改 Python 文件语法通过，无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| `git commit -m "feat: isolate postgres sync stores"` | 0 | 4 个实现/测试文件固定为提交 `bffeab7` |
+| 提交后新增单元与真实 PostgreSQL 专项 | 0 | 12 项再次通过 |
+
+### 实现与风险证据
+
+- 一个显式 `PostgresSyncStoreBridge` 用有界专用线程池承载同步 Approval/Memory 调用；worker 数与共享 sync pool `max_size` 对齐，两个 async façade 共用同一 admission 和 in-flight 所有权。
+- async façade 在提交前复制审批参数。调用超时时先尝试取消尚未开始的 submission：取消成功时 `result_unknown=false` 且写操作不执行；已运行时返回稳定 `store_operation_timeout`、`result_unknown=true`，底层 worker 不被描述成硬取消，也没有自动重试或结果复用。
+- 调用方取消只取消等待；已运行 worker 继续被 bridge 追踪。close 从 accepting 进入 quiescing，拒绝新调用，等待所有 worker 后关闭 executor；`PostgresPersistence.close()` 再按 bridge、sync pool、async pool 排序。
+- 同步 pool open 也成为 owned worker：调用方取消时先等待 open 结束，再关闭两类 pool。聚焦复审补回同步 pool close 失败时仍关闭 async pool 的原有资源不变量。
+- 真实 PostgreSQL 证明 async façade 执行了审批 resolve/grant consume、消息/事实写读、连接池耗尽映射和 composition shutdown 等待，不是 import 或 Mock 证据。
+
+### 未验证范围与全量门说明
+
+- 默认 `ApplicationContainer`、`create_app()`、FastAPI lifespan 和 HTTP 仍使用既有内存主链，没有迁移到 PostgreSQL composition 或 async façade；`KI-023` 只降为 mitigated，不能关闭。
+- 只有通过 async façade 提交的调用受 bridge admission/in-flight 追踪。为兼容既有合同而保留的直接同步 `approval_store`/`memory_store` 调用不受该 bridge 追踪，调用方仍须自行停止后再 close。
+- Python 线程中的数据库调用不能硬取消。running timeout/cancel 后结果可能未知，bridge 只等待并丢弃无人接收的结果；调用方不得自动重试有副作用写操作。没有查询级 PostgreSQL statement timeout、线程强杀或进程级硬终止证据。
+- Approval 与 Memory 共用同步 pool/bridge，但仍与 async Run/Event/checkpoint pool 分离，没有跨 pool 事务或外部副作用 exactly-once。
+- 本原子步骤没有依赖、migration、公共 Store Protocol、默认 HTTP 或跨前后端契约变化，也不是里程碑验收/发布门；真实 PostgreSQL 89 与定向 56 已覆盖修改面，因此没有重复运行 `scripts/verify.ps1`、Vue、MCP TypeScript 或 Compose 全量门。第五纵切完整门继续引用 `V-20260808-002`/`003`。
+- 本地 Compose 仍是 localhost trust/tmpfs 测试实例，不是生产鉴权、TLS、持久卷、备份、高可用、跨主机或容量证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T1 第九个真实纵切达到本地 E3；同步 Approval/Memory 的 async 线程隔离、取消/超时结果未知、共享 pool 耗尽和 composition in-flight close 可从提交 `bffeab7` 复现。
+- `KI-023` 更新为 mitigated；`KI-004`、`KI-016` 继续保持 mitigated。M11-T1 保持 `in_progress`，下一原子动作应处理 opt-in PostgreSQL 默认应用 composition 与 HTTP/lifespan admission，而不是进入 M11-T2。
+
+## V-20260808-012：M11-T1 PostgreSQL 同步 Store async 隔离连续性闭环
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `bffeab7` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、90 个 Markdown 通过；新增 ADR/handoff、M11-T1 状态和引用一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| 定向搜索 `bffeab7`、`V-20260808-011`、`ADR-0021`、89/56/12 项、`KI-023` 与 opt-in application composition 下一动作 | 0 | status、known issue、实施计划、backend standards、ADR 与 handoff 的事实、未验证范围和下一动作相互一致 |
+
+### 结论
+
+- implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第九纵切事实、owned worker/结果未知边界与下一条 opt-in PostgreSQL application composition 动作。
+- 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `bffeab7` 的 async bridge 9、PostgreSQL 89、定向 56、M1 10 与提交后新增专项 12 项证据继续引用 `V-20260808-011`。

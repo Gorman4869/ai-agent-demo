@@ -26,7 +26,7 @@
 | KI-020 | low | closed | M10 | Stage 10 的 20% 关键知识表曾把“多 Agent 取舍”误映射到 M10-T5，与实施计划 M10-T4 和实际验证冲突；M10-T5 故障矩阵复审时已修正为 M10-T4 | `V-20260722-005`：Stage 映射修正并通过连续性检查 |
 | KI-021 | low | closed | M10 | M10-T6 恢复审计发现三处动态文档仍停在 M10-T4/T5 提交前措辞，且实施计划“关闭 KI-004/重启恢复”与 accepted ADR 的 M11 PostgreSQL 真重启边界冲突；现已修正动态状态和里程碑措辞，旧 handoff 保持不可变并由新交接澄清 | `V-20260722-007`：课程链接、52 个稳定任务/72 个 Markdown 连续性与完整离线门通过；`KI-004` 正确保留为 mitigated |
 | KI-022 | low | closed | M11 | M11-T1 第二纵切恢复审计发现 `status.md` 顶部“最近已确认实现提交”仍为 M10 的 `1e332f3`，但 Git、M11 专项字段、handoff 和 `V-20260722-010` 均已固定首个 PostgreSQL 纵切实现提交 `8c6b011`；动态 status 已修正 | `V-20260803-001`：首个纵切 35 项恢复、第二纵切 53 项 PostgreSQL、连续性与 Git 事实一致 |
-| KI-023 | high | open | M11–M12 | PostgreSQL ApprovalStore/MemoryStore 为兼容现有 ToolRegistry 和记忆 API 保留同步契约；直接在 async event loop 调用会阻塞。第二纵切没有迁移默认 Container，也没有线程隔离、协作取消或请求超时证据 | 默认主链使用明确的线程隔离或 async 适配边界，并通过取消、超时、连接池耗尽和关闭测试 |
+| KI-023 | high | mitigated | M11–M12 | `bffeab7` 新增共享有界 `PostgresSyncStoreBridge` 和 Approval/Memory async façade；`V-20260808-011` 证明事件循环非阻塞、queued/running timeout、调用方取消、共享 pool 耗尽、owned open 和 composition close 等待。默认 Container/HTTP 尚未迁移，直接同步 compatibility 调用也不受 bridge 追踪 | 默认主链实际使用 async façade，固定 HTTP/命令 admission 与 FastAPI lifespan 关闭顺序，并通过取消、超时、连接池耗尽和应用关闭回归后关闭 |
 | KI-024 | low | closed | M1/M11 连续性 | M11 第四纵切 handoff 固定的 M1 恢复数量为当时的 7 项；后续学习者提交 `beefc1a` 新增 3 项且未修改 M11 lease/Coordinator，当前同一隔离命令实际通过 10 项。历史 handoff 保持不可变，新恢复记录更新当前基线 | `V-20260808-001`：PostgreSQL 76 项、M1 10 项和连续性 52/80 通过 |
 
 ## 状态值
