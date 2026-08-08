@@ -21,6 +21,10 @@ from backend.app.services.run_recovery import (
     RunRecoveryService,
     RunRecoveryStatus,
 )
+from backend.app.services.run_recovery_supervisor import (
+    RunRecoverySupervisor,
+    RunRecoverySupervisorState,
+)
 from backend.app.services.run_coordinator import RunCoordinator
 from backend.app.stores import (
     EventStore,
@@ -258,6 +262,53 @@ class PostgresRunCoordinatorLeaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("run_orphaned", stored.failure.code)
         self.assertEqual(0, await self._lease_count(run.id))
 
+    async def test_supervisor_recovers_expired_lease_without_manual_scan(
+        self,
+    ) -> None:
+        run = await self._create_run(run_id="supervisor-recovery")
+        running = (
+            await self.persistence.event_store.commit_start(
+                StartCommit(
+                    run_id=run.id,
+                    owner_id=run.owner_id,
+                    expected_version=run.version,
+                    event_id="supervisor-recovery-started",
+                    event_data={"status": "running", "runtime": "manual"},
+                )
+            )
+        ).record
+        await self.persistence.run_lease_store.acquire(
+            running.id,
+            owner_id=running.owner_id,
+            ttl=timedelta(seconds=1),
+        )
+        await self._expire_lease(running.id)
+        supervisor = RunRecoverySupervisor(
+            service=RunRecoveryService(
+                run_store=self.persistence.run_store,
+                event_store=self.persistence.event_store,
+                tool_execution_store=self.persistence.tool_execution_store,
+                run_lease_store=self.persistence.run_lease_store,
+            ),
+            scan_interval=timedelta(milliseconds=20),
+            scan_limit=1,
+            recovery_ttl=timedelta(seconds=1),
+        )
+
+        await supervisor.start()
+        try:
+            stored = await self._wait_for_run_status(
+                running.id,
+                status=RunStatus.FAILED,
+            )
+            await self._wait_for_lease_count(running.id, expected=0)
+        finally:
+            await supervisor.close()
+
+        self.assertEqual(RunRecoverySupervisorState.CLOSED, supervisor.state)
+        self.assertEqual("run_orphaned", stored.failure.code)
+        self.assertEqual(0, await self._lease_count(running.id))
+
     async def _create_run(self, *, run_id: str) -> RunRecord:
         run = RunRecord.create(
             run_id=run_id,
@@ -294,6 +345,36 @@ class PostgresRunCoordinatorLeaseTest(unittest.IsolatedAsyncioTestCase):
                 return row["version"]
             await asyncio.sleep(0.01)
         self.fail("lease heartbeat version did not advance")
+
+    async def _wait_for_run_status(
+        self,
+        run_id: str,
+        *,
+        status: RunStatus,
+    ) -> RunRecord:
+        deadline = asyncio.get_running_loop().time() + 1
+        while asyncio.get_running_loop().time() < deadline:
+            run = await self.persistence.run_store.get(
+                run_id,
+                owner_id="coordinator-owner",
+            )
+            if run is not None and run.status is status:
+                return run
+            await asyncio.sleep(0.01)
+        self.fail(f"Run did not reach {status.value}")
+
+    async def _wait_for_lease_count(
+        self,
+        run_id: str,
+        *,
+        expected: int,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + 1
+        while asyncio.get_running_loop().time() < deadline:
+            if await self._lease_count(run_id) == expected:
+                return
+            await asyncio.sleep(0.01)
+        self.fail(f"Run lease count did not reach {expected}")
 
     async def _expire_lease(self, run_id: str) -> None:
         async with self.persistence.pool.connection() as connection:
