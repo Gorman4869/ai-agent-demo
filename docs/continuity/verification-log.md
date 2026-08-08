@@ -1815,3 +1815,80 @@
 
 - implementation plan、ADR、known issue、status、verification 和新 handoff 已分别记录第五纵切事实、残余边界与下一条 scanner 调度原子动作。
 - 本步骤没有代码或行为变化，因此不重复运行后端/前端业务测试；实现提交 `003c7be` 的 PostgreSQL 82、核心 134、API/Container/SDK 68 与完整门 410 项证据继续引用 `V-20260808-002`/`003`。
+
+## V-20260808-005：M11-T1 显式 recovery supervisor 调度生命周期
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：基线 HEAD `8297ac0` 上的第六纵切工作区；实现提交 `e63d718`（`feat: schedule postgres run recovery`）
+- 任务等级：A 类并发、持久恢复、取消和后台任务生命周期；时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；没有修改 migration、Store Protocol、默认 Container、HTTP 或 FastAPI lifespan
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `8297ac0`，第五纵切实现提交为 `003c7be` |
+| `docker exec ... pg_isready` | 0 | 本地测试数据库 accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 修改前真实 PostgreSQL 82 项通过；不可达数据库负向用例保留预期 pool timeout |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 当前 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、82 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 recovery/supervisor 单元测试 | 1 | 13 项中 12 项通过；长周期关闭用例错误等待“第二次扫描”并超时，生产路径未失败 |
+| 修正夹具等待首轮完成后重跑 | 0 | recovery/supervisor 13 项通过；补调用方取消合同后最终 14 项通过 |
+| 新增 PostgreSQL supervisor 单例首轮 | 1 | Run 已提交 `failed` 后测试立即 close，取消尚未完成 release 的扫描；观测到陈旧 lease 和 psycopg rollback 清理警告，符合分离事务可收敛边界，但未满足本用例完整自动恢复目标 |
+| 改为等待 Run 终态与 lease 删除同时可见后重跑单例 | 0 | 真实 supervisor 自动 claim、提交 `run_orphaned`、release 并关闭；1 项通过，无 ResourceWarning |
+| 最终完整 `backend.tests.postgres_store_integration -q` | 0 | migration 1–4、前五纵切和 supervisor 自动恢复共 83 项通过；不可达数据库负向 pool timeout 为预期输出 |
+| Run/Store/Coordinator/recovery/LangGraph 核心定向回归 | 0 | 154 项通过；既有 release/notifier 安全负向日志符合预期 |
+| `python -S ... test_manual_agent_loop -q` | 0 | M1 隔离 10 项通过 |
+| 不落盘 `compile()` / `git diff --check` | 0 / 0 | 3 个修改 Python 文件 syntax-ok；无 whitespace 错误，仅有既有 LF/CRLF 转换提示 |
+| 首次 `git add`（沙箱） | 1 | `.git/index.lock` 权限拒绝；未修改源码或 Git 历史 |
+| 获本地 Git 写权限后 `git commit -m "feat: schedule postgres run recovery"` | 0 | 3 个实现/测试文件固定为提交 `e63d718` |
+| 提交后 recovery/supervisor 单元集 / PostgreSQL 自动恢复单例 | 0 / 0 | 14 项 / 1 项再次通过，提交后工作区干净 |
+
+### 实现与风险证据
+
+- 显式 `RunRecoverySupervisor` 立即启动首轮扫描，只有一个后台 task 串行 await 既有 `RunRecoveryService.scan_once()`，每轮完成后再等待周期；同一实例不会重叠 scan。
+- `start()` 幂等但关闭后不可重启；`created/running/closing/failed/closed` 固定并发 start/close 语义。`close()` 取消并 await 唯一 task，扫描清理异常不吞；调用方取消 close 时 `CancelledError` 继续传播。
+- claim 级 `StoreError` 和单 Run `FAILED` 结果只记录稳定 error code，不输出异常文本，下一周期继续扫描；非 Store 程序错误把 supervisor 置为 failed，并在 close 时重新抛出。
+- 构造阶段把 scan limit 固定为 1–100、recovery TTL 固定为大于 0 且不超过 1 天，与既有 lease Store 边界一致，避免非法配置延迟到后台 task。
+- 聚焦复审先后修正长周期测试观察点、终态/release 分离事务测试竞态、close 调用方取消吞没风险、关闭期间假启动和 Store 上限延迟失败；修正后定向与 PostgreSQL 集均通过。
+
+### 未验证范围与全量门说明
+
+- 本纵切只提供显式 service/supervisor 与真实 PostgreSQL E3，不注入默认 Container/HTTP/FastAPI lifespan，不证明统一应用进程重启或生产部署调度。
+- shutdown 在 in-flight scan 中取消时，已提交的 Run/Tool 状态与陈旧 recovery lease 仍按 `ADR-0016` 由下一次过期扫描收敛；没有证明任意驱动/网络中断点都无清理警告或立即删除 lease。
+- PostgreSQL Approval/Memory 同步 pool 的 async 线程隔离、取消、超时和耗尽仍未处理，`KI-023` 保持 open；外部副作用 exactly-once 仍不成立。
+- 本原子步骤没有依赖、migration、公共 Store Protocol、默认 composition、HTTP 或跨前后端契约变化，也不是里程碑验收/发布门；按课程交付协议只运行定向回归，没有重复运行 `scripts/verify.ps1`、Vue、MCP TypeScript 或 Compose 全量门。
+- 本地 Compose 仍是 localhost trust/tmpfs 测试实例，不是生产鉴权、TLS、持久卷、备份、高可用、跨主机或容量证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T1 第六个真实纵切达到本地 E3；显式 recovery supervisor 的单任务调度、故障续跑、取消清理和 PostgreSQL 自动收敛可以从提交 `e63d718` 复现。
+- `KI-004`、`KI-016` 继续保持 mitigated，不能因显式 supervisor 关闭；M11-T1 保持 `in_progress`。下一原子动作仍须由本轮连续性文档在不迁移默认 HTTP、不进入 M11-T2 的范围内固定。
+
+## V-20260808-006：M11-T1 recovery supervisor 连续性闭环
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `e63d718` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、84 个 Markdown 通过；新增 ADR/handoff 引用、M11-T1 状态和任务编号一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| 定向搜索动态文档中的旧 scanner 下一动作/五纵切措辞 | 1 | `status.md`、known issue 和新 handoff 中无旧命中；退出 1 表示 `rg` 未匹配，不是检查失败 |
+| 定向搜索 `e63d718`、`V-20260808-005`、`ADR-0018`、83/84 计数和 execution composition | 0 | status、known issue、实施计划、ADR 与 handoff 的实现事实、未验证范围和下一动作相互一致 |
+
+### 结论
+
+- implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第六纵切事实、显式 composition 边界与下一条原子动作。
+- 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `e63d718` 的 PostgreSQL 83、核心 154、supervisor/recovery 14、M1 10 与提交后单例证据继续引用 `V-20260808-005`。

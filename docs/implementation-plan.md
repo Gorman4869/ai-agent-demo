@@ -586,6 +586,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 内存风险合同覆盖 start 结果未知、双 Coordinator 单 Runtime、pause/resume、cancel、lease-lost、heartbeat unavailable 和 release failure；真实 PostgreSQL 纵切证明 heartbeat version 推进、terminal release，以及数据库强制过期后由现有 scanner 收敛为 `run_orphaned`。
 - 尚未完成：默认 Container/HTTP 注入、定时 scanner/lifespan 调度、统一应用进程重启恢复、同步 Approval/Memory async 线程边界和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
 
+#### M11-T1 第六个真实纵切边界
+
+- 新增显式 `RunRecoverySupervisor`，每个实例只拥有一个后台 task；首轮立即扫描，后续在上一轮完成后等待周期，因此同一实例不会重叠调用既有 `RunRecoveryService.scan_once()`。
+- 生命周期固定为 created/running/closing/failed/closed；start/close 幂等边界、关闭期间拒绝假启动、close 取消并等待 scan 清理，以及调用方取消 close 时继续传播 `CancelledError` 均有自动化合同。
+- claim 级 `StoreError` 和单 Run `FAILED` 不终止循环，下一周期继续；非 Store 程序错误保持可见。真实 PostgreSQL 纵切证明 supervisor 自动 claim 过期 lease、提交 `run_orphaned`、释放租约并关闭。
+- 尚未完成：默认 Container/HTTP/FastAPI lifespan 注入、统一应用 composition 与进程重启恢复、同步 Approval/Memory async 线程边界和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。
