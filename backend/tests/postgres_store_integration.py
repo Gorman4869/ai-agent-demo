@@ -17,6 +17,7 @@ from backend.app.domain.run import (
     ToolExecution,
     ToolExecutionStatus,
 )
+from backend.app.postgres_execution import PostgresExecutionComposition
 from backend.app.services.run_recovery import (
     RunRecoveryService,
     RunRecoveryStatus,
@@ -757,6 +758,114 @@ class PostgresExecutionCompositionProcessTest(
             recovered,
         )
 
+    async def test_close_waits_for_active_run_before_closing_persistence(
+        self,
+    ) -> None:
+        runtime = PostgresGatedRuntime()
+        composition = await PostgresExecutionComposition.open(
+            POSTGRES_DSN,
+            runtimes={"manual": runtime},
+            coordinator_quiesce_timeout_ms=1_000,
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=20,
+            recovery_scan_interval=timedelta(seconds=30),
+        )
+        run = await _create_composition_run(
+            composition,
+            run_id="composition-graceful-close-run",
+        )
+        execution = asyncio.create_task(
+            composition.coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+
+        closing = asyncio.create_task(composition.close())
+        await asyncio.sleep(0.05)
+        self.assertFalse(closing.done())
+        self.assertIsNotNone(
+            await composition.persistence.run_store.get(
+                run.id,
+                owner_id=run.owner_id,
+            )
+        )
+
+        runtime.release.set()
+        completed = await asyncio.wait_for(execution, timeout=1)
+        await asyncio.wait_for(closing, timeout=1)
+
+        audit = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await audit.setup()
+            stored = await audit.run_store.get(run.id, owner_id=run.owner_id)
+            lease_count = await _composition_lease_count(audit, run.id)
+        finally:
+            await audit.close()
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(RunStatus.COMPLETED, stored.status)
+        self.assertEqual(0, lease_count)
+
+    async def test_close_timeout_leaves_recoverable_run_for_new_composition(
+        self,
+    ) -> None:
+        runtime = PostgresSleepingRuntime()
+        composition = await PostgresExecutionComposition.open(
+            POSTGRES_DSN,
+            runtimes={"manual": runtime},
+            coordinator_quiesce_timeout_ms=20,
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=20,
+            recovery_scan_interval=timedelta(seconds=30),
+        )
+        run = await _create_composition_run(
+            composition,
+            run_id="composition-timeout-close-run",
+        )
+        execution = asyncio.create_task(
+            composition.coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+
+        await composition.close()
+        with self.assertRaises(asyncio.CancelledError):
+            await execution
+
+        audit = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await audit.setup()
+            abandoned = await audit.run_store.get(run.id, owner_id=run.owner_id)
+            events = await audit.event_store.list_for_run(
+                run.id,
+                owner_id=run.owner_id,
+            )
+            lease_count = await _composition_lease_count(audit, run.id)
+        finally:
+            await audit.close()
+        self.assertTrue(runtime.cancelled.is_set())
+        self.assertEqual(RunStatus.RUNNING, abandoned.status)
+        self.assertEqual(["run.started"], [event.type for event in events])
+        self.assertEqual(1, lease_count)
+
+        await asyncio.sleep(0.12)
+        recovering = await PostgresExecutionComposition.open(
+            POSTGRES_DSN,
+            runtimes={"manual": PostgresGatedRuntime()},
+            lease_ttl_ms=100,
+            lease_heartbeat_interval_ms=20,
+            recovery_scan_interval=timedelta(milliseconds=20),
+            recovery_scan_limit=1,
+            recovery_ttl=timedelta(milliseconds=100),
+        )
+        try:
+            recovered = await _wait_for_composition_recovery(
+                recovering,
+                run_id=run.id,
+                owner_id=run.owner_id,
+            )
+        finally:
+            await recovering.close()
+        self.assertEqual(RunStatus.FAILED, recovered.status)
+        self.assertEqual("run_orphaned", recovered.failure.code)
+
 
 class PostgresRunRecoveryTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -1036,6 +1145,63 @@ class PostgresSleepingRuntime:
         except asyncio.CancelledError:
             self.cancelled.set()
             raise
+
+
+async def _create_composition_run(
+    composition: PostgresExecutionComposition,
+    *,
+    run_id: str,
+) -> RunRecord:
+    run = RunRecord.create(
+        run_id=run_id,
+        session_id="composition-close-session",
+        owner_id="composition-close-owner",
+        runtime="manual",
+        input_text="private composition close input",
+        idempotency_key=f"{run_id}-private-key",
+        created_at=datetime.now(UTC),
+    )
+    await composition.persistence.run_store.create(run)
+    return run
+
+
+async def _wait_for_composition_recovery(
+    composition: PostgresExecutionComposition,
+    *,
+    run_id: str,
+    owner_id: str,
+) -> RunRecord:
+    deadline = asyncio.get_running_loop().time() + 3
+    while asyncio.get_running_loop().time() < deadline:
+        run = await composition.persistence.run_store.get(
+            run_id,
+            owner_id=owner_id,
+        )
+        if (
+            run is not None
+            and run.status is RunStatus.FAILED
+            and run.failure is not None
+            and run.failure.code == "run_orphaned"
+            and await _composition_lease_count(composition.persistence, run_id) == 0
+        ):
+            return run
+        await asyncio.sleep(0.02)
+    raise AssertionError("composition did not recover abandoned run")
+
+
+async def _composition_lease_count(
+    persistence: PostgresPersistence,
+    run_id: str,
+) -> int:
+    async with persistence.pool.connection() as connection:
+        result = await connection.execute(
+            "SELECT COUNT(*) AS count FROM agent_run_leases WHERE run_id = %s",
+            (run_id,),
+        )
+        row = await result.fetchone()
+    if row is None:
+        raise AssertionError("lease count query returned no row")
+    return row["count"]
 
 
 async def _reset_app_data(persistence: PostgresPersistence) -> None:

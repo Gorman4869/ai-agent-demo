@@ -96,17 +96,23 @@ class PostgresExecutionCompositionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(composition.persistence, persistence)
         self.assertIs(composition.recovery_supervisor, supervisor)
         self.assertIsInstance(composition.coordinator, RunCoordinator)
-        await composition.close()
+        quiesce = AsyncMock(
+            side_effect=lambda **kwargs: events.append("coordinator.quiesce")
+        )
+        with patch.object(composition.coordinator, "quiesce", new=quiesce):
+            await composition.close()
 
         self.assertEqual(
             [
                 "persistence.setup",
                 "supervisor.start",
+                "coordinator.quiesce",
                 "supervisor.close",
                 "persistence.close",
             ],
             events,
         )
+        quiesce.assert_awaited_once_with(timeout_ms=5_000)
         self.assertEqual(PostgresExecutionCompositionState.CLOSED, composition.state)
 
     async def test_repeated_close_is_idempotent(self) -> None:
@@ -193,6 +199,19 @@ class PostgresExecutionCompositionTest(unittest.IsolatedAsyncioTestCase):
             events,
         )
 
+    async def test_invalid_quiesce_timeout_opens_no_persistence(self) -> None:
+        opened = AsyncMock()
+
+        with patch.object(PostgresPersistence, "open", new=opened):
+            with self.assertRaises(ValueError):
+                await PostgresExecutionComposition.open(
+                    "postgresql://private-connection",
+                    runtimes={"manual": _Runtime()},
+                    coordinator_quiesce_timeout_ms=0,
+                )
+
+        opened.assert_not_awaited()
+
     async def test_supervisor_start_failure_closes_all_owned_resources(self) -> None:
         events: list[str] = []
         supervisor = _FakeSupervisor(
@@ -244,6 +263,42 @@ class PostgresExecutionCompositionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(supervisor.close_cleaned_up.is_set())
         self.assertEqual("persistence.close", events[-1])
         self.assertEqual(PostgresExecutionCompositionState.CLOSED, composition.state)
+
+    async def test_cancelled_quiesce_closes_remaining_owned_resources(self) -> None:
+        events: list[str] = []
+        composition = await self._open(
+            _FakePersistence(events),
+            _FakeSupervisor(events),
+        )
+        quiesce = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with patch.object(composition.coordinator, "quiesce", new=quiesce):
+            with self.assertRaises(asyncio.CancelledError):
+                await composition.close()
+
+        self.assertEqual(
+            ["supervisor.close", "persistence.close"],
+            events[-2:],
+        )
+        self.assertEqual(PostgresExecutionCompositionState.CLOSED, composition.state)
+
+    async def test_quiesce_failure_does_not_close_persistence_under_active_work(
+        self,
+    ) -> None:
+        events: list[str] = []
+        composition = await self._open(
+            _FakePersistence(events),
+            _FakeSupervisor(events),
+        )
+        quiesce = AsyncMock(side_effect=RuntimeError("quiesce-failed"))
+
+        with patch.object(composition.coordinator, "quiesce", new=quiesce):
+            with self.assertRaisesRegex(RuntimeError, "quiesce-failed"):
+                await composition.close()
+
+        self.assertEqual("supervisor.close", events[-1])
+        self.assertNotIn("persistence.close", events)
+        self.assertEqual(PostgresExecutionCompositionState.FAILED, composition.state)
 
     async def _open(
         self,

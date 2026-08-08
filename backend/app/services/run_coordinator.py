@@ -6,6 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import StrEnum
 from typing import Protocol
 
 from backend.app.agent import (
@@ -53,6 +54,20 @@ from backend.app.tools import (
 
 LOGGER = logging.getLogger(__name__)
 EventIdFactory = Callable[[RuntimeEvent, int], str]
+_COORDINATOR_SHUTDOWN_REASON = "coordinator_shutdown"
+
+
+class RunCoordinatorState(StrEnum):
+    ACCEPTING = "accepting"
+    QUIESCING = "quiescing"
+    QUIESCED = "quiesced"
+
+
+class RunCoordinatorAdmissionError(RuntimeError):
+    code = "coordinator_not_accepting"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
 
 
 class EventNotifier(Protocol):
@@ -327,6 +342,12 @@ class RunCoordinator:
         self._lease_heartbeat_interval = lease_heartbeat_interval_ms / 1_000
         self._active: dict[tuple[str, str], _ActiveRun] = {}
         self._active_lock = asyncio.Lock()
+        self._state = RunCoordinatorState.ACCEPTING
+        self._quiesce_task: asyncio.Task[None] | None = None
+
+    @property
+    def state(self) -> RunCoordinatorState:
+        return self._state
 
     async def execute(
         self,
@@ -343,6 +364,7 @@ class RunCoordinator:
         )
         key = (owner_id, run_id)
         async with self._active_lock:
+            self._require_accepting()
             active = self._active.get(key)
             if active is None or active.task.done():
                 deadline = (
@@ -401,6 +423,7 @@ class RunCoordinator:
         while True:
             finishing_execute: asyncio.Task[RunRecord] | None = None
             async with self._active_lock:
+                self._require_accepting()
                 active = self._active.get(key)
                 if (
                     active is not None
@@ -448,6 +471,24 @@ class RunCoordinator:
                 await asyncio.shield(finishing_execute)
                 continue
             return await asyncio.shield(active.task)
+
+    async def quiesce(self, *, timeout_ms: int = 5_000) -> None:
+        if (
+            not isinstance(timeout_ms, int)
+            or isinstance(timeout_ms, bool)
+            or timeout_ms < 1
+        ):
+            raise ValueError("timeout_ms must be a positive integer")
+
+        operation = asyncio.create_task(
+            self._begin_quiesce(timeout_ms),
+            name="run-coordinator-quiesce-request",
+        )
+        try:
+            await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            await operation
+            raise
 
     async def cancel(self, run_id: str, *, owner_id: str) -> bool:
         current = await self._run_store.get(run_id, owner_id=owner_id)
@@ -809,6 +850,8 @@ class RunCoordinator:
                 lifecycle_event,
                 created=lifecycle_created,
             )
+            if _is_coordinator_shutdown(control):
+                raise asyncio.CancelledError()
             if control.cancellation_token.is_cancelled:
                 result: RuntimeResult | RuntimeApprovalPause = _cancellation_result(
                     control.cancellation_token.reason
@@ -917,6 +960,8 @@ class RunCoordinator:
             control.cancellation_token.cancel("deadline_exceeded")
             return _timeout_result()
         except _RuntimeStopped:
+            if _is_coordinator_shutdown(control):
+                raise asyncio.CancelledError() from None
             return _cancellation_result(control.cancellation_token.reason)
         except InvalidRunTransitionError:
             winner = await self._run_store.get(
@@ -929,6 +974,8 @@ class RunCoordinator:
         except StoreError:
             raise
         except asyncio.CancelledError:
+            if _is_coordinator_shutdown(control):
+                raise
             control.cancellation_token.cancel("coordinator_cancelled")
             return _cancellation_result(control.cancellation_token.reason)
         except Exception:
@@ -944,6 +991,8 @@ class RunCoordinator:
                 category="runtime",
                 public_message="Runtime returned an invalid result",
             )
+        if _is_coordinator_shutdown(control):
+            raise asyncio.CancelledError()
         if control.cancellation_token.is_cancelled:
             return _cancellation_result(control.cancellation_token.reason)
         return result
@@ -1148,6 +1197,57 @@ class RunCoordinator:
             heartbeat_interval=self._lease_heartbeat_interval,
         )
 
+    def _require_accepting(self) -> None:
+        if self._state is not RunCoordinatorState.ACCEPTING:
+            raise RunCoordinatorAdmissionError()
+
+    async def _begin_quiesce(self, timeout_ms: int) -> None:
+        async with self._active_lock:
+            if self._state is RunCoordinatorState.QUIESCED:
+                return
+            if self._state is RunCoordinatorState.ACCEPTING:
+                self._state = RunCoordinatorState.QUIESCING
+                self._quiesce_task = asyncio.create_task(
+                    self._drain_active(timeout_ms),
+                    name="run-coordinator-quiesce",
+                )
+            task = self._quiesce_task
+        if task is None:
+            raise RuntimeError("coordinator quiesce task is missing")
+        await task
+
+    async def _drain_active(self, timeout_ms: int) -> None:
+        async with self._active_lock:
+            active_runs = tuple(
+                active for active in self._active.values() if not active.task.done()
+            )
+        tasks = {active.task for active in active_runs}
+        pending: set[asyncio.Task[RunRecord]] = set()
+        if tasks:
+            _, pending = await asyncio.wait(
+                tasks,
+                timeout=timeout_ms / 1_000,
+            )
+        if pending:
+            async with self._active_lock:
+                forced = tuple(
+                    active
+                    for active in self._active.values()
+                    if active.task in pending and not active.task.done()
+                )
+                for active in forced:
+                    active.control.cancellation_token.cancel(
+                        _COORDINATOR_SHUTDOWN_REASON
+                    )
+                    active.task.cancel()
+        if tasks:
+            await asyncio.gather(
+                *tasks,
+                return_exceptions=True,
+            )
+        async with self._active_lock:
+            self._state = RunCoordinatorState.QUIESCED
+
     async def _remove_active(
         self,
         key: tuple[str, str],
@@ -1237,6 +1337,13 @@ def _cancelled_failure(reason: str | None) -> RunFailure:
     )
 
 
+def _is_coordinator_shutdown(control: RuntimeControl) -> bool:
+    return (
+        control.cancellation_token.reason
+        == _COORDINATOR_SHUTDOWN_REASON
+    )
+
+
 def _cancellation_result(reason: str | None) -> RuntimeResult:
     if reason == "deadline_exceeded":
         return _timeout_result()
@@ -1251,4 +1358,6 @@ __all__ = [
     "NullEventNotifier",
     "PersistentEventEmitter",
     "RunCoordinator",
+    "RunCoordinatorAdmissionError",
+    "RunCoordinatorState",
 ]
