@@ -3,7 +3,7 @@
 - 更新时间：2026-08-08，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`1d4386c`
+- 最近已确认实现提交：`2e94640`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -31,6 +31,7 @@
 - M11-T1 第五纵切验证基线提交：`beefc1a`；实现提交：`003c7be`
 - M11-T1 第六纵切验证基线提交：`8297ac0`；实现提交：`e63d718`
 - M11-T1 第七纵切验证基线提交：`e6e53dd`；实现提交：`1d4386c`
+- M11-T1 第八纵切验证基线提交：`acd4f40`；实现提交：`2e94640`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -41,11 +42,11 @@
 | 任务 ID | `M11-T1` |
 | 状态 | `in_progress` |
 | 目标 | 设计并实现版本化 PostgreSQL migration、Run/Event/Approval/Memory Store、LangGraph checkpointer、连接生命周期和事务边界 |
-| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0007`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015`、`ADR-0016`、`ADR-0017`、`ADR-0018`、`ADR-0019` 与现有 Store Protocol |
+| 设计依据 | 实施计划 M11-T1、`ADR-0004`、`ADR-0006`、`ADR-0007`、`ADR-0011`、`ADR-0012`、`ADR-0014`、`ADR-0015`、`ADR-0016`、`ADR-0017`、`ADR-0018`、`ADR-0019`、`ADR-0020` 与现有 Store Protocol |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 已完成 M11-T1 第七个真实 PostgreSQL 纵切：显式 `PostgresExecutionComposition` 统一拥有 persistence setup、lease-aware Coordinator、recovery supervisor start/close；旧 holder 进程退出 17 后，PID 不同的新 composition 自动提交 `run_orphaned`、唯一失败事件并释放 lease |
-| 前置证据 | `V-20260808-007`、`V-20260808-005`、`V-20260808-004`、`V-20260808-003`、`V-20260808-002`、`V-20260808-001`、`V-20260803-006`、`V-20260803-005`、`ADR-0019`、`ADR-0018`、`ADR-0017`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0007`、`ADR-0006` |
-| 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现显式 Coordinator admission stop 与 active execution quiesce/drain 合同，使 composition close 在 Runtime/heartbeat 不再访问 pool 后才关闭 persistence，并覆盖执行中关闭、超时、取消和 lease 结果未知边界；仍不迁移默认 Container/HTTP，不调用同步 Approval/Memory，不进入 M11-T2 pgvector |
+| 当前修改 | 已完成 M11-T1 第八个真实 PostgreSQL 纵切：Coordinator accepting/quiescing/quiesced admission、active drain 和 timeout abandon；composition 按 Coordinator/supervisor/persistence 关闭，自然完成 release，timeout 保留 running+lease 并由新 composition 自动恢复 `run_orphaned` |
+| 前置证据 | `V-20260808-009`、`V-20260808-007`、`V-20260808-005`、`V-20260808-004`、`V-20260808-003`、`V-20260808-002`、`V-20260808-001`、`V-20260803-006`、`V-20260803-005`、`ADR-0020`、`ADR-0019`、`ADR-0018`、`ADR-0017`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0007`、`ADR-0006` |
+| 下一动作 | 继续 M11-T1 的下一条原子纵切：只设计并实现同步 PostgreSQL ApprovalStore/MemoryStore 的 async 线程隔离与生命周期边界，覆盖事件循环不阻塞、取消/超时、共享 sync pool 耗尽和 composition close 等待 in-flight 调用；仍不迁移默认 Container/HTTP，不进入 M11-T2 pgvector |
 
 ## 里程碑状态
 
@@ -56,7 +57,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 的 Run/Event/checkpoint、Approval/Memory、ToolExecution、lease/recovery、显式 Coordinator、recovery supervisor 和 execution composition 七个 PostgreSQL 纵切已通过真实容器、故障事务及跨进程验证；active execution drain、默认主链及 M11-T2 以后任务尚未完成 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 的 Run/Event/checkpoint、Approval/Memory、ToolExecution、lease/recovery、显式 Coordinator/supervisor/composition 与 active quiesce 八个 PostgreSQL 纵切已通过真实容器、故障事务及跨进程验证；同步 Store async 隔离、默认主链及 M11-T2 以后任务尚未完成 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -69,6 +70,9 @@
 
 ## 未验证范围
 
+- M11-T1 第八纵切见 `V-20260808-009`：quiesce+composition 单元 18 项、真实 PostgreSQL 86 项、核心 composition/Run/Store/Coordinator/recovery/LangGraph 164 项、API/Container/SDK 68 项和 M1 隔离 10 项通过；实现提交为 `2e94640`。
+- 第八纵切没有修改依赖、migration、Store Protocol、默认 HTTP 或跨前后端契约，也不是里程碑验收/发布门；核心和 API/Container 定向回归已覆盖共享 Coordinator 兼容性，因此没有重复运行 `scripts/verify.ps1`、Vue、MCP TypeScript 或 Compose 全量门。第五纵切完整门继续引用 `V-20260808-002`/`003`。
+- quiesce timeout 只是自然完成宽限期；非协作 Runtime 可能让清理超过 timeout。admission stop 只覆盖 execute/resume，默认 HTTP/命令入口、显式用户 cancel 等其他 Store 操作仍需调用方先停止。同步 PostgreSQL Approval/Memory async 隔离仍缺，`KI-004`、`KI-016` 保持 mitigated，`KI-023` 保持 open。
 - M11-T1 第七纵切见 `V-20260808-007`：composition 生命周期 9 项、真实 PostgreSQL 84 项、核心 composition/Run/Store/Coordinator/recovery/LangGraph 155 项和 M1 隔离 10 项通过；不同 PID 的新 composition 自动收敛旧 holder 的 `run_orphaned`，实现提交为 `1d4386c`。
 - 第七纵切没有修改依赖、migration、公共 Store Protocol、默认 Container/HTTP 或跨前后端契约，也不是里程碑验收/发布门，因此按课程交付协议没有重复运行 `scripts/verify.ps1`、Vue、MCP TypeScript 或 Compose 全量门；第五纵切完整门证据继续引用 `V-20260808-002`/`003`。
 - composition close 当前要求调用方先停止 execute/resume 并等待 active Coordinator 操作结束；尚无 admission stop、drain、shutdown timeout 或强制终止 Runtime 合同。默认 Container/FastAPI lifespan 和同步 Approval/Memory async 线程边界仍未迁移，`KI-004`、`KI-016` 保持 mitigated，`KI-023` 保持 open。
@@ -134,4 +138,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-08-m11-t1-postgres-execution-composition.md`，再核对 `V-20260808-008`、`V-20260808-007`、`ADR-0019`、`ADR-0018`、`ADR-0017`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0007`、`ADR-0006`、实施计划 M11-T1 和实际 composition/supervisor/Coordinator/PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 84 项、composition 9 项、M1 10 项和连续性检查；若一致，不要重做前七个纵切，下一步只做显式 Coordinator admission stop 与 active execution quiesce/drain。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container/HTTP、调用同步 Approval/Memory 或进入 M11-T2。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-08-m11-t1-coordinator-quiesce.md`，再核对 `V-20260808-010`、`V-20260808-009`、`ADR-0020`、`ADR-0019`、`ADR-0018`、`ADR-0017`、`ADR-0016`、`ADR-0015`、`ADR-0014`、`ADR-0012`、`ADR-0011`、`ADR-0007`、`ADR-0006`、实施计划 M11-T1 和实际 quiesce/composition/supervisor/Coordinator/PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 86 项、quiesce+composition 18 项、M1 10 项和连续性检查；若一致，不要重做前八个纵切，下一步只做同步 PostgreSQL Approval/Memory 的 async 线程隔离与 lifecycle。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、迁移默认 Container/HTTP 或进入 M11-T2。

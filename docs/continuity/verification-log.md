@@ -1969,3 +1969,81 @@
 
 - implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第七纵切事实、显式 composition 所有权、active Run 关闭前置条件与下一条 quiesce/drain 原子动作。
 - 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `1d4386c` 的 composition 9、PostgreSQL 84、核心 155、M1 10 与提交后跨 PID 单例证据继续引用 `V-20260808-007`。
+
+## V-20260808-009：M11-T1 Coordinator admission stop 与 active quiesce
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：基线 HEAD `acd4f40` 上的第八纵切工作区；实现提交 `2e94640`（`feat: quiesce postgres run execution`）
+- 任务等级：A 类并发 admission、取消、资源关闭和持久结果未知恢复；时间盒 2–4 小时
+- 模式：本地真实 PostgreSQL E3；复用 localhost-only PostgreSQL 17.10 测试容器。没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除依赖；没有修改 migration、Store Protocol、默认 Container、HTTP、FastAPI lifespan 或同步 Approval/Memory 调用边界
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `acd4f40`，第七纵切实现 `1d4386c` 与文档锚点存在 |
+| `docker exec ... pg_isready` | 0 | 本地测试数据库 accepting connections |
+| 设置测试 DSN 后 `... -m unittest backend.tests.postgres_store_integration -q` | 0 | 修改前真实 PostgreSQL 84 项通过；不可达数据库负向用例保留预期 pool timeout |
+| `... test_postgres_execution -q` | 0 | 修改前 composition 9 项通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 当前 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、86 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `backend.tests.test_run_coordinator_quiesce -v` | 1 | 6 项中 5 项通过；调用方取消用例在 quiesce 协程实际启动前立即取消，未进入待验证生命周期，生产断言未失败 |
+| 修正夹具等待 `quiescing` 后重跑 | 0 | 6 项全部通过：空闲幂等、execute/resume 拒绝、自然 drain、timeout abandon、调用方取消与并发共享 |
+| `test_postgres_execution` + quiesce 单元集 | 0 | 最终 18 项通过；composition 关闭顺序、timeout 配置、取消传播和 quiesce 程序错误下不提前关闭 pool 均固定 |
+| `PostgresExecutionCompositionProcessTest -v` | 0 | 3 项真实 PostgreSQL 通过：跨 PID 崩溃恢复、自然完成关闭、timeout 后 running+lease 由新 composition 自动恢复 |
+| 不落盘 `compile()` | 0 | 5 个修改 Python 文件 `syntax-ok` |
+| 完整 `backend.tests.postgres_store_integration -q` | 0 | migration 1–4、前七纵切和 quiesce 共 86 项通过；不可达数据库负向 pool timeout 为预期输出，无 ResourceWarning |
+| composition/Run/Store/Coordinator/recovery/LangGraph 核心定向回归 | 0 | 164 项通过；既有 lease release/notifier 安全负向日志符合预期 |
+| API、Container、OpenAI SDK、framework runtime 回归 | 0 | 68 项通过；保留一条既有 `StarletteDeprecationWarning` |
+| `python -S ... test_manual_agent_loop -q` | 0 | M1 隔离 10 项通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| `git commit -m "feat: quiesce postgres run execution"` | 0 | 5 个实现/测试文件固定为提交 `2e94640` |
+| 提交后 quiesce+composition 单元集 / PostgreSQL composition 集 | 0 / 0 | 18 项 / 3 项再次通过 |
+
+### 实现与风险证据
+
+- Coordinator 在既有 active lock 内从 accepting 切为 quiescing，之后 execute/resume 统一返回稳定 `coordinator_not_accepting`；并发 quiesce 共享一个 drain task，quiesced 不可重启。
+- 自然完成宽限期内，Runtime 继续正常提交 terminal 并 release。宽限期超时后，内部 `coordinator_shutdown` 取消 task，`_drive_running` 停止 heartbeat 并 abandon lease，不写 `run.cancelled` 或用户取消失败码。
+- 调用方取消 quiesce 时，内部 drain 完成后才传播 `CancelledError`。聚焦复审又补全对所有快照 task 的 gather，避免自然失败但调用方已离开时留下未检索 task 异常。
+- composition close 固定 Coordinator、supervisor、persistence 顺序。真实 PostgreSQL 证明自然 drain 期间 pool 保持可用；timeout 后审计读到 running、仅 `run.started`、lease 仍存在，下一 composition 自动提交 `run_orphaned` 并释放 lease。
+
+### 未验证范围与全量门说明
+
+- timeout 是自然完成宽限期，不是整个 Runtime 或进程的硬终止上限；若 Runtime 非协作地吞掉 task cancellation，quiesce 会继续等待清理，不能宣称硬停止线程、子进程或外部请求。
+- admission stop 只覆盖 execute/resume 和已登记 active task。默认 HTTP/命令入口尚未停用，现有显式用户 `cancel()` 等非执行 Store 操作仍需调用方在 composition close 前停止，不能把本纵切描述成完整 FastAPI shutdown。
+- 默认 `ApplicationContainer`、`create_app()`、FastAPI lifespan 和 HTTP 未迁移。PostgreSQL Approval/Memory 同步 pool 的 async 线程隔离、取消、超时和耗尽仍未处理，`KI-023` 保持 open。
+- 无 lease Coordinator 可以自然 drain，但 timeout 后可由 scanner 收敛的证据只适用于显式 lease-aware PostgreSQL composition。lease、ToolExecution、Run/Event 与外部副作用仍不构成 exactly-once。
+- 本原子步骤没有依赖、migration、Store Protocol、默认 HTTP 或跨前后端契约变化，也不是里程碑验收/发布门；核心 164 与 API/Container 68 项已覆盖共享 Coordinator 兼容性，因此没有重复运行 `scripts/verify.ps1`、Vue、MCP TypeScript 或 Compose 全量门。第五纵切完整门继续引用 `V-20260808-002`/`003`。
+- 本地 Compose 仍是 localhost trust/tmpfs 测试实例，不是生产鉴权、TLS、持久卷、备份、高可用、跨主机或容量证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T1 第八个真实纵切达到本地 E3；Coordinator admission stop、active drain、shutdown timeout fail-closed 和 composition 关闭顺序可以从提交 `2e94640` 复现。
+- `KI-004`、`KI-016` 继续保持 mitigated，`KI-023` 保持 open；M11-T1 保持 `in_progress`。下一原子动作应处理同步 PostgreSQL Approval/Memory 的 async 隔离，再考虑默认应用接线。
+
+## V-20260808-010：M11-T1 Coordinator quiesce 连续性闭环
+
+- 任务：`M11-T1 / in_progress`
+- 时间：2026-08-08，Asia/Shanghai
+- 验证目标：实现提交 `2e94640` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、88 个 Markdown 通过；新增 ADR/handoff、M11-T1 状态和引用一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 转换提示 |
+| 定向搜索 `2e94640`、`V-20260808-009`、`ADR-0020`、164 项、88 个 Markdown 和 Approval/Memory async 下一动作 | 0 | status、known issue、实施计划、backend standards、ADR 与 handoff 的事实、未验证范围和下一动作相互一致 |
+
+### 结论
+
+- implementation plan、ADR、backend standards、known issue、status、verification 和新 handoff 已分别记录第八纵切事实、Coordinator quiesce 所有权、shutdown 结果未知边界与下一条同步 Store async 隔离动作。
+- 本步骤没有代码或行为变化，因此不重复运行业务测试或全仓门；实现提交 `2e94640` 的专用 18、PostgreSQL 86、核心 164、API/Container 68、M1 10 与提交后真实 composition 3 项证据继续引用 `V-20260808-009`。

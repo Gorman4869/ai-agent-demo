@@ -600,6 +600,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 真实 PostgreSQL 的旧 holder 进程由 composition Coordinator 开始执行后以 17 退出；PID 不同的新 composition 只依靠自动 supervisor 把 Run 收敛为 `run_orphaned`、写入唯一失败事件并释放 lease，probe 输出保持有界和脱敏。
 - 尚未完成：composition close 前的 execute/resume admission stop 与 active Coordinator drain、默认 Container/HTTP/FastAPI lifespan 注入、同步 Approval/Memory async 线程边界和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
 
+#### M11-T1 第八个真实纵切边界
+
+- `RunCoordinator` 增加 accepting/quiescing/quiesced 生命周期；quiescing 后在既有 active lock 内拒绝新 execute/resume，多个 quiesce 调用共享一个不可重启的 drain task。
+- quiesce 先给 active execution 自然完成宽限期；超时后使用内部 `coordinator_shutdown` 取消并 await Runtime/heartbeat 清理，不提交用户取消终态，不 release 结果未知 lease。调用方取消等待时先完成 drain 再传播。
+- `PostgresExecutionComposition.close()` 固定 `coordinator.quiesce -> supervisor.close -> persistence.close`。真实 PostgreSQL 证明自然完成后 terminal+release，及 timeout 后 running+lease 由下一 composition 自动收敛为 `run_orphaned`。
+- 尚未完成：默认 HTTP/命令入口停止、同步 PostgreSQL Approval/Memory 的 async 线程隔离、默认 Container/FastAPI lifespan 注入和外部副作用 exactly-once。因此 M11-T1 继续 `in_progress`，不进入 M11-T2。
+
 ### M11-T2：真实 pgvector 文档与检索闭环
 
 - 依赖：M11-T1。
