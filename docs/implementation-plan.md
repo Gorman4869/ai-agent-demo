@@ -676,6 +676,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：长对话裁剪、关键事实保留、恶意检索指令隔离、超预算、摘要失败和不同用户隔离。
 - 验收：至少一组长对话固定测试证明关键事实仍可命中，并能解释每段上下文为何进入模型。
 
+#### M11-T4 第一个离线纵切边界
+
+- `ADR-0025` 固定六种 Context 来源及 trust、owner scope、服务端选择优先级、独立渲染顺序、完整片段裁剪和估算预算报告；片段不能自行提升 trust 或 priority。
+- 新增纯标准库 `ContextAssembler`：system 不可静默丢弃，Memory/Recent/Summary 强制 owner 匹配，RAG 固定为 `untrusted_evidence`，摘要不可用进入报告，空输入返回零成本 no-op。
+- 总预算按完整 `context-assembly-v1` JSON 计算且不超过现有 `RuntimeRequest.prompt_context` 的 32 KB；`ceil(UTF-8 bytes / 4)` 只标为离线估算，不冒充 Provider Token、usage 或费用。
+- 新增 10 个关键测试方法或等价覆盖；Context/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 88 项和 M1 隔离 10 项通过。没有修改共享 Runtime、Container、Store、依赖、构建或跨前后端接口，因此不重复完整全仓门。
+- 本纵切达到本地 E3，但 M11-T4 保持 `in_progress`：尚未从真实 MemoryStore/KnowledgeBase/SkillBuilder 收集来源，也未接入默认 Runtime/Container 或完成最终长对话主链验收。
+
 ### M11-T5：持久记忆进入主 Run
 
 - 依赖：M11-T1、M11-T4。

@@ -2500,3 +2500,83 @@
 
 - `V-20260809-006` 的本地真实 SDK 协议、完整离线门、真实 pgvector 与 M1 证据和当前 plan、known issue、status、后端规约及 handoff 一致，没有发现代码与记录漂移。
 - M11-T3 保持 `verified`；当前任务只切换到 `M11-T4 / planned`，本轮没有实现 ContextAssembler。第三纵切实现提交将在结束时本地固定，下一份 verification/handoff 再记录新 HEAD。
+
+## V-20260809-008：M11-T4 有界 ContextAssembler 领域纵切
+
+- 任务：`M11-T4 / in_progress`
+- 时间：2026-08-09 12:43，Asia/Shanghai
+- 验证目标：基线 HEAD `02664b8` 上的 M11-T4 第一离线纵切工作区
+- 任务等级：B 类确定性离线领域合同；时间盒 30–90 分钟
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：纯 Python 标准库实现；没有新增、安装、升级或删除 Python/Node 依赖，没有修改锁文件、共享 Runtime/Container/Store、数据库、构建配置或跨前后端接口
+
+### 恢复基线与漂移登记
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `02664b8`，M11-T3 三个实现提交连续存在 |
+| 按强制顺序读取 AGENTS、continuity README/status/playbook、M11-T4/M10-T3、ADR-0010/0011/0013/0024、最新 handoff、`V-20260809-006/007` 与后端规约 | 0 | 当前任务确认为 M11-T4；发现 status 顶部第三纵切 hash 仍 pending、底部恢复入口仍指向 M11-T3 第二纵切 |
+| 代码与 `02664b8` 提交内容复核 | 0 | OpenAI Embedding Adapter/Settings/Container/测试与 handoff 事实一致；漂移仅在动态 status，先登记为 `KI-025` 再开始 M11-T4 |
+| `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 0 | integration pgvector 容器 healthy，只使用本地缓存 image，没有下载 |
+| handoff 共享契约恢复集 / 真实 pgvector / M1 `python -S` | 0 / 0 / 0 | 160 项、真实 pgvector 4 项、M1 10 项通过；只有既有 Starlette/httpx 弃用警告 |
+| 修改前 `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、98 个 Markdown 通过；脚本未捕获 status 恢复段语义陈旧，人工真相源复核仍按规则登记漂移 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `python -m unittest backend.tests.test_context_assembler -v` | 0 | 10 个关键测试方法通过；六来源、空输入、长历史、system fail-closed、RAG 注入、owner、摘要、预算、非法输入和脱敏均执行 |
+| 首轮 Context/Runtime/Skill/Memory/RAG 聚焦集 | 0 | 40 项通过 |
+| 独立聚焦复审 | 0 | 发现 Policy 对伪造 budget 可能抛 `AttributeError`、Assembler 未拒绝伪造 policy，RAG 用例未包含 JSON 结构逃逸，报告也未自描述选择/渲染顺序；全部修正并补等价覆盖 |
+| 最终 Context/Runtime/Skill/Memory/RAG/M10-T3/Container 定向集 | 0 | 88 项通过；只有既有 Starlette/httpx 警告与 asyncio 慢任务诊断，没有失败或新增 skip |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；新 context 包未进入 M1 标准库 Loop 顶层导入路径 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有 LF/CRLF 转换提示 |
+
+### 实现与风险证据
+
+- `ContextFragment` 固定 system/recent/summary/memory/rag/skill 六种来源，单片段 16,000 UTF-8 字节、总数 128；content 与 owner 隐藏 repr，trust 只能由 source 映射，片段不能自我提升权限。
+- 所有 owner scope 在选择前完整校验：recent/summary/memory 必须匹配 assembly owner，system/skill 禁止 owner，显式 scoped RAG 必须匹配；任一错误返回稳定无内容 code，不返回已选前缀。
+- 选择优先级固定为 system、memory、recent、summary、skill、rag；recent 最新优先。渲染固定为 system、skill、summary、memory、recent、rag，并恢复 recent 时间顺序。
+- 每来源与总预算使用明确标注的 `ceil(UTF-8 bytes / 4)` 估算；总量按安全头部与完整 `context-assembly-v1` JSON 计算。非 system 片段完整纳入或丢弃并记录原因，system 放不下或来源不可用时 fail closed。
+- RAG 固定为 `untrusted_evidence`。测试把引号、括号和伪造 `trusted_policy` 字样保留为 content，经真实 `json.loads()` 后 source/trust 仍由服务端记录决定；这证明结构隔离，不证明在线模型遵循质量。
+- 摘要不可用写入 source availability，不伪造 summary；空输入返回 `prompt_context=None` 与零成本报告。报告只含安全 ID、来源、trust、估算、计数、选择结果和原因，不含 content/owner，并明确 Provider usage 不可用、费用未知。
+- 非空输出实际构造现有 `RuntimeRequest(prompt_context=...)` 成功，且默认总上限不超过其 32,000 UTF-8 字节合同；没有修改 RuntimeRequest 或 Runtime 实现。
+
+### 失败尝试与修正
+
+- 首次用 PowerShell 不支持的 Unix 风格 `*.md` 路径传给 `rg`，以及按推测文件名读取 ADR-0024 均退出 1；随后用目录搜索定位实际 `ADR-0024-embedding-batching-boundary.md`，不是仓库漂移。
+- `apply_patch` 首次因新包父目录不存在未写入；沙箱内 `New-Item backend/app/context` 又因目录权限退出 1。获准只创建该工作区目录后，所有文件继续由 `apply_patch` 写入，没有部分补丁或任务外改动。
+
+### 未验证范围与全量门说明
+
+- 当前 Assembler 只消费调用方已收集的冻结片段，不直接读取 MemoryStore、KnowledgeBase 或 SkillBuilder，不生成摘要，也未进入默认 Runtime/Container；M11-T4 尚不能标记 `verified`。
+- 关键 Memory 保留来自固定优先级和预算 fixture，不证明真实持久 fact、摘要质量、语义相关性或线上长上下文模型能力。下一纵切才实现显式 source collector。
+- RAG 的 JSON/trust 结构隔离不是 prompt injection 的模型级绝对防护；真实模型遵循、RAG Recall/MRR/依据正确率和不少于 50 条固定评测仍由 M11-T6/M11-T7 承接。
+- 估算预算不是 Provider Token、usage、模型窗口或费用，不能关闭 `KI-018`。没有版本化定价、持久 usage/cost 账本或跨调用硬预算。
+- 本纵切未修改共享领域契约、依赖、数据库、构建或跨前后端接口；88 项相关回归和 M1 隔离覆盖修改面，因此按交付协议未运行 `scripts/verify.ps1`、Vue/MCP 构建或修改后真实数据库集成。恢复阶段 pgvector 4 项只证明 M11-T3 基线一致。
+- 没有配置 remote、执行 push、读取真实 Key、访问在线模型或产生费用。
+
+### 结论
+
+- M11-T4 第一纵切达到本地 E3：六来源 trust/owner 合同、确定性优先级和渲染、完整片段预算、安全报告与既有 RuntimeRequest 边界可从基线 `02664b8` 上的工作区复现。
+- M11-T4 更新为 `in_progress`。下一原子动作只实现显式 Context source collector，把真实 Memory/RAG/Skill 数据形状映射为 owner-safe fragments，并保留可注入离线摘要失败边界；不接默认 Runtime/Container，不进入 M11-T5/M11-T6。
+
+## V-20260809-009：M11-T4 ContextAssembler 连续性闭环
+
+- 任务：`M11-T4 / in_progress`
+- 时间：2026-08-09 12:49，Asia/Shanghai
+- 验证目标：基线 HEAD `02664b8` 上经 `V-20260809-008` 验证的第一纵切工作区与连续性文档
+- 模式：纯本地文档、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、100 个 Markdown 通过；M11-T4 in_progress、ADR-0025、新 handoff、plan、verification 与恢复入口引用可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` | 0 | 5 个已跟踪修改与 5 个新文件路径，合计 10 个任务文件；没有发现任务外改动 |
+| `git diff --stat` 与未跟踪文件复核 | 0 | 已跟踪规约和连续性范围符合第一纵切；新 context 包两个文件、测试、ADR 与 handoff 均已单独确认 |
+
+### 结论
+
+- `V-20260809-008` 的 88 项相关回归、M1 隔离和本地 E3 证据与当前实现、plan、ADR、known issue、status、后端规约及 handoff 一致。
+- `KI-025` 已按“先登记漂移再修正”关闭；M11-T3 实现锚点固定为 `02664b8`，恢复入口已切到 M11-T4 第一纵切。
+- 本记录只关闭第一纵切的文档连续性，不把 M11-T4 提升为 `verified`，也不增加在线模型、真实 Store 来源收集、Provider token/费用、完整全仓门或 Runtime/Container 接线证据。

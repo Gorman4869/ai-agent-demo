@@ -3,7 +3,7 @@
 - 更新时间：2026-08-09，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`813c412`
+- 最近已确认实现提交：`02664b8`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -37,7 +37,8 @@
 - M11-T2 验证基线提交：`41871c4`；实现提交：`7ebaa16`
 - M11-T3 第一纵切验证基线提交：`9b77bfd`；实现提交：`31479b8`
 - M11-T3 第二纵切验证基线提交：`31479b8`；实现提交：`813c412`
-- M11-T3 第三纵切验证基线提交：`813c412`；实现提交待本轮 Git 固定
+- M11-T3 第三纵切验证基线提交：`813c412`；实现提交：`02664b8`
+- M11-T4 第一纵切验证基线提交：`02664b8`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -46,13 +47,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M11-T4` |
-| 状态 | `planned` |
+| 状态 | `in_progress` |
 | 目标 | 建立 ContextAssembler 的来源选择、排序、Token 预算和可解释报告合同 |
-| 设计依据 | 实施计划 M11-T4、M10-T3 上下文入口、已验收 M11-T3 Embedding 合同与 `ADR-0024` |
+| 设计依据 | 实施计划 M11-T4、M10-T3 上下文入口、`ADR-0010`、`ADR-0013`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T3 已完成离线 Provider/批次、缓存/retry，以及显式在线 SDK Adapter 与 embedding-specific Settings/composition 的离线 E2/E3 合同；本轮没有开始 M11-T4 代码 |
-| 前置证据 | M11-T3 `V-20260809-003/004/005/006/007`、`ADR-0024`，以及 M11-T2 `V-20260809-001/002`/`ADR-0023` |
-| 下一动作 | 开始 M11-T4 第一个离线纵切：先固定 ContextAssembler 输入片段、来源标记、确定性优先级和预算报告的最小领域合同；不接在线模型、不提前实现 M11-T5 记忆写入或 M11-T6 评测集 |
+| 当前修改 | M11-T4 第一纵切已新增六来源 ContextFragment、固定 trust/owner/选择与渲染顺序、完整片段预算和安全报告；输出通过既有 RuntimeRequest 32 KB 合同，但尚未收集真实 Store 来源或接入 Runtime/Container |
+| 前置证据 | `V-20260809-008/009`、`ADR-0025`、验证基线 `02664b8`，以及 M11-T3 `V-20260809-006/007`/`ADR-0024` |
+| 下一动作 | 继续 M11-T4 第二个离线纵切：实现显式 Context source collector，把 server-owned system、MemoryStore messages/facts、KnowledgeBase results 与 SkillContext 映射为 owner-safe fragments；摘要只用可注入离线协议并显式报告失败，不接默认 Runtime/Container |
 
 ## 里程碑状态
 
@@ -63,7 +64,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T3 已 `verified`；离线/显式在线 Embedding Adapter、批次/维度、缓存/retry 与 fail-closed composition 均有本地证据。ContextAssembler、记忆 API、固定 RAG 评测与真实在线冒烟仍由 M11-T4–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T3 已 `verified`；M11-T4 首纵切已完成有界 Context 领域合同、来源信任、owner 隔离和预算报告 E3。真实来源收集/Runtime 接线、记忆 API 主链、固定 RAG 评测与在线冒烟仍由 M11-T4–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -76,6 +77,11 @@
 
 ## 未验证范围
 
+- M11-T4 第一纵切见 `V-20260809-008/009`：新增 10 个关键测试方法或等价覆盖，最终 Context/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 88 项、M1 隔离 10 项和连续性 52/100 通过；验证基线为 `02664b8`，本轮实现提交在结束时固定。
+- 当前 ContextAssembler 只消费应用层已收集片段，不直接读取 MemoryStore/KnowledgeBase/SkillBuilder，不生成摘要，也没有接入默认 Runtime/Container。它证明领域选择与隔离合同，不证明真实主链长对话质量。
+- `ceil(UTF-8 bytes / 4)` 是离线估算，8,000 单位只用于守住 32 KB prompt_context 字节边界；不是 Provider tokenizer、usage、模型上下文窗口、费用或账单证据，`KI-018` 保持 open。
+- RAG JSON 逃逸测试证明内容不能伪造 source/trust 结构，不能证明真实模型永远遵循安全头部。在线模型、持久记忆读取/纠正、固定 50 条 RAG 指标与统一 Run 仍未验证。
+- 本纵切没有修改依赖、锁文件、共享 Runtime/Container/Store、数据库、构建或跨前后端接口；88 项定向与 M1 隔离覆盖修改面，因此按交付协议未重复运行完整全仓门、Vue/MCP 构建或真实数据库集成。
 - M11-T3 第三纵切见 `V-20260809-006`：真实 SDK `MockTransport`、Settings/Container/Embedding 专项 67 项和共享契约定向 160 项通过；真实 pgvector 4 项、M1 隔离 10 项和完整离线门通过。完整门后端 505 项通过、1 项既有 Windows symlink 跳过，Vue、MCP TypeScript、依赖、Code Agent 与 Compose 配置通过；验证基线为 `813c412`，本轮实现提交在结束时固定。
 - 显式在线 Adapter 的 E2/E3 证据完全来自本地真实 SDK + `httpx.MockTransport`，没有读取真实 Key、访问网络 Provider 或产生费用；模型可用性、语义质量、账单和真实 E4 仍由 M11-T7 在新的单次授权下验证。
 - M11-T3 第二纵切见 `V-20260809-004/005`：新增 11 个关键测试方法，最终知识/API 定向 78 项、真实 pgvector 4 项、M1 隔离 10 项和连续性 52/97 通过；验证基线为 `31479b8`，实现提交为 `813c412`。
@@ -162,4 +168,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t3-embedding-cache-retry.md`，再核对 `V-20260809-004/005`、`ADR-0024`、验证基线 `31479b8`、实施计划 M11-T3 和实际 embeddings cache/retry 代码。按 handoff 重跑知识/API 78 项、真实 pgvector 4 项、M1 10 项和连续性检查；若一致，不要重做 M11-T2 或 M11-T3 前两个纵切，下一步只实现显式在线 SDK Adapter 与 embedding-specific Settings/composition 的离线 fail-closed 构造测试。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T4/M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t4-context-assembler-domain.md`，再核对 `V-20260809-008/009`、`ADR-0010`、`ADR-0013`、`ADR-0025`、验证基线 `02664b8`、实施计划 M11-T4 和实际 `backend.app.context` 代码。按 handoff 重跑 Context/Runtime/Skill/Memory/RAG/M10-T3/Container 88 项、M1 10 项和连续性 52/100；若一致，不要重做 M11-T1–T3 或 M11-T4 第一纵切，下一步只实现显式 source collector。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到默认 Runtime/Container、M11-T5/M11-T6/M12/M13。
