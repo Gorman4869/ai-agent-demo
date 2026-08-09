@@ -6,6 +6,7 @@ from typing import Protocol
 from backend.app.agent.runtime import (
     AgentRuntime,
     RuntimeControl,
+    RuntimeContextIdentity,
     RuntimeEventSink,
     RuntimeOutcome,
     RuntimeRequest,
@@ -57,6 +58,37 @@ class RuntimeContextBinding:
 
 class RuntimeContextBindingFactory(Protocol):
     def __call__(self, request: RuntimeRequest) -> RuntimeContextBinding: ...
+
+
+@dataclass(frozen=True)
+class RuntimeIdentityBindingFactory:
+    """Map a coordinator-owned Runtime identity into context source scope."""
+
+    system_constraints: tuple[ContextSystemConstraint, ...] = ()
+
+    def __post_init__(self) -> None:
+        validated = RuntimeContextBinding(
+            owner_id="context-binding-validation-owner",
+            session_id="context-binding-validation-session",
+            system_constraints=self.system_constraints,
+        )
+        object.__setattr__(
+            self,
+            "system_constraints",
+            validated.system_constraints,
+        )
+
+    def __call__(self, request: RuntimeRequest) -> RuntimeContextBinding:
+        identity = request.context_identity
+        if identity is None:
+            raise ContextRuntimePreparationError("context_identity_missing")
+        if not isinstance(identity, RuntimeContextIdentity):
+            raise ContextRuntimePreparationError("context_identity_invalid")
+        return RuntimeContextBinding(
+            owner_id=identity.owner_id,
+            session_id=identity.session_id,
+            system_constraints=self.system_constraints,
+        )
 
 
 @dataclass(frozen=True)
@@ -165,5 +197,6 @@ __all__ = [
     "PreparedContextRequest",
     "RuntimeContextBinding",
     "RuntimeContextBindingFactory",
+    "RuntimeIdentityBindingFactory",
     "prepare_context_request",
 ]

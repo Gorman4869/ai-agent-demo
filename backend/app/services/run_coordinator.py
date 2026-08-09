@@ -17,6 +17,7 @@ from backend.app.agent import (
     RuntimeApprovalPause,
     RuntimeApprovalResume,
     RuntimeCheckpointContext,
+    RuntimeContextIdentity,
     RuntimeControl,
     RuntimeEvent,
     RuntimeRequest,
@@ -931,6 +932,10 @@ class RunCoordinator:
                     checkpoint_context=RuntimeCheckpointContext.for_run(
                         run_id=running.id,
                         owner_id=running.owner_id,
+                    ),
+                    context_identity=RuntimeContextIdentity(
+                        owner_id=running.owner_id,
+                        session_id=running.session_id,
                     ),
                 )
                 if approval is None:

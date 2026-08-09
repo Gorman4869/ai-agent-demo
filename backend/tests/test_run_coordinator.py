@@ -4,7 +4,12 @@ import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from backend.app.agent import RuntimeApprovalPause, RuntimeEvent, RuntimeResult
+from backend.app.agent import (
+    RuntimeApprovalPause,
+    RuntimeContextIdentity,
+    RuntimeEvent,
+    RuntimeResult,
+)
 from backend.app.domain.run import RunFailure, RunRecord, RunStatus, StoredRunEvent
 from backend.app.services.run_coordinator import (
     EventNotifier,
@@ -70,6 +75,47 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             ],
             notifier.observations,
         )
+
+    async def test_runtime_request_identity_comes_from_owned_run_record(
+        self,
+    ) -> None:
+        run = RunRecord.create(
+            run_id="identity-run",
+            session_id="trusted-session",
+            owner_id="trusted-owner",
+            runtime="manual",
+            input_text="session-from-input owner-from-input",
+            idempotency_key="identity-idempotency",
+            created_at=NOW,
+        )
+        await self.run_store.create(run)
+        runtime = StaticRuntime(
+            RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+        )
+
+        result = await self._coordinator(runtime).execute(
+            run.id,
+            owner_id=run.owner_id,
+            execution_context=ToolExecutionContext(
+                principal_id=run.owner_id,
+            ),
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(1, len(runtime.requests))
+        request = runtime.requests[0]
+        self.assertEqual(
+            RuntimeContextIdentity(
+                owner_id=run.owner_id,
+                session_id=run.session_id,
+            ),
+            request.context_identity,
+        )
+        self.assertTrue(
+            request.checkpoint_context.belongs_to_owner(run.owner_id)
+        )
+        self.assertNotIn(run.owner_id, repr(request))
+        self.assertNotIn(run.session_id, repr(request))
 
     async def test_notifier_failure_does_not_rollback_or_fail_the_run(self) -> None:
         run = await self._create_run()
@@ -636,6 +682,20 @@ class RunCoordinatorLeaseTest(unittest.IsolatedAsyncioTestCase):
             self.lease_store.reservation_statuses,
         )
         self.assertEqual(2, self.lease_store.release_calls)
+        self.assertEqual(2, len(runtime.requests))
+        for runtime_request in runtime.requests:
+            self.assertEqual(
+                RuntimeContextIdentity(
+                    owner_id=run.owner_id,
+                    session_id=run.session_id,
+                ),
+                runtime_request.context_identity,
+            )
+            self.assertTrue(
+                runtime_request.checkpoint_context.belongs_to_owner(
+                    run.owner_id
+                )
+            )
 
     async def test_cancel_stops_heartbeat_and_releases_active_lease(self) -> None:
         run = await self._create_run()
@@ -781,10 +841,12 @@ class StaticRuntime:
         self.result = result
         self.events = events
         self.calls = 0
+        self.requests = []
 
     async def run(self, request, *, emit, control) -> RuntimeResult:
-        del request, control
+        del control
         self.calls += 1
+        self.requests.append(request)
         for event in self.events:
             await emit(event)
         return self.result
@@ -854,13 +916,16 @@ class GatedRuntime:
 class PauseThenCompleteRuntime:
     def __init__(self, pause: RuntimeApprovalPause) -> None:
         self.pause = pause
+        self.requests = []
 
     async def run(self, request, *, emit, control):
-        del request, emit, control
+        del emit, control
+        self.requests.append(request)
         return self.pause
 
     async def resume(self, request, *, approval, emit, control):
-        del request, emit, control
+        del emit, control
+        self.requests.append(request)
         if approval.approval_id != self.pause.approval_id:
             raise AssertionError("resume approval does not match the pause")
         return RuntimeResult(status=RunStatus.COMPLETED, answer="approved")

@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from backend.app.agent import (
     CancellationToken,
     RuntimeApprovalPause,
     RuntimeCheckpointContext,
     RuntimeControl,
+    RuntimeContextIdentity,
     RuntimeRequest,
     RuntimeResult,
 )
@@ -20,13 +22,16 @@ from backend.app.context import (
     ContextSummaryResult,
     ContextSystemConstraint,
     RuntimeContextBinding,
+    RuntimeIdentityBindingFactory,
     prepare_context_request,
 )
 from backend.app.domain import Message
-from backend.app.domain.run import RunStatus
+from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.knowledge import Document, InMemoryKnowledgeBase
 from backend.app.memory import ConversationMemory, MemoryFact, MemoryScope
+from backend.app.services import RunCoordinator
 from backend.app.skills import SkillContextBuilder, SkillDefinition
+from backend.app.stores import InMemoryEventStore, InMemoryRunStore
 from backend.app.tools import ToolExecutionContext
 
 
@@ -87,6 +92,10 @@ class ContextRuntimePreparationTest(unittest.TestCase):
             input_text="Use context runtime evidence.",
             execution_context=execution_context,
             checkpoint_context=checkpoint_context,
+            context_identity=RuntimeContextIdentity(
+                owner_id="private-owner",
+                session_id="private-session",
+            ),
         )
 
         prepared = prepare_context_request(
@@ -104,6 +113,7 @@ class ContextRuntimePreparationTest(unittest.TestCase):
         self.assertIs(request.input_text, prepared.request.input_text)
         self.assertIs(execution_context, prepared.request.execution_context)
         self.assertIs(checkpoint_context, prepared.request.checkpoint_context)
+        self.assertIs(request.context_identity, prepared.request.context_identity)
         payload = _payload(prepared.request.prompt_context)
         self.assertEqual(
             {
@@ -163,6 +173,45 @@ class ContextRuntimePreparationTest(unittest.TestCase):
         self.assertNotIn("private-policy-content", rendered)
         self.assertNotIn("private-query-content", rendered)
         self.assertIn("safe-policy-id", rendered)
+
+    def test_runtime_identity_factory_ignores_untrusted_request_fields(
+        self,
+    ) -> None:
+        factory = RuntimeIdentityBindingFactory(
+            system_constraints=(
+                ContextSystemConstraint(
+                    id="policy-v1",
+                    content="private policy",
+                ),
+            )
+        )
+        request = RuntimeRequest(
+            run_id="forged-session-id",
+            input_text="Use session-from-input and owner-from-input.",
+            execution_context=ToolExecutionContext(
+                principal_id="forged-principal",
+            ),
+            context_identity=RuntimeContextIdentity(
+                owner_id="trusted-owner",
+                session_id="trusted-session",
+            ),
+        )
+
+        binding = factory(request)
+
+        self.assertEqual("trusted-owner", binding.owner_id)
+        self.assertEqual("trusted-session", binding.session_id)
+        self.assertEqual(
+            ("policy-v1",),
+            tuple(
+                constraint.id
+                for constraint in binding.system_constraints
+            ),
+        )
+        rendered = repr((factory, binding))
+        self.assertNotIn("trusted-owner", rendered)
+        self.assertNotIn("trusted-session", rendered)
+        self.assertNotIn("private policy", rendered)
 
 
 class ContextAwareRuntimeTest(unittest.IsolatedAsyncioTestCase):
@@ -260,6 +309,27 @@ class ContextAwareRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], binding_factory.requests)
         self.assertEqual([], delegate.calls)
 
+    async def test_missing_runtime_identity_returns_stable_failure(self) -> None:
+        delegate = _CaptureRuntime(
+            RuntimeResult(status=RunStatus.COMPLETED, answer="unused")
+        )
+        runtime = ContextAwareRuntime(
+            delegate,
+            binding_factory=RuntimeIdentityBindingFactory(),
+            collector=_collector(),
+        )
+
+        result = await runtime.run(
+            RuntimeRequest(run_id="missing-identity", input_text="private"),
+            emit=_ignore_event,
+            control=RuntimeControl(CancellationToken()),
+        )
+
+        self.assertEqual(RunStatus.FAILED, result.status)
+        self.assertEqual("context_unavailable", result.failure.code)
+        self.assertEqual([], delegate.calls)
+        self.assertNotIn("private", repr(result))
+
     async def test_cross_owner_context_returns_content_free_failure(self) -> None:
         delegate = _CaptureRuntime(
             RuntimeResult(status=RunStatus.COMPLETED, answer="unused")
@@ -352,6 +422,57 @@ class ContextAwareRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(pause, result)
         self.assertEqual(1, len(delegate.calls))
+
+
+class ContextCoordinatorIdentityTest(unittest.IsolatedAsyncioTestCase):
+    async def test_run_record_identity_drives_real_context_collection(self) -> None:
+        memory = ConversationMemory()
+        memory.append_message(
+            "trusted-session",
+            Message(role="user", content="trusted recent context"),
+        )
+        delegate = _CaptureRuntime(
+            RuntimeResult(status=RunStatus.COMPLETED, answer="context used")
+        )
+        runtime = ContextAwareRuntime(
+            delegate,
+            binding_factory=RuntimeIdentityBindingFactory(),
+            collector=_collector(memory=memory),
+        )
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
+        run = RunRecord.create(
+            run_id="context-coordinator",
+            session_id="trusted-session",
+            owner_id="trusted-owner",
+            runtime="manual",
+            input_text="collect my context",
+            idempotency_key="context-coordinator-key",
+            created_at=datetime(2026, 7, 16, 5, 0, tzinfo=UTC),
+        )
+        await run_store.create(run)
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={"manual": runtime},
+            run_timeout_ms=1_000,
+        )
+
+        result = await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(1, len(delegate.calls))
+        request = delegate.calls[0][0]
+        self.assertEqual(
+            RuntimeContextIdentity(
+                owner_id=run.owner_id,
+                session_id=run.session_id,
+            ),
+            request.context_identity,
+        )
+        self.assertIn("trusted recent context", request.prompt_context)
+        self.assertNotIn(run.owner_id, repr(request))
+        self.assertNotIn(run.session_id, repr(request))
 
 
 class _BindingFactory:

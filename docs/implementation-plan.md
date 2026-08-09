@@ -700,6 +700,15 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 真实 ConversationMemory/InMemoryKnowledgeBase/SkillContextBuilder→collector→Assembler→Fake AgentRuntime 的离线纵切已执行；summary unavailable、跨 owner、脱敏、字段身份和单次 delegate 均有自动化证据。它不是 import-only 或仅 Fake collection 证据，但 delegate 仍是确定性测试替身。
 - 本纵切达到显式离线 E3，M11-T4 保持 `in_progress`：同步适配器尚未接默认 Container，RunCoordinator 也尚未把 RunRecord 的可信 owner/session 传播到 RuntimeRequest。下一纵切先固定该身份合同；不得从 input、tool arguments、principal 或 run ID 推导 session，也不得把同步 PostgreSQL/pgvector 放入事件循环。
 
+#### M11-T4 第四个离线纵切边界
+
+- `ADR-0026` 在 Agent Runtime 层固定冻结、repr-safe 的 `RuntimeContextIdentity(owner_id, session_id)`；它作为 `RuntimeRequest` 末尾可选字段保持直接 Runtime 调用兼容，并与 checkpoint owner 做 fail-closed 一致性校验。
+- `RunCoordinator` 的 execute 与 approval resume 共用路径只从当前 owned `RunRecord.owner_id/session_id` 构造 identity。输入、工具参数、execution principal、模型结果和 run ID 均不能提供或覆盖 Context scope。
+- 新增具体 `RuntimeIdentityBindingFactory`，只把 identity 与应用固定 system constraints 映射为既有 `RuntimeContextBinding`；缺失身份经 `ContextAwareRuntime` 稳定返回 `context_unavailable`，不查询 source、不调用 delegate。
+- 真实 `RunCoordinator -> ContextAwareRuntime -> ConversationMemory/Knowledge/Skill collector -> ContextAssembler -> AgentRuntime delegate` 离线纵切已执行，approved resume 的两次 RuntimeRequest 也都携带同一 RunRecord identity；delegate 仍是确定性测试替身，不是在线模型证据。
+- 新增 7 个关键测试方法或等价覆盖；专项 57 项、共享相关回归 175 项、M1 隔离 10 项通过。因修改跨模块共享 `RuntimeRequest` 合同，完整离线门已触发：后端 542 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。
+- 本纵切达到可信身份传播的显式离线 E3，但 M11-T4 保持 `in_progress`：默认 Container 尚未采用 ContextAwareRuntime，持久 PostgreSQL Memory/pgvector source 仍缺适当 async 边界。下一纵切只迁移默认进程内组合并保持显式 Runtime 注入不变，不进入 M11-T5/M11-T6。
+
 ### M11-T5：持久记忆进入主 Run
 
 - 依赖：M11-T1、M11-T4。

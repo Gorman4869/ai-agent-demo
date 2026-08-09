@@ -7,7 +7,9 @@ import unittest
 from backend.app.agent import CancellationToken, ManualAgentLoop
 from backend.app.agent.manual_runtime import ManualRuntime
 from backend.app.agent.runtime import (
+    RuntimeCheckpointContext,
     RuntimeControl,
+    RuntimeContextIdentity,
     RuntimeEvent,
     RuntimeRequest,
     RuntimeResult,
@@ -56,6 +58,84 @@ class RuntimeContractTest(unittest.TestCase):
         request = RuntimeRequest(run_id="run-1", input_text=secret)
 
         self.assertNotIn(secret, repr(request))
+
+    def test_runtime_context_identity_is_frozen_validated_and_repr_safe(
+        self,
+    ) -> None:
+        owner = "private-owner"
+        session = "private-session"
+        identity = RuntimeContextIdentity(
+            owner_id=owner,
+            session_id=session,
+        )
+        request = RuntimeRequest(
+            run_id="identity-run",
+            input_text="hello",
+            context_identity=identity,
+        )
+
+        self.assertIs(identity, request.context_identity)
+        self.assertNotIn(owner, repr(identity))
+        self.assertNotIn(session, repr(identity))
+        self.assertNotIn(owner, repr(request))
+        self.assertNotIn(session, repr(request))
+        with self.assertRaisesRegex(ValueError, "owner_id"):
+            RuntimeContextIdentity(
+                owner_id="owner with spaces",
+                session_id=session,
+            )
+        with self.assertRaisesRegex(ValueError, "session_id"):
+            RuntimeContextIdentity(
+                owner_id=owner,
+                session_id="session\x00control",
+            )
+
+    def test_runtime_request_rejects_invalid_or_cross_owner_identity(
+        self,
+    ) -> None:
+        checkpoint = RuntimeCheckpointContext.for_run(
+            run_id="identity-run",
+            owner_id="owner-a",
+        )
+
+        with self.assertRaisesRegex(ValueError, "context_identity"):
+            RuntimeRequest(
+                run_id="identity-run",
+                input_text="hello",
+                context_identity=object(),
+            )
+        with self.assertRaisesRegex(ValueError, "checkpoint owner"):
+            RuntimeRequest(
+                run_id="identity-run",
+                input_text="hello",
+                checkpoint_context=checkpoint,
+                context_identity=RuntimeContextIdentity(
+                    owner_id="owner-b",
+                    session_id="session-b",
+                ),
+            )
+
+        request = RuntimeRequest(
+            run_id="identity-run",
+            input_text="hello",
+            checkpoint_context=checkpoint,
+            context_identity=RuntimeContextIdentity(
+                owner_id="owner-a",
+                session_id="session-a",
+            ),
+        )
+        self.assertTrue(
+            request.checkpoint_context.belongs_to_owner(
+                request.context_identity.owner_id
+            )
+        )
+
+    def test_runtime_request_keeps_identity_optional_for_direct_runtimes(
+        self,
+    ) -> None:
+        request = RuntimeRequest(run_id="direct-run", input_text="hello")
+
+        self.assertIsNone(request.context_identity)
 
 
 class ManualRuntimeTest(unittest.IsolatedAsyncioTestCase):

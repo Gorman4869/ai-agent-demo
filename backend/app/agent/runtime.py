@@ -37,6 +37,20 @@ def _require_runtime_identifier(value: str, *, field_name: str) -> str:
     return value
 
 
+def _require_runtime_scope_identifier(
+    value: str,
+    *,
+    field_name: str,
+) -> str:
+    checked = _require_runtime_identifier(value, field_name=field_name)
+    if any(
+        character.isspace() or not character.isprintable()
+        for character in checked
+    ):
+        raise ValueError(f"{field_name} has an invalid format")
+    return checked
+
+
 def _checkpoint_digest(*parts: str) -> str:
     digest = hashlib.sha256()
     for part in parts:
@@ -121,6 +135,38 @@ class RuntimeCheckpointContext:
             f"runtime-thread-v1-{expected_digest}",
         )
 
+    def belongs_to_owner(self, owner_id: str) -> bool:
+        checked_owner_id = _require_runtime_identifier(
+            owner_id,
+            field_name="owner_id",
+        )
+        expected_digest = _checkpoint_digest(
+            "runtime-owner-v1",
+            checked_owner_id,
+        )
+        return hmac.compare_digest(
+            self.owner_scope,
+            f"runtime-owner-v1-{expected_digest}",
+        )
+
+
+@dataclass(frozen=True)
+class RuntimeContextIdentity:
+    """Trusted owner and session identity for application context lookup."""
+
+    owner_id: str = field(repr=False)
+    session_id: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        _require_runtime_scope_identifier(
+            self.owner_id,
+            field_name="context owner_id",
+        )
+        _require_runtime_scope_identifier(
+            self.session_id,
+            field_name="context session_id",
+        )
+
 
 @dataclass(frozen=True)
 class RuntimeRequest:
@@ -143,6 +189,11 @@ class RuntimeRequest:
         repr=False,
         compare=False,
     )
+    context_identity: RuntimeContextIdentity | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         _require_runtime_identifier(self.run_id, field_name="run_id")
@@ -157,6 +208,18 @@ class RuntimeRequest:
                 raise ValueError("checkpoint_context has an invalid format")
             if not self.checkpoint_context.belongs_to(self.run_id):
                 raise ValueError("checkpoint_context does not belong to run_id")
+        if self.context_identity is not None:
+            if not isinstance(self.context_identity, RuntimeContextIdentity):
+                raise ValueError("context_identity has an invalid format")
+            if (
+                self.checkpoint_context is not None
+                and not self.checkpoint_context.belongs_to_owner(
+                    self.context_identity.owner_id
+                )
+            ):
+                raise ValueError(
+                    "context_identity does not match checkpoint owner"
+                )
 
 
 @dataclass(frozen=True)
@@ -341,6 +404,7 @@ __all__ = [
     "RuntimeApprovalPause",
     "RuntimeApprovalResume",
     "RuntimeCheckpointContext",
+    "RuntimeContextIdentity",
     "RuntimeControl",
     "RuntimeEvent",
     "RuntimeEventSink",

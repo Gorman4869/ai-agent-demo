@@ -28,6 +28,7 @@ from .runtime import (
     PreparedContextRequest,
     RuntimeContextBinding,
     RuntimeContextBindingFactory,
+    RuntimeIdentityBindingFactory,
     prepare_context_request,
 )
 
@@ -56,6 +57,7 @@ __all__ = [
     "PreparedContextRequest",
     "RuntimeContextBinding",
     "RuntimeContextBindingFactory",
+    "RuntimeIdentityBindingFactory",
     "default_context_budget_policy",
     "prepare_context_request",
 ]

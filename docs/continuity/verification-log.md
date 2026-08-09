@@ -2723,3 +2723,73 @@
 - `V-20260809-012` 的 adapter 专项 10 项、相关回归 108 项、M1 隔离和显式本地 E3 证据与当前实现、plan、known issue、status、后端规约及 handoff 一致。
 - 第二纵切实现提交已按上一 handoff 固定为 `c0e0b11`；没有发现新的代码/记录漂移。
 - 本记录只关闭第三纵切的文档连续性，不把 M11-T4 提升为 `verified`，也不增加可信 RunRecord identity、默认 Container、PostgreSQL/pgvector、在线摘要、Provider usage/费用或完整全仓门证据。
+
+## V-20260809-014：M11-T4 可信 Runtime Context Identity 纵切
+
+- 任务：`M11-T4 / in_progress`
+- 时间：2026-08-09 14:00，Asia/Shanghai
+- 验证目标：HEAD `93abc08` 上的 M11-T4 第四离线纵切工作区
+- 任务等级：A 类身份与跨模块共享 RuntimeRequest 合同；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用现有 RunRecord、RunCoordinator、Runtime checkpoint、Context collector/Assembler 和进程内 Store；没有新增、安装、升级或删除依赖，没有修改数据库、Settings、HTTP 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `93abc08` 为第三纵切实现提交，前序 `c0e0b11` 等提交连续存在 |
+| 按强制顺序读取 AGENTS、continuity README/status/playbook、M11-T4、ADR-0010/0013/0024/0025、最新 handoff、`V-20260809-012/013` 与后端规约 | 0 | 当前任务和下一动作确认为可信 identity 第四纵切；status 中第三纵切 hash pending 是上一 handoff 明示由本次记录固定的正常提交节奏，没有代码/记录漂移 |
+| `git show --stat 93abc08` 与实际 Runtime/Context 代码复核 | 0 | 第三纵切提交范围与 handoff 一致，没有任务外改动 |
+| handoff Context adapter/collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 恢复集 | 0 | 108 项通过；只有既有 Starlette/httpx 警告 |
+| handoff M1 `python -S` / 修改前连续性 | 0 / 0 | M1 10 项通过；52 个稳定任务、102 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首次 identity/Context/Coordinator 专项 | 1 | 新增真实 Coordinator 纵切 fixture 的 `created_at` 晚于现有 Coordinator 固定时钟，触发既有 `run transition time must not move backwards`；把 fixture 改为既有过去时间后重跑通过，不修改生产逻辑 |
+| 最终 identity/Context/Coordinator 专项 | 0 | 57 项通过；覆盖冻结/格式/repr、可选兼容、checkpoint owner 冲突、可信 factory、缺失身份、Coordinator execute、approval resume 和真实进程内 Context 纵切 |
+| 最终共享相关回归 | 0 | 175 项通过；覆盖 Runtime、Context、Coordinator/quiesce、Skill、LangGraph approval/checkpoint/recovery、三 Runtime 对照、OpenAI Agents、Container 与 PostgreSQL execution composition；只有既有 Starlette/httpx 警告和故障注入日志 |
+| 首次 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 1 | 后端 542 项通过、1 项既有 Windows symlink 能力跳过；Vue `vue-tsc` 因沙箱拒绝写 `frontend/tsconfig.app.tsbuildinfo` 返回 `TS5033/EPERM`，未发现代码或类型错误 |
+| 经授权在沙箱外重跑同一完整离线门 | 0 | 后端 542 项通过、1 项既有 Windows symlink 能力跳过；受控 Code Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建和 Docker Compose 配置全部通过 |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；新增 Agent Runtime 身份对象未破坏 M1 标准库 Loop 导入路径 |
+
+### 实现与风险证据
+
+- `RuntimeContextIdentity` 冻结并隐藏 owner/session repr；`RuntimeRequest` 末尾可选字段保持现有位置参数和无 Context 直接调用。identity 与 checkpoint 同时存在时 owner 摘要必须匹配。
+- RunCoordinator 的 execute 与 approval resume 共用 `_run_runtime()` 构造点，均只从当前 owned RunRecord 构造 identity。自定义 owner/session、伪造 input/run ID/principal 和两次 resume request 均有自动化断言。
+- `RuntimeIdentityBindingFactory` 只映射 identity 和应用固定 system constraints。缺失身份经 ContextAwareRuntime 返回稳定 `context_unavailable`，不调用 delegate；不会从输入、execution principal 或 run ID 猜测 scope。
+- 真实进程内纵切由 Coordinator 驱动 ContextAwareRuntime，读取 `trusted-session` 的 ConversationMemory，经真实 collector/Assembler 把 recent context 写入 RuntimeRequest 后交给 delegate；不是 import-only 或 Fake source 证据。
+- identity 不进入 prompt、事件、checkpoint、相等比较或常规 repr。该对象只承载已由 owned RunRecord 确认的数据范围，不替代认证和 session 所有权校验。
+
+### 未验证范围
+
+- 默认 Container 仍未采用 ContextAwareRuntime，显式 caller-supplied Runtime mapping 未迁移；当前证据不能描述成默认 Agent 或统一 Run 主链已使用完整 Context。
+- 同步 collector 的真实纵切只使用 ConversationMemory/InMemoryKnowledgeBase/SkillContextBuilder。没有执行 PostgreSQL Memory/pgvector context source、在线摘要、Provider、真实模型、Token/usage 或费用验证。
+- ContextAwareRuntime 当前没有 approval `resume()` 包装能力；本纵切证明 Coordinator 向既有 resumable Runtime 的请求传播相同 identity，不证明 Context 在 approval resume 时重新收集或冻结。默认接线前必须单独决定并验证该语义。
+- 首次全量门的 Vue EPERM 是受控沙箱文件写入限制；只有经授权的同命令退出 0 计为完整门通过。没有配置 remote、执行 push、读取真实 Key、访问在线 Provider 或产生费用。
+
+### 结论
+
+- M11-T4 第四纵切达到可信身份传播的显式本地 E3：持久 Run 的 owner/session 可经 Coordinator 进入 RuntimeRequest，并驱动真实进程内 Context collection，同时保持 checkpoint、兼容和脱敏合同。
+- M11-T4 保持 `in_progress`。下一原子动作只让默认进程内 Container Runtime 使用单一 ContextAwareRuntime/collector 组合，替换而非叠加 SkillAwareRuntime，并保持显式 Runtime 注入不变；不接同步 PostgreSQL/pgvector source，不进入 M11-T5/M11-T6。
+
+## V-20260809-015：M11-T4 Runtime Context Identity 连续性闭环
+
+- 任务：`M11-T4 / in_progress`
+- 时间：2026-08-09 14:01，Asia/Shanghai
+- 验证目标：HEAD `93abc08` 上经 `V-20260809-014` 验证的第四纵切工作区与连续性文档
+- 模式：纯本地文档、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1`（handoff 与 ADR 落盘后） | 0 | 52 个稳定任务、104 个 Markdown 通过；M11-T4 in_progress、ADR-0026、新 handoff、plan、verification、known issue 与恢复入口引用可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` | 0 | 13 个已跟踪修改与 2 个新文件路径，合计 15 个任务文件；构建没有留下 dist 或 tsbuildinfo 改动，没有发现任务外改动 |
+| `git diff --stat` 与未跟踪文件复核 | 0 | 已跟踪 Agent/Context/Coordinator、测试、规约和连续性范围符合第四纵切；新 ADR 与 handoff 已单独确认 |
+
+### 结论
+
+- `V-20260809-014` 的专项 57 项、共享相关回归 175 项、M1 隔离 10 项和完整离线门证据与当前实现、ADR、plan、known issue、status、后端规约及 handoff 一致。
+- 第三纵切实现提交已按上一 handoff 固定为 `93abc08`；没有发现新的代码/记录漂移。
+- 本记录只关闭第四纵切的文档连续性，不把 M11-T4 提升为 `verified`，也不增加默认 Container、PostgreSQL/pgvector context source、在线摘要、Provider usage/费用或统一 Run 证据。
