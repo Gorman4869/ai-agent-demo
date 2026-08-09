@@ -51,3 +51,35 @@ class RagTest(unittest.TestCase):
         results = knowledge.search("新的记忆", limit=3)
         self.assertEqual(1, len(results))
         self.assertEqual("new", results[0].citation.source)
+
+    def test_seed_is_idempotent_and_changed_content_replaces(self) -> None:
+        knowledge = InMemoryKnowledgeBase()
+        first = Document(id="seed", title="Seed", source="one", content="Agent 工具")
+        changed = Document(
+            id="seed",
+            title="Seed",
+            source="two",
+            content="Agent 记忆",
+        )
+
+        self.assertEqual(1, knowledge.seed(first))
+        self.assertEqual(1, knowledge.seed(first))
+        self.assertEqual(1, knowledge.seed(changed))
+
+        self.assertEqual((), knowledge.search("工具"))
+        self.assertEqual("two", knowledge.search("记忆")[0].citation.source)
+
+    def test_delete_removes_all_document_chunks(self) -> None:
+        knowledge = InMemoryKnowledgeBase(chunk_size=20, overlap=0)
+        knowledge.add(
+            Document(
+                id="delete",
+                title="Delete",
+                source="delete.md",
+                content="12345678901234567890abcdefghij",
+            )
+        )
+
+        self.assertTrue(knowledge.delete("delete"))
+        self.assertFalse(knowledge.delete("delete"))
+        self.assertEqual((), knowledge.search("abcdefghij"))

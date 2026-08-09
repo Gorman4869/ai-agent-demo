@@ -388,6 +388,8 @@ class ApiTest(unittest.TestCase):
             )
         )
 
+        self.assertEqual(0, knowledge.add_count)
+
         first = client.post("/api/knowledge/demo-seed")
         second = client.post("/api/knowledge/demo-seed")
 
@@ -396,6 +398,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(1, knowledge.add_count)
 
     def test_demo_document_id_cannot_be_overwritten_by_knowledge_editor(self) -> None:
+        seeded = self.client.post("/api/knowledge/demo-seed")
         overwritten = self.client.post(
             "/api/knowledge/documents",
             json={
@@ -411,6 +414,7 @@ class ApiTest(unittest.TestCase):
             json={"question": "Agent 由什么组成？"},
         )
 
+        self.assertEqual(200, seeded.status_code)
         self.assertEqual(409, overwritten.status_code)
         self.assertEqual(
             "course/agent-foundations.md",

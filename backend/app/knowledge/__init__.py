@@ -1,6 +1,7 @@
 from .pgvector import (
     DatabaseConnectionFactory,
     EmbeddingModel,
+    PGVECTOR_DIMENSIONS,
     PgVectorKnowledgeBase,
     create_psycopg_connection_factory,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "EmbeddingModel",
     "InMemoryKnowledgeBase",
     "KnowledgeBase",
+    "PGVECTOR_DIMENSIONS",
     "PgVectorKnowledgeBase",
     "SearchResult",
     "create_psycopg_connection_factory",

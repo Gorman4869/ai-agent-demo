@@ -134,15 +134,9 @@ def create_app(
                 memory=memory,
                 authenticator=authenticator,
             )
-    demo_document_chunk_count = (
-        resolved_container.knowledge_base.add(DEMO_COURSE_DOCUMENT)
-        if resolved_container is not None
-        else None
-    )
-
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        nonlocal resolved_container, demo_document_chunk_count
+        nonlocal resolved_container
         if resolved_container is None:
             assert container is None
             resolved_container = await ApplicationContainer.open(
@@ -153,11 +147,6 @@ def create_app(
             )
             _app.state.container = resolved_container
         try:
-            if demo_document_chunk_count is None:
-                demo_document_chunk_count = resolved_container.knowledge_base.add(
-                    DEMO_COURSE_DOCUMENT
-                )
-            _app.state.demo_document_chunk_count = demo_document_chunk_count
             await resolved_container.start()
             yield
         finally:
@@ -170,7 +159,6 @@ def create_app(
     )
     app.add_middleware(_ApplicationAdmissionMiddleware)
     app.state.container = resolved_container
-    app.state.demo_document_chunk_count = demo_document_chunk_count
 
     def current_container() -> ApplicationContainer:
         current = app.state.container
@@ -371,12 +359,9 @@ def create_app(
         response_model=DocumentResponse,
     )
     def seed_demo_document() -> DocumentResponse:
-        chunk_count = app.state.demo_document_chunk_count
-        if not isinstance(chunk_count, int):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Application is not ready",
-            )
+        chunk_count = current_container().knowledge_base.seed(
+            DEMO_COURSE_DOCUMENT
+        )
         return DocumentResponse(
             id=DEMO_COURSE_DOCUMENT.id,
             chunk_count=chunk_count,

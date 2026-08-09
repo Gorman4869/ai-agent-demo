@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
 from collections import Counter
@@ -36,6 +38,12 @@ class KnowledgeBase(Protocol):
     def add(self, document: Document) -> int:
         """Index a document and return its chunk count."""
 
+    def seed(self, document: Document) -> int:
+        """Idempotently index one application-owned document."""
+
+    def delete(self, document_id: str) -> bool:
+        """Delete one document and return whether it existed."""
+
     def search(self, query: str, *, limit: int = 3) -> tuple[SearchResult, ...]:
         """Return relevant chunks in descending similarity order."""
 
@@ -57,11 +65,13 @@ class InMemoryKnowledgeBase:
         self._chunk_size = chunk_size
         self._overlap = overlap
         self._chunks: list[_IndexedChunk] = []
+        self._document_digests: dict[str, str] = {}
 
     def add(self, document: Document) -> int:
         if not document.content.strip():
             raise ValueError("document content must not be empty")
         chunks = _split_text(document.content, self._chunk_size, self._overlap)
+        digest = _document_digest(document, chunks)
         self._chunks = [
             chunk
             for chunk in self._chunks
@@ -78,7 +88,34 @@ class InMemoryKnowledgeBase:
             self._chunks.append(
                 _IndexedChunk(citation=citation, vector=_vectorize(content))
             )
+        self._document_digests[document.id] = digest
         return len(chunks)
+
+    def seed(self, document: Document) -> int:
+        if not document.content.strip():
+            raise ValueError("document content must not be empty")
+        chunks = _split_text(document.content, self._chunk_size, self._overlap)
+        if self._document_digests.get(document.id) == _document_digest(
+            document,
+            chunks,
+        ):
+            return sum(
+                chunk.citation.document_id == document.id
+                for chunk in self._chunks
+            )
+        return self.add(document)
+
+    def delete(self, document_id: str) -> bool:
+        if not isinstance(document_id, str) or not document_id:
+            return False
+        original_count = len(self._chunks)
+        self._chunks = [
+            chunk
+            for chunk in self._chunks
+            if chunk.citation.document_id != document_id
+        ]
+        self._document_digests.pop(document_id, None)
+        return len(self._chunks) != original_count
 
     def search(self, query: str, *, limit: int = 3) -> tuple[SearchResult, ...]:
         if not query.strip() or limit < 1:
@@ -105,6 +142,21 @@ def _split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
         for start in range(0, len(normalized), step)
         if normalized[start : start + chunk_size]
     ]
+
+
+def _document_digest(document: Document, chunks: list[str]) -> str:
+    canonical = json.dumps(
+        {
+            "id": document.id,
+            "title": document.title,
+            "source": document.source,
+            "chunks": chunks,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _vectorize(text: str) -> Counter[str]:

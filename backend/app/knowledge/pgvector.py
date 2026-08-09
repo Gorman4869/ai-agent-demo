@@ -6,7 +6,19 @@ from contextlib import contextmanager
 from importlib import import_module
 from typing import Callable, Iterator, Protocol, Sequence, cast
 
-from .rag import Citation, Document, SearchResult, _split_text
+from .pgvector_migrations import apply_pgvector_migrations
+from .rag import (
+    Citation,
+    Document,
+    SearchResult,
+    _document_digest,
+    _split_text,
+)
+
+
+PGVECTOR_DIMENSIONS = 3
+PGVECTOR_DOCUMENT_TABLE = "knowledge_documents"
+PGVECTOR_CHUNK_TABLE = "knowledge_chunks"
 
 
 class EmbeddingModel(Protocol):
@@ -19,6 +31,8 @@ class DatabaseCursor(Protocol):
         self,
         query: str,
         parameters: Sequence[object] | None = None,
+        *,
+        prepare: bool | None = None,
     ) -> object: ...
 
     def executemany(
@@ -28,6 +42,8 @@ class DatabaseCursor(Protocol):
     ) -> object: ...
 
     def fetchall(self) -> Sequence[Sequence[object]]: ...
+
+    def fetchone(self) -> Sequence[object] | None: ...
 
     def close(self) -> None: ...
 
@@ -54,7 +70,8 @@ class PgVectorKnowledgeBase:
         embedding_model: EmbeddingModel,
         *,
         dimensions: int,
-        table_name: str = "knowledge_chunks",
+        table_name: str = PGVECTOR_CHUNK_TABLE,
+        document_table_name: str = PGVECTOR_DOCUMENT_TABLE,
         chunk_size: int = 160,
         overlap: int = 30,
     ) -> None:
@@ -64,70 +81,87 @@ class PgVectorKnowledgeBase:
             raise ValueError("chunk_size must be at least 20")
         if overlap < 0 or overlap >= chunk_size:
             raise ValueError("overlap must be between 0 and chunk_size")
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) is None:
-            raise ValueError("table_name must be a simple SQL identifier")
+        for name, value in (
+            ("table_name", table_name),
+            ("document_table_name", document_table_name),
+        ):
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value) is None:
+                raise ValueError(f"{name} must be a simple SQL identifier")
         self._connection_factory = connection_factory
         self._embedding_model = embedding_model
         self._dimensions = dimensions
+        self._table_identifier = table_name
+        self._document_table_identifier = document_table_name
         self._table_name = f'"{table_name}"'
+        self._document_table_name = f'"{document_table_name}"'
         self._chunk_size = chunk_size
         self._overlap = overlap
 
-    def initialize_schema(self) -> None:
-        """Create the pgvector extension and chunk table when explicitly requested."""
-        with self._transaction() as cursor:
-            cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            cursor.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._table_name} (
-                    document_id TEXT NOT NULL,
-                    chunk_index INTEGER NOT NULL,
-                    title TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    excerpt TEXT NOT NULL,
-                    embedding vector({self._dimensions}) NOT NULL,
-                    PRIMARY KEY (document_id, chunk_index)
-                )
-                """
+    def initialize_schema(self) -> tuple[int, ...]:
+        """Apply the fixed, versioned pgvector knowledge migration."""
+        if (
+            self._dimensions != PGVECTOR_DIMENSIONS
+            or self._table_identifier != PGVECTOR_CHUNK_TABLE
+            or self._document_table_identifier != PGVECTOR_DOCUMENT_TABLE
+        ):
+            raise ValueError(
+                "default pgvector migration requires the fixed knowledge schema"
             )
+        with self._transaction() as cursor:
+            return apply_pgvector_migrations(cursor)
 
     def add(self, document: Document) -> int:
-        if not document.content.strip():
-            raise ValueError("document content must not be empty")
-        chunks = _split_text(document.content, self._chunk_size, self._overlap)
-        records: list[Sequence[object]] = []
-        for chunk_index, excerpt in enumerate(chunks):
-            records.append(
-                (
-                    document.id,
-                    chunk_index,
-                    document.title,
-                    document.source,
-                    excerpt,
-                    self._embed(excerpt),
-                )
-            )
+        chunks, digest, records = self._prepare_document(document)
 
         with self._transaction() as cursor:
-            cursor.execute(
-                f"DELETE FROM {self._table_name} WHERE document_id = %s",
-                (document.id,),
-            )
-            cursor.executemany(
-                f"""
-                INSERT INTO {self._table_name} (
-                    document_id,
-                    chunk_index,
-                    title,
-                    source,
-                    excerpt,
-                    embedding
-                )
-                VALUES (%s, %s, %s, %s, %s, %s::vector)
-                """,
-                records,
+            self._replace_document(
+                cursor,
+                document=document,
+                digest=digest,
+                records=records,
             )
         return len(chunks)
+
+    def seed(self, document: Document) -> int:
+        chunks, digest, records = self._prepare_document(document)
+        with self._transaction() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))",
+                ("knowledge-seed", document.id),
+            )
+            cursor.execute(
+                f"""
+                SELECT content_digest, chunk_count
+                FROM {self._document_table_name}
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (document.id,),
+            )
+            current = cursor.fetchone()
+            if current is not None and str(current[0]).strip() == digest:
+                return int(current[1])
+            self._replace_document(
+                cursor,
+                document=document,
+                digest=digest,
+                records=records,
+            )
+        return len(chunks)
+
+    def delete(self, document_id: str) -> bool:
+        if not isinstance(document_id, str) or not document_id:
+            return False
+        with self._transaction() as cursor:
+            cursor.execute(
+                f"""
+                DELETE FROM {self._document_table_name}
+                WHERE id = %s
+                RETURNING id
+                """,
+                (document_id,),
+            )
+            return cursor.fetchone() is not None
 
     def search(self, query: str, *, limit: int = 3) -> tuple[SearchResult, ...]:
         if not query.strip() or limit < 1:
@@ -141,12 +175,14 @@ class PgVectorKnowledgeBase:
                 )
                 SELECT
                     chunk.document_id,
-                    chunk.title,
-                    chunk.source,
+                    document.title,
+                    document.source,
                     chunk.chunk_index,
                     chunk.excerpt,
                     1 - (chunk.embedding <=> query_vector.embedding) AS score
                 FROM {self._table_name} AS chunk
+                JOIN {self._document_table_name} AS document
+                    ON document.id = chunk.document_id
                 CROSS JOIN query_vector
                 ORDER BY
                     chunk.embedding <=> query_vector.embedding,
@@ -178,6 +214,74 @@ class PgVectorKnowledgeBase:
                 )
             )
         return tuple(results)
+
+    def _prepare_document(
+        self,
+        document: Document,
+    ) -> tuple[list[str], str, list[Sequence[object]]]:
+        if not document.content.strip():
+            raise ValueError("document content must not be empty")
+        chunks = _split_text(document.content, self._chunk_size, self._overlap)
+        records: list[Sequence[object]] = []
+        for chunk_index, excerpt in enumerate(chunks):
+            records.append(
+                (
+                    document.id,
+                    chunk_index,
+                    excerpt,
+                    self._embed(excerpt),
+                )
+            )
+        return chunks, _document_digest(document, chunks), records
+
+    def _replace_document(
+        self,
+        cursor: DatabaseCursor,
+        *,
+        document: Document,
+        digest: str,
+        records: list[Sequence[object]],
+    ) -> None:
+        cursor.execute(
+            f"""
+            INSERT INTO {self._document_table_name} (
+                id,
+                title,
+                source,
+                content_digest,
+                chunk_count
+            ) VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                source = EXCLUDED.source,
+                content_digest = EXCLUDED.content_digest,
+                chunk_count = EXCLUDED.chunk_count,
+                updated_at = clock_timestamp()
+            """,
+            (
+                document.id,
+                document.title,
+                document.source,
+                digest,
+                len(records),
+            ),
+        )
+        cursor.execute(
+            f"DELETE FROM {self._table_name} WHERE document_id = %s",
+            (document.id,),
+        )
+        cursor.executemany(
+            f"""
+            INSERT INTO {self._table_name} (
+                document_id,
+                chunk_index,
+                excerpt,
+                embedding
+            )
+            VALUES (%s, %s, %s, %s::vector)
+            """,
+            records,
+        )
 
     def _embed(self, text: str) -> str:
         values = tuple(float(value) for value in self._embedding_model.embed(text))

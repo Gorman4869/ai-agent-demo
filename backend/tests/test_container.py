@@ -260,7 +260,7 @@ class ApplicationContainerTest(unittest.TestCase):
             with self.assertRaises(SettingsError):
                 create_app(knowledge_base=knowledge_base)
 
-        knowledge_base.add.assert_not_called()
+        knowledge_base.seed.assert_not_called()
 
 
 class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
