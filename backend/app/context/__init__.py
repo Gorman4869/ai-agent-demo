@@ -13,19 +13,35 @@ from .assembler import (
     ContextTrust,
     default_context_budget_policy,
 )
+from .collector import (
+    CollectedContext,
+    ContextCollectionError,
+    ContextCollectionInput,
+    ContextSourceCollector,
+    ContextSummarizer,
+    ContextSummaryResult,
+    ContextSystemConstraint,
+)
 
 __all__ = [
+    "CollectedContext",
     "ContextAssembler",
     "ContextAssembly",
     "ContextAssemblyError",
     "ContextBudgetPolicy",
     "ContextBudgetReport",
+    "ContextCollectionError",
+    "ContextCollectionInput",
     "ContextDecisionReason",
     "ContextFragment",
     "ContextFragmentDecision",
     "ContextSource",
+    "ContextSourceCollector",
     "ContextSourceBudget",
     "ContextSourceUsage",
+    "ContextSummarizer",
+    "ContextSummaryResult",
+    "ContextSystemConstraint",
     "ContextTrust",
     "default_context_budget_policy",
 ]

@@ -2580,3 +2580,75 @@
 - `V-20260809-008` 的 88 项相关回归、M1 隔离和本地 E3 证据与当前实现、plan、ADR、known issue、status、后端规约及 handoff 一致。
 - `KI-025` 已按“先登记漂移再修正”关闭；M11-T3 实现锚点固定为 `02664b8`，恢复入口已切到 M11-T4 第一纵切。
 - 本记录只关闭第一纵切的文档连续性，不把 M11-T4 提升为 `verified`，也不增加在线模型、真实 Store 来源收集、Provider token/费用、完整全仓门或 Runtime/Container 接线证据。
+
+## V-20260809-010：M11-T4 Context source collector 离线纵切
+
+- 任务：`M11-T4 / in_progress`
+- 时间：2026-08-09 13:11，Asia/Shanghai
+- 验证目标：HEAD `9b052c2` 上的 M11-T4 第二离线纵切工作区
+- 任务等级：B 类确定性 source adapter；时间盒 30–90 分钟
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用现有同步 MemoryStore、KnowledgeBase、SkillContextBuilder 与标准库 ContextAssembler；没有新增、安装、升级或删除依赖，没有修改 Store/Runtime/Container/数据库/构建或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `9b052c2` 为第一纵切实现提交，前序 M11-T3 提交连续存在 |
+| 按强制顺序读取 AGENTS、continuity README/status/playbook、M11-T4/M10-T3、ADR-0010/0013/0024/0025、最新 handoff、`V-20260809-008/009` 与后端规约 | 0 | 当前任务和下一动作确认为 M11-T4 第二离线纵切；status 中第一纵切 hash pending 是 handoff 明示由本次记录固定的正常提交节奏，不是未登记漂移 |
+| `git show --stat 9b052c2` 与实际 context 代码复核 | 0 | 第一纵切 10 个文件与 handoff 一致，没有任务外改动或代码/记录冲突 |
+| handoff Context/Runtime/Skill/Memory/RAG/M10-T3/Container 恢复集 | 0 | 88 项通过；只有既有 Starlette/httpx 警告和 asyncio 慢任务诊断 |
+| handoff M1 `python -S` / 修改前连续性 | 0 / 0 | M1 10 项通过；52 个稳定任务、100 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `python -m unittest backend.tests.test_context_collector -v` | 0 | 10 个关键测试方法通过；真实三来源、空来源、summary unavailable、跨 owner、RAG 注入、稳定 ID/ordinal、长历史事实保留、Skill 失败、非法来源和脱敏均执行 |
+| 首轮 collector + 第一纵切相关回归 | 0 | 98 项通过；新 collector 与既有 Context/Runtime/Skill/Memory/RAG/M10-T3/Container 合同兼容 |
+| 聚焦自审 | 0 | 发现 Memory/Knowledge 返回值的 `TypeError` 捕获范围包含方法调用，可能误吞程序错误；已把捕获缩到 iterable 转换，并补内部 TypeError 继续传播的等价覆盖。没有剩余阻断问题 |
+| 最终 collector 专项 | 0 | 10 项通过 |
+| 最终 Context collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 定向集 | 0 | 98 项通过；只有既有 Starlette/httpx 警告与 asyncio 慢任务诊断，没有失败或新增 skip |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；新 collector 未进入 M1 标准库 Loop 顶层导入路径 |
+
+### 实现与风险证据
+
+- `ContextCollectionInput` 显式分离 server-owned owner/session/query/system constraints；owner/session/query 与 system policy 内容隐藏 repr，稳定 constraint ID 可见。最多 16 条 system constraint、8,000 字符 query 和 1–16 条 RAG 结果均有本地边界。
+- collector 实际调用 MemoryStore messages/facts、KnowledgeBase search 和 SkillContextBuilder build。fact owner 在任何 Knowledge/Skill 查询前完整校验；错误时没有部分 collection、owner、fact value 或 query 泄漏。
+- message、fact、citation 和 Skill 使用来源前缀加 SHA-256 的版本化报告 ID；recent ordinal 保留 Store 顺序，RAG ordinal 保留检索排名。内容使用确定性 JSON 或既有 Skill fragment，并继续由 Assembler 固定 trust/排序/预算。
+- `ContextSummaryResult` 显式表达有摘要、无摘要与 unavailable；本纵切没有摘要模型。Unavailable 只标记 summary source，不恢复 ConversationMemory 窗口外历史。
+- 长历史固定测试通过真实 ConversationMemory→collector→Assembler，预算只保留最新两条 recent，同时 approved `preferred_language=Chinese` fact 仍被选择；这证明确定性工程保留，不证明语义或在线模型质量。
+- 恶意 RAG citation 经 InMemoryKnowledgeBase 实际检索、collector 二层 JSON 和 Assembler 外层 JSON 后仍为 `untrusted_evidence`；只有 server system constraint 为 `trusted_policy`。
+
+### 未验证范围与全量门说明
+
+- Collector 仍是同步显式对象，尚未生成 RuntimeRequest、调用 AgentRuntime 或接入默认 Container；M11-T4 保持 `in_progress`。
+- ConversationMemory、InMemoryKnowledgeBase 和真实 SkillContextBuilder 只提供离线 E3。没有运行 PostgreSQL Memory/pgvector、真实摘要模型、Provider、在线网络、Token/usage 或费用。
+- MemoryStore messages 只有 session scope，collector 无法从 Message 验证 owner；session→owner 必须由后续可信 Runtime/应用调用方绑定。Fact 自带 owner 并已 fail closed 校验。
+- 本纵切新增独立 collector 合同和导出，但没有修改既有共享协议、依赖、数据库、构建或跨前后端接口；98 项相关回归和 M1 隔离覆盖修改面，因此按交付协议未运行 `scripts/verify.ps1`、Vue/MCP 构建或真实数据库集成。
+- 没有配置 remote、执行 push、读取真实 Key、访问在线模型或产生费用。
+
+### 结论
+
+- M11-T4 第二纵切达到本地 E3：真实同步 Memory/RAG/Skill source 形状可从可信输入收集为 owner-safe fragments，并由既有 Assembler 解释选择结果。
+- M11-T4 保持 `in_progress`。下一原子动作只实现显式 Context-aware Runtime request adapter，绑定 server-owned owner/session/query/system input，保留原 RuntimeRequest 安全字段并 fail closed 处理已有 prompt_context；不接默认 Container，不进入 M11-T5/M11-T6。
+
+## V-20260809-011：M11-T4 Context source collector 连续性闭环
+
+- 任务：`M11-T4 / in_progress`
+- 时间：2026-08-09 13:11，Asia/Shanghai
+- 验证目标：HEAD `9b052c2` 上经 `V-20260809-010` 验证的第二纵切工作区与连续性文档
+- 模式：纯本地文档、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、101 个 Markdown 通过；M11-T4 in_progress、新 handoff、plan、verification、known issue 与恢复入口引用可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` | 0 | 6 个已跟踪修改与 3 个新文件路径，合计 9 个任务文件；没有发现任务外改动 |
+| `git diff --stat` 与未跟踪文件复核 | 0 | 已跟踪导出、规约和连续性范围符合第二纵切；新 collector、测试与 handoff 均已单独确认 |
+
+### 结论
+
+- `V-20260809-010` 的 collector 专项 10 项、相关回归 98 项、M1 隔离和本地 E3 证据与当前实现、plan、known issue、status、后端规约及 handoff 一致。
+- 第一纵切实现提交已按上一 handoff 固定为 `9b052c2`；没有发现新的代码/记录漂移。
+- 本记录只关闭第二纵切的文档连续性，不把 M11-T4 提升为 `verified`，也不增加 Runtime/Container、PostgreSQL/pgvector、在线摘要、Provider usage/费用或完整全仓门证据。

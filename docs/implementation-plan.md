@@ -684,6 +684,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 10 个关键测试方法或等价覆盖；Context/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 88 项和 M1 隔离 10 项通过。没有修改共享 Runtime、Container、Store、依赖、构建或跨前后端接口，因此不重复完整全仓门。
 - 本纵切达到本地 E3，但 M11-T4 保持 `in_progress`：尚未从真实 MemoryStore/KnowledgeBase/SkillBuilder 收集来源，也未接入默认 Runtime/Container 或完成最终长对话主链验收。
 
+#### M11-T4 第二个离线纵切边界
+
+- 新增显式 `ContextSourceCollector`、服务端 `ContextCollectionInput`、owner 绑定的 `CollectedContext` 与可注入 `ContextSummaryResult` 协议；没有修改现有 MemoryStore、KnowledgeBase、SkillContextBuilder、RuntimeRequest 或 Container 合同。
+- collector 实际调用 `MemoryStore.messages()`/`facts()`、`KnowledgeBase.search()` 与 `SkillContextBuilder.build()`，把消息顺序、fact ID/owner、citation 排名和 Skill 快照映射为来源版本化摘要 ID，再通过现有 ContextAssembler 完成确定性组装。
+- fact owner 在任何 Knowledge/Skill 查询前完整校验；摘要 unavailable 只进入来源可用性报告，不恢复 Store 窗口外历史。RAG 指令保持 `untrusted_evidence`，owner/session/query/content 不进入 repr 或预算报告。
+- 新增 10 个关键测试方法或等价覆盖；collector 专项 10 项、Context/Runtime/Skill/Memory/RAG/M10-T3/Container 相关 98 项和 M1 隔离 10 项通过。没有依赖、数据库、构建、既有共享协议或跨前后端接口变化，因此不重复完整全仓门。
+- 本纵切达到本地 E3，但 M11-T4 保持 `in_progress`：同步 collector 尚未进入显式 Runtime request preparation 或默认 Container，session 与 owner 的绑定仍由可信调用方保证；在线摘要、PostgreSQL fact 主链和最终统一 Run 不在本纵切证据内。
+
 ### M11-T5：持久记忆进入主 Run
 
 - 依赖：M11-T1、M11-T4。
