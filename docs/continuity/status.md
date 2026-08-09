@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-08-08，Asia/Shanghai
+- 更新时间：2026-08-09，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`be2c818`
+- 最近已确认实现提交：`7ebaa16`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -34,6 +34,7 @@
 - M11-T1 第八纵切验证基线提交：`acd4f40`；实现提交：`2e94640`
 - M11-T1 第九纵切验证基线提交：`0c30a28`；实现提交：`bffeab7`
 - M11-T1 第十纵切验证基线提交：`1e867bc`；实现提交：`be2c818`
+- M11-T2 验证基线提交：`41871c4`；实现提交：`7ebaa16`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -41,14 +42,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M11-T2` |
+| 任务 ID | `M11-T3` |
 | 状态 | `planned` |
-| 目标 | 在真实 PostgreSQL/pgvector 中完成文档、切片、向量维度、索引、增删改与相似度检索闭环 |
-| 设计依据 | 实施计划 M11-T2、`ADR-0001`、M11-T1 已验收 persistence/application lifecycle，以及现有 `PgVectorKnowledgeBase` 边界 |
+| 目标 | 建立确定性离线与显式在线 Embedding Adapter、批处理、重试、缓存键和维度元数据合同 |
+| 设计依据 | 实施计划 M11-T3、M8-T1 模型边界、`ADR-0023` 与 M11-T2 已验收 pgvector schema/CRUD/seed 合同 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T1 已由第十纵切完成验收：显式 persistence gate、PostgreSQL async Container open、FastAPI lifespan、完整 ASGI/command admission、Approval/Memory async façade 与 startup/shutdown rollback/顺序；实现提交 `be2c818` |
-| 前置证据 | `V-20260808-013`、`ADR-0022`、M11-T1 前九纵切 verification/ADR，以及实现提交 `be2c818` |
-| 下一动作 | 进入 M11-T2 的首个 A 类设计/实现纵切：先审计现有 `PgVectorKnowledgeBase`、PostgreSQL image/extension 与表/索引契约，新增 ADR 后只实现真实 pgvector migration + 最小 CRUD/相似度检索测试；默认离线、不得安装依赖或执行在线 Embedding |
+| 当前修改 | M11-T2 已完成独立 knowledge migration、`vector(3)`/cosine HNSW、事务 CRUD、显式摘要 seed、integration Compose 与真实 pgvector 证据；实现提交 `7ebaa16` |
+| 前置证据 | `V-20260809-001/002`、`ADR-0023`、实现提交 `7ebaa16`，以及 M11-T1 `V-20260808-013/014` |
+| 下一动作 | 进入 M11-T3 首个原子纵切：先审计现有 Embedding/模型 adapter 与 `PgVectorKnowledgeBase` 调用边界，用 ADR 固定批次、维度、重试、缓存键和在线授权所有权；首步只交付确定性离线 Embedding + 批次/维度元数据最小纵切，不读取 Key、不执行在线调用 |
 
 ## 里程碑状态
 
@@ -59,19 +60,23 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 十个 PostgreSQL 纵切已 `verified`：Store/checkpoint、ToolExecution、lease/recovery、composition/quiesce、sync bridge 与默认 opt-in Container/FastAPI application lifecycle 均有真实数据库和完整门证据；M11-T2 以后任务尚未完成 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 PostgreSQL persistence/application lifecycle 与 M11-T2 真实 pgvector schema/CRUD/seed 均已 `verified`；Embedding、ContextAssembler、记忆 API、固定 RAG 评测与在线冒烟仍由 M11-T3–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- Docker Engine 与本地 PostgreSQL 17.10 测试容器在本轮恢复后健康运行；这不是持续可用或生产部署证据，后续会话仍须先检查实际状态。
+- Docker Engine、M11-T1 PostgreSQL 17.10 容器和 M11-T2 `pgvector/pgvector:0.8.1-pg17` integration 容器在本轮结束前健康运行；这不是持续可用或生产部署证据，后续会话仍须先检查实际状态。
 - 真实模型在线冒烟测试尚未获得单次执行授权；不阻塞离线实现与测试。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
 ## 未验证范围
 
+- M11-T2 见 `V-20260809-001`：提交后知识/API 定向 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项和 M1 隔离 10 项通过；完整离线门最终后端 470 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 与主 Compose 配置通过。实现提交为 `7ebaa16`。
+- 完整门首轮在后端阶段遇到一次既有 TypeScript MCP 5 秒 startup timeout；单独 E2E 4 项在 0.943 秒通过，同一完整门从头重跑后退出 0。另一次提交前完整后端回归曾出现 lease timing 单项失败，单项和串行完整后端随后均通过；失败事实保留在 verification。
+- M11-T2 使用确定性三维课程 Embedding，只证明本地 schema、SQL、事务与检索闭环，不证明 Provider Embedding、批处理/缓存、Token/账单、线上质量或固定 RAG 指标；`KI-006` 只降为 mitigated。
+- integration Compose 只绑定 localhost 并使用 trust/tmpfs；不是默认 ApplicationContainer 接线、主 Compose、生产鉴权、TLS、持久卷、备份、高可用或容量证据。固定 image 的首次下载已获用户明确授权；没有读取 Key、执行在线模型或产生付费调用。
 - M11-T1 第十纵切见 `V-20260808-013`：真实 PostgreSQL 91 项、受影响定向 98 项、最终完整门后端 463 项通过且 1 项既有 Windows symlink 跳过，M1 隔离 10 项通过；实现提交为 `be2c818`，提交后 63 项默认路径与 2 项真实 PostgreSQL application 专项再次通过。
 - 默认仍是 memory；只有显式 `AI_AGENT_PERSISTENCE=postgres` 才在 FastAPI lifespan 打开数据库。旧 Run HTTP/SSE 仍是 legacy `InMemoryRunService` 且不双写，统一 durable Run/审批/取消/事件 API 属于 M12。
 - application async 路径只使用 Approval/Memory façade，并由共享 ASGI/command admission 排空；显式同步 compatibility 调用仍不受 bridge 追踪。Windows PostgreSQL host 还需在 loop 创建前选择 Selector policy；本地 trust/tmpfs 证据不是生产部署或外部副作用 exactly-once。
@@ -95,7 +100,7 @@
 - M11-T1 第四纵切见 `V-20260803-005`：内存 lease/recovery 13 项、完整真实 PostgreSQL 76 项、受影响 Run/Store/Coordinator/LangGraph 131 项和 M1 隔离 7 项通过；最终完整门后端 394 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
 - 四个 PID 不同的 probe 进程证明持有 execution lease 的进程以 17 退出后，两个 scanner 竞争同一过期记录时只有一个恢复者；审计进程读取到 running ToolExecution=unknown、pending=cancelled、Run=`run_orphaned` 且租约已释放。后续默认 application lifecycle 已调度同一 scanner，但该 probe 仍只证明本地数据库仲裁，不证明外部副作用 exactly-once。
 - PostgreSQL 只保存 lease token SHA-256，过期判断使用数据库时钟；heartbeat/release 绑定未过期 token/version 和 Run 状态。ToolExecution、Run/Event 和 lease release 仍是分离事务，真实触发器故障证明中间状态可由下一次扫描收敛，但收敛前可能短暂观察到工具已终态而 Run 仍 running。
-- 第四纵切当时没有 Coordinator heartbeat、supervisor、统一 composition 或同步 Approval/Memory async 边界；后续第五至第十纵切已补这些能力及默认 opt-in Container/lifespan。生产数据库能力和 M11-T2 pgvector 仍未完成；`KI-023` 已关闭，`KI-004`、`KI-016` 保持 mitigated。
+- 第四纵切当时没有 Coordinator heartbeat、supervisor、统一 composition 或同步 Approval/Memory async 边界；后续第五至第十纵切已补这些能力及默认 opt-in Container/lifespan，M11-T2 又补真实 pgvector 最小闭环。生产数据库能力仍未完成；`KI-023` 已关闭，`KI-004`、`KI-016` 保持 mitigated。
 - 第四纵切完整门沙箱首轮在后端 393 项、Code Agent 和依赖通过后因 Vue `tsconfig.app.tsbuildinfo` 写入 `TS5033`/`EPERM` 退出 1；相同脚本获批后退出 0。锁序复审补两项合同后，最终完整门以后端 394 项再次退出 0；仍有一条既有 `StarletteDeprecationWarning`。
 - M11-T1 第三纵切见 `V-20260803-003`：内存/PostgreSQL 各 10 项 ToolExecution 共同合同、完整 PostgreSQL 65 项、受影响 Run/Coordinator/LangGraph 108 项、M1 隔离 7 项通过；完整门后端 381 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
 - 三个 PID 不同的 probe 进程证明 terminal commit 后进程以 17 退出且未发送完成确认时，新进程能读取 completed 并按幂等键 replay；同一批中遗留 running 记录只能显式转为 terminal unknown。它证明本地数据库仲裁，不证明外部工具副作用与数据库 exactly-once。
@@ -104,7 +109,7 @@
 - M11-T1 第二纵切见 `V-20260803-001`：真实 PostgreSQL Approval/Memory/Run/Event/checkpointer 集成 53 项、受影响 Runtime/API/Container 回归 80 项、M1 隔离 7 项通过；最终完整门后端 371 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 和 Compose 配置通过。
 - 第二纵切的两个 PID probe 已恢复私有审批参数、完成决议与单次 grant 消费，并恢复消息和长期事实；probe 只输出 ID、计数和布尔结果。`V-20260808-013` 已把 async façade 注入默认 opt-in Container 和记忆 HTTP，但 M10 审批 Runtime/ContextAssembler 与统一 Run API 尚未迁移。
 - 为兼容既有同步 ToolRegistry，PostgreSQL Approval/Memory 使用共享同步 pool，Run/Event/checkpoint 继续使用异步 pool；它们共享 DSN 和生命周期但不共享事务。`V-20260808-011` 已验证 bridge，`V-20260808-013` 已完成默认 application façade 接线；跨 pool 原子性与 exactly-once 仍未验证。
-- `0002` 私有参数和记忆为本地课程数据库中的明文 JSON/text；没有应用层加密、生产 TLS、备份、密钥管理或数据保留证据。默认 Container 已由第十纵切接入，M11-T1 为 `verified`；M11-T2 pgvector 尚未实现。
+- `0002` 私有参数和记忆为本地课程数据库中的明文 JSON/text；没有应用层加密、生产 TLS、备份、密钥管理或数据保留证据。默认 Container 已由第十纵切接入，M11-T1 为 `verified`；M11-T2 已完成独立 pgvector 最小闭环，但未改变这些生产缺口。
 - 第二纵切完整门沙箱首轮在当时后端 370 项、受控 Code Agent 和依赖检查通过后，因 Vue `tsconfig.app.tsbuildinfo` 写入 `TS5033`/`EPERM` 退出 1；相同脚本获批后退出 0。聚焦复审补一项授权伪造合同后，最终完整门以后端 371 项再次退出 0。后端仍有一条既有 `StarletteDeprecationWarning`。
 - M11-T1 首个纵切见 `V-20260722-009`：真实 PostgreSQL migration/Run/Event/checkpointer 集成 35 项、受影响 Store/Coordinator/LangGraph 回归 71 项、M1 隔离 7 项和完整发布门通过；发布门后端 354 项通过、1 项既有 Windows symlink 能力跳过。
 - 首个纵切的两个 PID 已通过官方 AsyncPostgresSaver 恢复同一可信 thread，但没有验证数据库容器重启、跨主机、同 thread 并发写、多进程终态竞争或生产容量。后续九个纵切已补其余 Store、lease/recovery 与默认 application lifecycle；统一 durable HTTP 仍由 M12 承接。
@@ -147,4 +152,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-08-m11-t1-postgres-application-lifecycle.md`，再核对 `V-20260808-014`、`V-20260808-013`、`ADR-0022`、实施计划 M11-T1/M11-T2 和实际 application lifecycle/composition/async facade/PostgreSQL adapters。先确认 Docker 与本地测试容器状态，再按 handoff 重跑 PostgreSQL 91 项、提交后默认路径 63 项、真实 application 专项 2 项、M1 10 项和连续性检查；若一致，不要重做 M11-T1 十个纵切，下一步只进入 M11-T2 首个真实 pgvector 原子纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git、新增部署配置或执行在线 Embedding。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t2-real-pgvector.md`，再核对 `V-20260809-001/002`、`ADR-0023`、实现提交 `7ebaa16`、实施计划 M11-T2/M11-T3 和实际 knowledge migration/PgVector/seed/integration Compose。先确认 Docker 与两个本地测试容器状态，再按 handoff 重跑知识/API 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项、M1 10 项和连续性检查；若一致，不要重做 M11-T1/M11-T2，下一步只进入 M11-T3 的离线 Embedding 最小纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M12/M13。

@@ -630,6 +630,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：真实容器中插入、替换、删除、相似度查询、维度错误和事务回滚。
 - 验收：不再以 Fake Connection 作为向量数据库完成证据；M11 不提前把数据库生产化到主 Compose，M13 再完成密钥、健康检查和部署整合。
 
+#### M11-T2 真实纵切与任务验收结果
+
+- `ADR-0023` 固定独立 knowledge migration 命名空间、`knowledge_documents`/`knowledge_chunks`、课程 `vector(3)`、cosine `<=>` 与 HNSW `vector_cosine_ops`；M11-T1 的 vanilla PostgreSQL migration 和主 Compose 均未修改。
+- `PgVectorKnowledgeBase` 通过版本化 migration 显式建表，文档 replace、级联 delete、相似度 search 与摘要 seed 均使用事务。FastAPI import、`create_app()` 和 lifespan 不再隐式写 Demo；只有固定 `/api/knowledge/demo-seed` 命令触发幂等 seed。
+- 固定 `pgvector/pgvector:0.8.1-pg17` 的 localhost-only integration Compose 实际执行 extension/schema/index 检查、插入、替换、删除、相似度查询、同摘要不重写、维度错误和旧内容回滚；4 项真实数据库测试通过，不再把 Fake Cursor 当完成证据。
+- 共享 KnowledgeBase/HTTP 行为变化触发完整离线门：最终后端 470 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 与主 Compose 配置通过。M11-T1 PostgreSQL 91 项和 M1 隔离 10 项也通过。
+- M11-T2 更新为 `verified`。该结论不包含在线 Embedding、批处理/缓存、固定 RAG 指标、默认 Container pgvector 接线或生产部署；下一原子任务为 M11-T3。
+
 ### M11-T3：Embedding Adapter 与批处理
 
 - 依赖：M8-T1、M11-T2。

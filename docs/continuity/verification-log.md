@@ -2207,3 +2207,95 @@
 - M11-T1 的 implementation plan、ADR、backend standards、known issue、status、verification 和最新 handoff 已固定第十纵切与任务验收事实；恢复入口指向实现提交 `be2c818`、`V-20260808-013/014` 与 `ADR-0022`。
 - 本步骤没有代码或行为变化，因此没有重复运行业务测试或完整门；PostgreSQL 91 项、定向 98 项、最终完整门后端 463 项与 1 项既有 Windows symlink 跳过、M1 10 项，以及提交后 63+2 项继续引用 `V-20260808-013`。
 - 当前任务为 `M11-T2 / planned`。下一条原子动作只做真实 pgvector migration 与最小 CRUD/相似度检索纵切；不重做 M11-T1，不安装依赖，不执行在线 Embedding，不进入 M11-T3/M12。
+
+## V-20260809-001：M11-T2 真实 pgvector 文档与检索闭环
+
+- 任务：`M11-T2 / verified`
+- 时间：2026-08-09，Asia/Shanghai
+- 验证目标：基线 HEAD `41871c4` 上的 M11-T2 工作区；实现提交 `7ebaa16`（`feat: add real pgvector knowledge store`）
+- 任务等级：A 类数据库 extension、版本化 schema、事务替换与启动副作用边界；时间盒 2–4 小时
+- 模式：默认离线 E3 与本地真实 pgvector E3；没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除 Python/Node 依赖；固定 Docker image `pgvector/pgvector:0.8.1-pg17` 仅在用户明确授权后下载，digest `sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21`
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `41871c4`，M11-T1 实现 `be2c818` 与文档锚点存在 |
+| `docker exec ai-agent-demo-m11-postgres-1 pg_isready ...` | 0 | M11-T1 本地 PostgreSQL 测试数据库 accepting connections |
+| 设置测试 DSN 后 `backend.tests.postgres_store_integration -q` | 0 | 修改前真实 PostgreSQL 91 项通过；不可达数据库负向用例保留预期 pool timeout |
+| Settings/lifecycle/Container/API 恢复集 | 0 | 修改前默认路径 63 项通过；仅有既有 Starlette/httpx 弃用警告 |
+| 真实 PostgreSQL application 专项 | 0 | 修改前 2 项通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、92 个 Markdown 通过 |
+
+### 授权与环境证据
+
+| 操作 | 结果 | 说明 |
+| --- | --- | --- |
+| 首次申请 `docker pull pgvector/pgvector:0.8.1-pg17` | 未执行 | 当时没有本轮明确下载授权，审批拒绝；没有绕过权限或改用浮动 image |
+| 用户明确回复授权后执行固定 image pull | 退出 0 | 下载固定 tag 并记录 digest；没有下载 Python/Node 包 |
+| `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 退出 0 | localhost `55433`、trust/tmpfs integration 容器进入 healthy；后续不隐式 pull |
+| `docker compose -f deploy/compose.integration.yaml config --quiet` | 退出 0 | 新增 integration Compose 最终配置解析通过，主 `deploy/compose.yaml` 未修改 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮知识/PgVector/RAG/API/Container 聚焦集 | 0 | 53 项通过；迁移、SQL 参数、摘要 seed、启动零写入和 API 行为通过 |
+| 补迁移 checksum/history 失败合同后的聚焦集 | 0 | 55 项通过；失败 migration 回滚且不标记版本 |
+| 设置 `AI_AGENT_TEST_PGVECTOR_DSN` 后 `backend.tests.pgvector_integration -v` | 0 | 4 项真实 pgvector 通过：extension/schema/HNSW、插入/替换/删除/检索、同摘要不重写、维度错误与旧内容回滚 |
+| 提交前首轮完整 backend discover | 1 | 当时 468 项中 `test_unknown_start_commit_keeps_reservation_for_recovery` 单项时序断言失败，预期 claim 1 实得 0；没有修改生产行为 |
+| 单独重跑上述 lease 用例 / 串行重跑完整 backend discover | 0 / 0 | lease 用例通过；补完最终测试后完整后端 470 项通过、1 项既有 Windows symlink 跳过 |
+| 不落盘 `compile()` / `git diff --check` / `git diff --cached --check` | 0 / 0 / 0 | 修改 Python 语法通过，无 whitespace 错误；两处 EOF 空行在提交前移除，只有既有 LF/CRLF 提示 |
+| `git commit -m "feat: add real pgvector knowledge store"` | 0 | 13 个实现、migration、测试、integration Compose 与 ADR 文件固定为提交 `7ebaa16` |
+| 提交后知识/PgVector/RAG/API/Container 聚焦集 | 0 | 55 项再次通过；保留一条既有 Starlette/httpx 弃用警告 |
+| 提交后真实 pgvector integration | 0 | 4 项再次通过，实际连接 localhost `55433` 的 vector extension 数据库 |
+| 提交后完整 M11-T1 PostgreSQL 集 | 0 | 91 项通过，证明独立 knowledge migration 未污染 `app_schema_migrations`；不可达数据库 timeout 为预期负向输出 |
+| 提交后 M1 `python -S` 隔离 | 0 | 10 项通过，pgvector/psycopg 路径未进入 M1 标准库边界 |
+| 首轮 `scripts/verify.ps1` | 1 | 后端 470 项中 TypeScript MCP E2E 单项在 5 秒内 startup timeout，1 项既有 Windows symlink 跳过；门在后端阶段停止 |
+| 单独 `backend.tests.test_mcp_client_e2e -v` | 0 | 4 项在 0.943 秒通过；没有放宽 timeout 或修改 MCP 生产代码 |
+| 第二轮 `scripts/verify.ps1` | 0 | 后端 470 项通过、1 项既有 Windows symlink 跳过；Code Agent、`pip check`、Vue、MCP TypeScript 与主 Compose 配置全部通过 |
+
+### 实现与风险证据
+
+- Knowledge schema 使用独立 `backend/knowledge_migrations`、advisory transaction lock 和 checksum history，不强迫 M11-T1 的 vanilla PostgreSQL Run Store安装 vector extension。
+- migration 实际创建 `knowledge_documents`、外键级联的 `knowledge_chunks.embedding vector(3)` 与 HNSW `vector_cosine_ops`。查询使用 cosine `<=>`，并用 document ID/chunk index 固定同距排序。
+- `add()` 在同一事务 upsert 文档、删除旧切片并插入新向量；真实维度错误证明整个 replacement 回滚，旧 title/source/chunk 仍可检索。`delete()` 通过文档外键级联并返回实际存在性。
+- `seed()` 用 server-owned 文档摘要和 transaction advisory lock 跳过同内容数据库重写。FastAPI import、`create_app()` 与 lifespan 不再写 knowledge Store，只有固定 demo seed 端点显式触发；任意文档 API 仍不能覆盖保留 ID。
+- Fake Cursor 55 项只作为参数、错误分支和领域映射证据；M11-T2 的完成结论来自独立真实 pgvector 4 项和完整门，不把 import、extension presence 或 Mock 描述成真实检索。
+
+### 未验证范围
+
+- 三维 `_KeywordEmbedding` 是确定性本地测试 fixture，不是 Provider Embedding。批处理、重试、缓存键、维度元数据、在线授权、usage/费用和真实模型质量属于 M11-T3/M11-T7。
+- 相同 seed 已证明不重写数据库 row/chunk，但当前适配器在摘要比较前仍计算确定性切片向量；没有把这描述成在线 Embedding 缓存或零 Provider 调用，后续由 M11-T3 固定缓存/批处理所有权。
+- 没有固定不少于 50 条查询的 Recall@K、MRR 或回答依据正确率；`KI-006` 只降为 mitigated，最终关闭仍需 M11-T6。
+- PgVector adapter 尚未接入默认 `ApplicationContainer` persistence selector。integration Compose 只绑定 localhost 并使用 trust/tmpfs，不是主 Compose、生产鉴权、TLS、持久卷、备份、高可用、容量或灾备证据。
+- 首轮完整门 MCP startup timeout 与提交前 lease 时序失败均在独立/串行重跑通过，但仍说明并行进程启动与时间敏感测试存在抖动；本任务没有扩大到修订其 timeout 合同。
+- 没有配置 remote、执行 push、读取环境密钥或调用在线/付费模型。
+
+### 结论
+
+- M11-T2 达到本地 E3：真实 pgvector migration、固定维度/index、事务 CRUD、显式幂等 seed 和相似度检索均可从提交 `7ebaa16` 复现，任务更新为 `verified`。
+- `KI-006` 更新为 mitigated；M11 继续 `in_progress`。下一原子任务是 M11-T3 的确定性离线 Embedding/批处理/维度元数据最小纵切，不在本轮实现在线调用或 M12/M13。
+
+## V-20260809-002：M11-T2 pgvector 连续性闭环
+
+- 任务：`M11-T2 / verified`；下一任务 `M11-T3 / planned`
+- 时间：2026-08-09，Asia/Shanghai
+- 验证目标：实现提交 `7ebaa16` 上的 continuity 工作区
+- 模式：纯文档闭环；离线、无 Key、费用 0
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、94 个 Markdown 通过；新增 ADR/handoff、M11-T2 verified、M11-T3 planned 与恢复入口一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有 LF/CRLF 转换提示 |
+| 定向复核 `7ebaa16`、`V-20260809-001/002`、`ADR-0023`、55/4/91/470 项、`KI-006` 与 M11-T3 下一动作 | 0 | status、known issue、实施计划、backend standards、ADR、verification 与 handoff 的事实、边界和下一动作相互一致 |
+
+### 结论
+
+- M11-T2 的 implementation plan、ADR、backend standards、known issue、status、verification 和最新 handoff 已固定真实 pgvector migration/CRUD/seed 证据与未验证范围；恢复入口指向实现提交 `7ebaa16`。
+- 本步骤没有代码或行为变化，因此没有重复运行业务测试或完整门；提交后知识/API 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项、M1 10 项和最终完整离线门继续引用 `V-20260809-001`。
+- 当前任务为 `M11-T3 / planned`。下一条原子动作只做确定性离线 Embedding、批次与维度元数据最小纵切；不得重做 M11-T2、读取 Key、执行在线 Embedding 或扩大到 M12/M13。
