@@ -692,6 +692,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 10 个关键测试方法或等价覆盖；collector 专项 10 项、Context/Runtime/Skill/Memory/RAG/M10-T3/Container 相关 98 项和 M1 隔离 10 项通过。没有依赖、数据库、构建、既有共享协议或跨前后端接口变化，因此不重复完整全仓门。
 - 本纵切达到本地 E3，但 M11-T4 保持 `in_progress`：同步 collector 尚未进入显式 Runtime request preparation 或默认 Container，session 与 owner 的绑定仍由可信调用方保证；在线摘要、PostgreSQL fact 主链和最终统一 Run 不在本纵切证据内。
 
+#### M11-T4 第三个离线纵切边界
+
+- 新增显式 `ContextAwareRuntime`、`RuntimeContextBinding`、绑定 factory 协议与 `prepare_context_request()`；不修改现有 `RuntimeRequest`、`AgentRuntime`、`SkillAwareRuntime` 或 Container 合同。
+- factory 只提供可信 owner/session/system constraints，query 强制取原 `RuntimeRequest.input_text`。collector→Assembler 非空时只用冻结复制写入 `prompt_context`，并保留 run/input/execution/checkpoint 对象；空上下文把原请求对象交给 delegate。
+- 已有 `prompt_context`、非法绑定、collection 或 assembly 失败统一映射为稳定无内容 `context_unavailable`，delegate 不执行；绑定 factory 的程序错误继续传播。正常终态与 `RuntimeApprovalPause` 均原样透传。
+- 真实 ConversationMemory/InMemoryKnowledgeBase/SkillContextBuilder→collector→Assembler→Fake AgentRuntime 的离线纵切已执行；summary unavailable、跨 owner、脱敏、字段身份和单次 delegate 均有自动化证据。它不是 import-only 或仅 Fake collection 证据，但 delegate 仍是确定性测试替身。
+- 本纵切达到显式离线 E3，M11-T4 保持 `in_progress`：同步适配器尚未接默认 Container，RunCoordinator 也尚未把 RunRecord 的可信 owner/session 传播到 RuntimeRequest。下一纵切先固定该身份合同；不得从 input、tool arguments、principal 或 run ID 推导 session，也不得把同步 PostgreSQL/pgvector 放入事件循环。
+
 ### M11-T5：持久记忆进入主 Run
 
 - 依赖：M11-T1、M11-T4。

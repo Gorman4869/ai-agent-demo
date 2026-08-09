@@ -3,7 +3,7 @@
 - 更新时间：2026-08-09，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`9b052c2`
+- 最近已确认实现提交：`c0e0b11`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -39,7 +39,8 @@
 - M11-T3 第二纵切验证基线提交：`31479b8`；实现提交：`813c412`
 - M11-T3 第三纵切验证基线提交：`813c412`；实现提交：`02664b8`
 - M11-T4 第一纵切验证基线提交：`02664b8`；实现提交：`9b052c2`
-- M11-T4 第二纵切验证基线提交：`9b052c2`；实现提交待本轮 Git 固定
+- M11-T4 第二纵切验证基线提交：`9b052c2`；实现提交：`c0e0b11`
+- M11-T4 第三纵切验证基线提交：`c0e0b11`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -52,9 +53,9 @@
 | 目标 | 建立 ContextAssembler 的来源选择、排序、Token 预算和可解释报告合同 |
 | 设计依据 | 实施计划 M11-T4、M10-T3 上下文入口、`ADR-0010`、`ADR-0013`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T4 第二纵切已新增显式 source collector，实际读取同步 MemoryStore messages/facts、KnowledgeBase results 与 SkillContext，映射 owner-safe fragments 并走通 Assembler；摘要 unavailable、跨 owner、长历史事实保留和 RAG 注入均有离线证据，但尚未进入 Runtime/Container |
-| 前置证据 | `V-20260809-010/011`、`ADR-0025`、第二纵切验证基线 `9b052c2`，以及第一纵切 `V-20260809-008/009` |
-| 下一动作 | 继续 M11-T4 第三个离线纵切：实现显式 Context-aware Runtime request adapter，由可信调用方提供 owner/session/query/system 输入，执行 collector→Assembler 并生成新的冻结 RuntimeRequest；保留 input/execution/checkpoint，已有 prompt_context 冲突 fail closed，不接默认 Container |
+| 当前修改 | M11-T4 第三纵切已新增显式 ContextAwareRuntime 与可信 binding factory，把真实同步 collector→Assembler 结果写入冻结 RuntimeRequest.prompt_context 后单次委托；已有 prompt 冲突、跨 owner 与非法绑定均稳定失败，summary unavailable 和 approval pause 透传有离线证据，但尚未进入 RunCoordinator/默认 Container |
+| 前置证据 | `V-20260809-012`、`ADR-0025`、第三纵切验证基线 `c0e0b11`，以及前两纵切 `V-20260809-008` 至 `011` |
+| 下一动作 | 继续 M11-T4 第四个纵切：先固定 RunCoordinator→RuntimeRequest 的可信 context identity 合同，由 RunRecord 传播 owner/session 并保持 repr 脱敏；不得从 input、tool arguments、principal 或 run ID 推导 session，本步仍不接默认 Container |
 
 ## 里程碑状态
 
@@ -65,7 +66,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T3 已 `verified`；M11-T4 已完成有界 Context 领域合同和同步 Memory/RAG/Skill source collector E3。Runtime/Container 接线、记忆 API 主链、固定 RAG 评测与在线冒烟仍由 M11-T4–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T3 已 `verified`；M11-T4 已完成有界 Context 领域合同、同步 Memory/RAG/Skill source collector 和显式 ContextAwareRuntime E3。可信 Run 身份传播、默认 Container 接线、记忆 API 主链、固定 RAG 评测与在线冒烟仍由 M11-T4–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -78,6 +79,11 @@
 
 ## 未验证范围
 
+- M11-T4 第三纵切见 `V-20260809-012`：新增 10 个关键测试方法，专项 10 项、Context/collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 108 项和 M1 隔离 10 项通过；验证基线与第二纵切实现提交均为 `c0e0b11`，本轮实现提交在结束时固定。
+- 当前 ContextAwareRuntime 是显式同步 source adapter。可信 factory 实际收到原 RuntimeRequest 并提供 owner/session/system，query 强制取 input_text；但 RunCoordinator 尚未从 RunRecord 传播这组身份，默认 Container 仍只使用 SkillAwareRuntime，不能描述成默认 Agent 主链已使用完整 Context。
+- 新增离线纵切使用真实 ConversationMemory、InMemoryKnowledgeBase、SkillContextBuilder、collector 和 Assembler，但 AgentRuntime delegate 是确定性 Fake；没有运行 PostgreSQL Memory/pgvector、在线摘要、Provider 或默认 HTTP/Container 上下文调用。
+- ContextAwareRuntime 位于 async Runtime 边界却调用同步 collector；当前仅证明离线内存路径。不得把同步 PostgreSQL/pgvector 接入事件循环，后续默认组合需要可信身份传播和适当 async source 边界。
+- 第三纵切没有修改现有 RuntimeRequest/AgentRuntime/Store/Container 公共契约、依赖、数据库、构建或跨前后端接口；108 项相关回归和 M1 隔离覆盖修改面，因此按交付协议未运行完整全仓门、Vue/MCP 构建或真实数据库集成。
 - M11-T4 第二纵切见 `V-20260809-010/011`：新增 10 个关键测试方法或等价覆盖，collector 专项 10 项、相关定向 98 项、M1 隔离 10 项和连续性 52/101 通过；验证基线与第一纵切实现提交均为 `9b052c2`，本轮实现提交在结束时固定。
 - 当前 collector 同步调用现有 MemoryStore/KnowledgeBase/SkillContextBuilder，并由 `ConversationMemory`、`InMemoryKnowledgeBase` 和真实 SkillContextBuilder 离线 fixture 证明 E3；没有运行 PostgreSQL Memory/pgvector、在线摘要或 Provider，不能描述为持久/在线证据。
 - MemoryStore 的消息合同只有 server-provided session ID，没有消息 owner 字段；collector 能校验每条 fact owner，但 session→owner 绑定仍由可信调用方负责。collector 尚未进入 Runtime/Container，不能证明默认 Agent 主链已经使用这些上下文。
@@ -174,4 +180,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t4-context-source-collector.md`，再核对 `V-20260809-010/011`、`ADR-0010`、`ADR-0013`、`ADR-0025`、验证基线 `9b052c2`、实施计划 M11-T4 和实际 collector/Assembler 代码。按 handoff 重跑 Context collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 98 项、M1 10 项和连续性 52/101；若一致，不要重做 M11-T1–T3 或 M11-T4 前两纵切，下一步只实现显式 Context-aware Runtime request adapter。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到默认 Container、M11-T5/M11-T6/M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t4-context-runtime-adapter.md`，再核对 `V-20260809-012/013`、`ADR-0010`、`ADR-0013`、`ADR-0025`、验证基线 `c0e0b11`、实施计划 M11-T4 和实际 ContextAwareRuntime/collector/Assembler 代码。按 handoff 重跑 Context adapter/collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 108 项、M1 10 项和连续性 52/102；若一致，不要重做 M11-T1–T3 或 M11-T4 前三纵切，下一步只固定 RunCoordinator→RuntimeRequest 的可信 context identity，不接默认 Container。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T5/M11-T6/M12/M13。

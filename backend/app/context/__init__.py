@@ -22,9 +22,18 @@ from .collector import (
     ContextSummaryResult,
     ContextSystemConstraint,
 )
+from .runtime import (
+    ContextAwareRuntime,
+    ContextRuntimePreparationError,
+    PreparedContextRequest,
+    RuntimeContextBinding,
+    RuntimeContextBindingFactory,
+    prepare_context_request,
+)
 
 __all__ = [
     "CollectedContext",
+    "ContextAwareRuntime",
     "ContextAssembler",
     "ContextAssembly",
     "ContextAssemblyError",
@@ -35,6 +44,7 @@ __all__ = [
     "ContextDecisionReason",
     "ContextFragment",
     "ContextFragmentDecision",
+    "ContextRuntimePreparationError",
     "ContextSource",
     "ContextSourceCollector",
     "ContextSourceBudget",
@@ -43,5 +53,9 @@ __all__ = [
     "ContextSummaryResult",
     "ContextSystemConstraint",
     "ContextTrust",
+    "PreparedContextRequest",
+    "RuntimeContextBinding",
+    "RuntimeContextBindingFactory",
     "default_context_budget_policy",
+    "prepare_context_request",
 ]
