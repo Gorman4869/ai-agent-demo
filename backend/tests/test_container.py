@@ -19,7 +19,10 @@ from backend.app.application_lifecycle import (
 from backend.app.container import ApplicationContainer
 from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.integrations.mcp import McpClientState
-from backend.app.knowledge import InMemoryKnowledgeBase
+from backend.app.knowledge import (
+    InMemoryKnowledgeBase,
+    create_deterministic_embedding_model,
+)
 from backend.app.main import create_app
 from backend.app.memory import ConversationMemory
 from backend.app.security import StaticTokenAuthenticator
@@ -71,6 +74,8 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertEqual(McpClientState.CREATED, container.mcp_clients.state)
         self.assertEqual((), container.mcp_clients.connected_server_ids)
         self.assertIsInstance(container.knowledge_base, InMemoryKnowledgeBase)
+        self.assertEqual("offline", container.embedding_model.metadata.provider)
+        self.assertEqual(3, container.embedding_model.metadata.dimensions)
         self.assertIsInstance(container.memory, ConversationMemory)
         self.assertIsInstance(container.authenticator, StaticTokenAuthenticator)
 
@@ -80,6 +85,7 @@ class ApplicationContainerTest(unittest.TestCase):
         run_store = InMemoryRunStore()
         event_store = InMemoryEventStore(run_store)
         knowledge_base = InMemoryKnowledgeBase()
+        embedding_model = create_deterministic_embedding_model(dimensions=5)
         memory = ConversationMemory()
         authenticator = StaticTokenAuthenticator()
         runtime = Mock()
@@ -91,6 +97,7 @@ class ApplicationContainerTest(unittest.TestCase):
             event_store=event_store,
             runtimes={"manual": runtime},
             knowledge_base=knowledge_base,
+            embedding_model=embedding_model,
             memory=memory,
             authenticator=authenticator,
         )
@@ -101,6 +108,7 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIs(event_store, container.event_store)
         self.assertIs(runtime, container.runtimes["manual"])
         self.assertIs(knowledge_base, container.knowledge_base)
+        self.assertIs(embedding_model, container.embedding_model)
         self.assertIs(memory, container.memory)
         self.assertIs(authenticator, container.authenticator)
 
@@ -198,6 +206,44 @@ class ApplicationContainerTest(unittest.TestCase):
             OpenAIAgentsRuntime,
         )
         self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
+
+    def test_online_embedding_composition_is_lazy_and_repr_safe(self) -> None:
+        secret = "embedding-container-secret"
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_ONLINE_ENABLED": "true",
+                "OPENAI_API_KEY": secret,
+                "AI_AGENT_EMBEDDING_PROVIDER": "openai",
+                "AI_AGENT_EMBEDDING_MODEL": "configured-embedding",
+                "AI_AGENT_EMBEDDING_REVISION": "course-v1",
+                "AI_AGENT_EMBEDDING_DIMENSIONS": "3",
+            }
+        )
+
+        with (
+            patch(
+                "backend.app.knowledge.openai_embeddings.openai.OpenAI"
+            ) as openai_client,
+            patch.object(
+                socket,
+                "create_connection",
+                side_effect=AssertionError("container attempted network access"),
+            ),
+            patch.object(
+                socket.socket,
+                "connect",
+                side_effect=AssertionError("container attempted network access"),
+            ),
+        ):
+            container = ApplicationContainer.create(settings=settings)
+
+        openai_client.assert_not_called()
+        self.assertEqual("openai", container.embedding_model.metadata.provider)
+        self.assertEqual(
+            "configured-embedding",
+            container.embedding_model.metadata.model,
+        )
+        self.assertNotIn(secret, repr(container))
 
     def test_container_cannot_be_mixed_with_legacy_overrides(self) -> None:
         container = ApplicationContainer.create(

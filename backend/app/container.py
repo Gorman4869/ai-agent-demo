@@ -21,7 +21,19 @@ from backend.app.integrations.mcp import (
     McpServerConfig,
     default_mcp_server_configs,
 )
-from backend.app.knowledge import InMemoryKnowledgeBase, KnowledgeBase
+from backend.app.knowledge import (
+    BatchingEmbeddingModel,
+    EmbeddingModel,
+    EmbeddingUsageSink,
+    InMemoryEmbeddingCache,
+    InMemoryKnowledgeBase,
+    KnowledgeBase,
+    OpenAIEmbeddingClientFactory,
+    OpenAIEmbeddingProvider,
+    RetryingEmbeddingProvider,
+    create_deterministic_embedding_model,
+    create_openai_embedding_client_factory,
+)
 from backend.app.memory import ConversationMemory, MemoryStore
 from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import InMemoryRunService, RunCoordinator
@@ -68,6 +80,7 @@ class ApplicationContainer:
     run_coordinator: RunCoordinator
     mcp_clients: McpClientManager
     knowledge_base: KnowledgeBase
+    embedding_model: EmbeddingModel = field(repr=False)
     memory: MemoryStore = field(repr=False)
     approval_store: ApprovalStore = field(repr=False)
     async_memory_store: AsyncMemoryStore = field(repr=False)
@@ -99,6 +112,7 @@ class ApplicationContainer:
         mcp_clients: McpClientManager | None = None,
         mcp_server_configs: Mapping[str, McpServerConfig] | None = None,
         knowledge_base: KnowledgeBase | None = None,
+        embedding_model: EmbeddingModel | None = None,
         memory: MemoryStore | None = None,
         approval_store: ApprovalStore | None = None,
         authenticator: StaticTokenAuthenticator | None = None,
@@ -138,6 +152,11 @@ class ApplicationContainer:
             mcp_clients=mcp_clients,
             mcp_server_configs=mcp_server_configs,
         )
+        resolved_embedding_model = (
+            embedding_model
+            if embedding_model is not None
+            else create_embedding_model(resolved_settings)
+        )
         resolved_memory = memory if memory is not None else ConversationMemory()
         resolved_approval_store = (
             approval_store
@@ -164,6 +183,7 @@ class ApplicationContainer:
                 if knowledge_base is not None
                 else InMemoryKnowledgeBase()
             ),
+            embedding_model=resolved_embedding_model,
             memory=resolved_memory,
             approval_store=resolved_approval_store,
             async_memory_store=AsyncLocalMemoryStore(resolved_memory),
@@ -192,6 +212,7 @@ class ApplicationContainer:
         mcp_clients: McpClientManager | None = None,
         mcp_server_configs: Mapping[str, McpServerConfig] | None = None,
         knowledge_base: KnowledgeBase | None = None,
+        embedding_model: EmbeddingModel | None = None,
         authenticator: StaticTokenAuthenticator | None = None,
     ) -> ApplicationContainer:
         """Open an explicitly configured PostgreSQL application container."""
@@ -223,6 +244,11 @@ class ApplicationContainer:
             if knowledge_base is not None
             else InMemoryKnowledgeBase()
         )
+        resolved_embedding_model = (
+            embedding_model
+            if embedding_model is not None
+            else create_embedding_model(resolved_settings)
+        )
 
         from backend.app.postgres_execution import PostgresExecutionComposition
 
@@ -253,6 +279,7 @@ class ApplicationContainer:
                 run_coordinator=composition.coordinator,
                 mcp_clients=resolved_mcp_clients,
                 knowledge_base=resolved_knowledge_base,
+                embedding_model=resolved_embedding_model,
                 memory=persistence.memory_store,
                 approval_store=persistence.approval_store,
                 async_memory_store=persistence.async_memory_store,
@@ -324,6 +351,55 @@ def _resolve_mcp_clients(
             if mcp_server_configs is not None
             else default_mcp_server_configs()
         ),
+    )
+
+
+def create_embedding_model(
+    settings: Settings,
+    *,
+    openai_client_factory: OpenAIEmbeddingClientFactory | None = None,
+    usage_sink: EmbeddingUsageSink | None = None,
+) -> EmbeddingModel:
+    """Assemble one offline-default embedding model without starting I/O."""
+
+    config = settings.embedding
+    cache = InMemoryEmbeddingCache(max_entries=config.cache_max_entries)
+    if config.provider == "offline":
+        return create_deterministic_embedding_model(
+            dimensions=config.dimensions,
+            batch_size=config.batch_size,
+            cache=cache,
+        )
+    if (
+        not settings.online_embedding_enabled
+        or settings.openai_api_key is None
+        or config.model is None
+        or config.revision is None
+    ):
+        raise ValueError("openai embedding requires complete settings")
+
+    client_factory = (
+        openai_client_factory
+        if openai_client_factory is not None
+        else create_openai_embedding_client_factory(
+            api_key=settings.openai_api_key.get_secret_value(),
+            timeout_ms=config.request_timeout_ms,
+        )
+    )
+    provider = OpenAIEmbeddingProvider(
+        client_factory,
+        model=config.model,
+        revision=config.revision,
+        dimensions=config.dimensions,
+        usage_sink=usage_sink,
+    )
+    return BatchingEmbeddingModel(
+        RetryingEmbeddingProvider(
+            provider,
+            max_retries=config.max_retries,
+        ),
+        batch_size=config.batch_size,
+        cache=cache,
     )
 
 

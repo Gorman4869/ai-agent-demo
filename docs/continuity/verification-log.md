@@ -2425,3 +2425,78 @@
 
 - `V-20260809-004` 的代码/真实 pgvector/M1 证据与当前 plan、known issue、status、后端规约和 handoff 一致，没有发现代码与记录漂移。
 - 本记录只关闭第二纵切的文档连续性，不改变 `M11-T3 / in_progress`，也不增加在线 Provider、持久缓存或完整全仓门证据。
+
+## V-20260809-006：M11-T3 显式 OpenAI Embedding Adapter 与任务验收
+
+- 任务：`M11-T3 / verified`；下一任务 `M11-T4 / planned`
+- 时间：2026-08-09 12:19，Asia/Shanghai
+- 验证目标：基线 HEAD `813c412` 上的 M11-T3 第三纵切工作区
+- 任务等级：A 类共享 Settings/composition 与 secret gate；时间盒 2–4 小时
+- 环境：Python 3.12.10、`openai==2.45.0`、`openai-agents==0.18.2`、Docker Compose v5.1.1、本地缓存 `pgvector/pgvector:0.8.1-pg17`
+- 模式：默认离线 E2/E3；没有读取真实 Key、访问网络 Provider 或产生费用，费用 0
+- 依赖事实：复用仓库已锁定并已安装的 OpenAI SDK；没有新增、安装、升级或删除 Python/Node 依赖，没有修改锁文件、数据库 migration 或跨前后端 HTTP 契约
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `813c412`，第二纵切实现提交和前两纵切历史存在 |
+| 按强制顺序读取 AGENTS、continuity README/status/playbook、M11-T3/M8-T1、ADR-0005/0023/0024、最新 handoff、`V-20260809-004/005` 与后端规约 | 0 | 当前任务、设计依赖、在线授权边界和恢复命令一致；实际代码包含 `813c412` 记录的缓存/retry 纵切，未发现漂移 |
+| 修改前 Embedding/PgVector/RAG/API/Container 定向集 | 0 | 78 项通过；仅有既有 Starlette/httpx 弃用警告 |
+| `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 0 | 获准连接本机 Docker 后固定 integration 容器 healthy，只使用本地缓存 image，没有下载 |
+| 修改前真实 pgvector integration / M1 `python -S` 隔离 | 0 / 0 | 真实 pgvector 4 项、M1 10 项通过 |
+| 修改前 `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、97 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 本地 SDK 版本/签名检查与一次 `httpx.MockTransport` 响应解析 probe | 0 | 确认 `OpenAI(... timeout, max_retries, http_client)` 与 `client.embeddings.create(input, model, dimensions, encoding_format)` 公共接口；真实 SDK 在零网络下解析逆序索引和 usage，不是在线证据 |
+| `python -m unittest backend.tests.test_openai_embeddings backend.tests.test_settings backend.tests.test_container backend.tests.test_embeddings -v` | 0 | 聚焦复审补 Provider 空批零 Client 后，67 项通过；本纵切新增 12 个关键测试方法或等价覆盖 |
+| `python -m unittest` 的 Embedding/PgVector/RAG/Settings/Container/Lifecycle/API/OpenAI Runtime/online smoke 定向集 | 0 | 160 项通过；既有聊天 Runtime、在线跳过门、API 与生命周期未回归 |
+| 沙箱内首轮 `scripts/verify.ps1` | 1 | 后端 505 项通过、1 项既有 Windows symlink 跳过，Code Agent 与依赖检查通过；Vue 因沙箱拒绝写 `frontend/tsconfig.app.tsbuildinfo` 报 `TS5033/EPERM`，不是代码失败 |
+| 获准环境同一 `scripts/verify.ps1` | 0 | 后端 505 项通过、1 项既有 Windows symlink 跳过；Controlled Code-Agent Demo、pip check、Vue 生产构建、MCP TypeScript 构建与 Compose 配置全部通过 |
+| 沙箱内 Docker 状态检查 / 获准后 `docker compose ... up -d --wait --pull never` | 1 / 0 | 沙箱拒绝 Docker config/named pipe；同一固定 Compose 命令获准后容器 healthy，没有下载 |
+| 设置 `AI_AGENT_TEST_PGVECTOR_DSN` 后真实 pgvector integration | 0 | 4 项通过；schema、CRUD、查询、幂等 seed 和回滚路径保持可运行 |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；OpenAI SDK Adapter 与 Pydantic Settings 未进入 M1 标准库 Loop 导入路径 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有 LF/CRLF 转换提示 |
+
+### 实现与风险证据
+
+- `OpenAIEmbeddingProvider` 接收显式 client factory/model/revision/dimensions/usage sink，不读取环境、不保存全局默认 client。空批返回空 tuple；正常批次调用公开 SDK Embeddings API，并按响应 index 恢复输入顺序。
+- Client Factory 按 Provider batch 延迟创建并确定关闭 SDK client，设置请求 timeout 与 `max_retries=0`。只有共享 `RetryingEmbeddingProvider` 捕获连接/服务端暂时性错误；认证/权限、配额/限流、请求、响应、usage、维度和值错误均不重试并返回稳定无内容 code。
+- `EmbeddingSettings` 默认 offline，限制 dimensions/batch/cache/timeout/retry。只有全局 online、embedding provider/model/revision 与共享 SecretStr Key 同时合法时 composition 才创建在线 Model；仅配置 Key、chat model 或 embedding 标签不会启用。
+- 默认 Container 只组装确定性离线 Model。显式在线组合也只创建延迟 Client Factory，不在 import、Settings 解析或 Container 构造时触发 SDK Client 或网络；可继续显式注入测试 Model。
+- 真实 OpenAI SDK + `httpx.MockTransport` 用例实际执行请求序列化、响应对象解析、逆序恢复、usage sink、缓存命中、500 重试、401/429/400 分类、非法索引/usage、维度失败、空批、timeout、资源关闭和秘密 repr 边界。Fake/Mock 只作为 E2/E3 协议证据，没有描述成在线成功。
+
+### 未验证范围
+
+- 没有读取真实 `OPENAI_API_KEY`、访问 OpenAI 网络、执行真实模型或产生费用。Provider 可达性、模型/维度可用性、真实 tokenizer/usage/账单与低预算在线结果仅由 M11-T7 在新的单次授权下验证。
+- 当前 usage 通过注入 sink 暴露单批 token 计数，尚未形成版本化定价、费用计算、持久 usage/cost 账本或跨批预算强制；`KI-018` 不因本任务关闭。
+- 有界 LRU 仍是单进程内存，没有持久化、跨进程共享、TTL、失效协议或容量压测。Retry 有次数和请求 timeout，但没有 sleep/backoff 或并发限流，只能用于只读 Embedding batch。
+- 三维 SHA-256 Provider、本地 SDK 映射与真实 pgvector CRUD 不证明语义质量、Recall@K、MRR 或回答依据正确率；`KI-006` 保持 mitigated，固定评测由 M11-T6 完成。
+- integration Compose 仍是 localhost trust/tmpfs 测试基础设施，不是生产部署、鉴权、TLS、备份、高可用或容量证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T3 三个纵切共同覆盖确定性离线 Provider、冻结元数据、批处理、版本化缓存、有界 retry、显式在线 SDK Adapter、fail-closed Settings/composition 与真实 pgvector 调用链；代码、测试和完整离线门满足任务产物，更新为 `verified`。
+- 该 verified 结论不包含真实在线 E4；M11-T7 仍保留独立授权门。下一原子任务是 M11-T4 的 ContextAssembler 输入片段、来源标记、确定性优先级和预算报告最小离线合同，不提前实现 M11-T5/M11-T6。
+
+## V-20260809-007：M11-T3 OpenAI Embedding 连续性闭环
+
+- 任务：`M11-T3 / verified`；当前任务 `M11-T4 / planned`
+- 时间：2026-08-09，Asia/Shanghai
+- 验证目标：基线 HEAD `813c412` 上经 `V-20260809-006` 验证的第三纵切工作区与连续性文档
+- 模式：纯本地文档、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、98 个 Markdown 通过；M11-T3 verified、M11-T4 planned、新 handoff、plan、ADR/verification 引用可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` | 0 | 12 个已跟踪修改与 3 个新文件，均属于 M11-T3 第三纵切；没有发现任务外改动 |
+| `git diff --stat` 与未跟踪文件复核 | 0 | 实现、测试、配置、规约和连续性范围符合第三纵切；两个新 Python 文件与一个新 handoff 均已单独确认 |
+
+### 结论
+
+- `V-20260809-006` 的本地真实 SDK 协议、完整离线门、真实 pgvector 与 M1 证据和当前 plan、known issue、status、后端规约及 handoff 一致，没有发现代码与记录漂移。
+- M11-T3 保持 `verified`；当前任务只切换到 `M11-T4 / planned`，本轮没有实现 ContextAssembler。第三纵切实现提交将在结束时本地固定，下一份 verification/handoff 再记录新 HEAD。

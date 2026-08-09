@@ -661,6 +661,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 11 个关键测试方法；Embedding/PgVector/RAG/API/Container 定向 78 项、真实 pgvector 4 项和 M1 隔离 10 项通过。没有依赖、Settings、schema 或跨前后端接口变化，因此不重复完整全仓门。
 - 本纵切达到本地 E3，但 M11-T3 保持 `in_progress`：显式在线 SDK Adapter、embedding-specific Settings/composition 与真实授权冒烟尚未完成；内存缓存也不是持久或跨进程证据。
 
+#### M11-T3 第三个离线纵切与任务验收结果
+
+- 新增显式 `OpenAIEmbeddingProvider`，通过已锁定 OpenAI SDK 的公开 `client.embeddings.create()` 执行有界 batch；响应按 `index` 恢复输入顺序，缺失/重复索引、非法 usage、维度和值错误均映射为稳定无内容错误。
+- SDK Client Factory 仅由 composition 注入 Key 和 timeout，按 batch 延迟创建并关闭 client，固定 `max_retries=0`；共享 `RetryingEmbeddingProvider` 是唯一重试所有者，只重试连接与服务端暂时性错误，认证、权限、配额/限流、请求和响应协议错误不重试。
+- 新增 embedding-specific Settings：默认 `offline`，只有全局 online、embedding provider/model/revision 和共享 `OPENAI_API_KEY` 同时合法才允许在线 composition。仅存在 Key、chat model 或 embedding 标签不会启用；安全摘要和 Container repr 不暴露原值。
+- 离线风险测试通过真实 OpenAI SDK + `httpx.MockTransport` 执行请求序列化、响应解析、顺序恢复、usage、缓存命中、错误分类、重试、资源关闭和敏感信息边界。最终定向回归 160 项、真实 pgvector 4 项、M1 隔离 10 项及完整离线门通过；完整门后端 505 项通过、1 项既有 Windows symlink 能力跳过，Vue、MCP TypeScript、依赖、Code Agent 与 Compose 配置通过。
+- M11-T3 达到 `verified`。该结论只证明离线 E2/E3 构造与协议映射，不是在线 Provider、语义质量或费用证据；真实单次在线 Embedding 仍仅由 M11-T7 在新的明确授权下执行。下一原子任务为 M11-T4。
+
 ### M11-T4：ContextAssembler 与 Token 预算
 
 - 依赖：M10-T3、M11-T3。

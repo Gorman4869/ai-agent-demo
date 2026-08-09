@@ -3,7 +3,7 @@
 - 更新时间：2026-08-09，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`31479b8`
+- 最近已确认实现提交：`813c412`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -36,7 +36,8 @@
 - M11-T1 第十纵切验证基线提交：`1e867bc`；实现提交：`be2c818`
 - M11-T2 验证基线提交：`41871c4`；实现提交：`7ebaa16`
 - M11-T3 第一纵切验证基线提交：`9b77bfd`；实现提交：`31479b8`
-- M11-T3 第二纵切验证基线提交：`31479b8`；实现提交待本轮 Git 固定
+- M11-T3 第二纵切验证基线提交：`31479b8`；实现提交：`813c412`
+- M11-T3 第三纵切验证基线提交：`813c412`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -44,14 +45,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M11-T3` |
-| 状态 | `in_progress` |
-| 目标 | 建立确定性离线与显式在线 Embedding Adapter、批处理、重试、缓存键和维度元数据合同 |
-| 设计依据 | 实施计划 M11-T3、M8-T1 模型边界、`ADR-0023` 与 M11-T2 已验收 pgvector schema/CRUD/seed 合同 |
+| 任务 ID | `M11-T4` |
+| 状态 | `planned` |
+| 目标 | 建立 ContextAssembler 的来源选择、排序、Token 预算和可解释报告合同 |
+| 设计依据 | 实施计划 M11-T4、M10-T3 上下文入口、已验收 M11-T3 Embedding 合同与 `ADR-0024` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T3 第二纵切已新增版本化敏感安全 key、有界进程内 LRU、完整成功后缓存和显式暂时性 Provider batch retry；第一纵切的离线 Provider/Batching/PgVector 合同保持通过，在线 Adapter/Settings 尚未实现 |
-| 前置证据 | `V-20260809-003/004/005`、`ADR-0024`、第二纵切验证基线 `31479b8`，以及 M11-T2 `V-20260809-001/002`/`ADR-0023` |
-| 下一动作 | 继续 M11-T3 第三个离线纵切：实现显式在线 SDK Adapter 与 embedding-specific Settings/composition 的离线 fail-closed 构造测试；不读取 Key、不执行网络或付费调用，真实授权冒烟仍由 M11-T7 记录 |
+| 当前修改 | M11-T3 已完成离线 Provider/批次、缓存/retry，以及显式在线 SDK Adapter 与 embedding-specific Settings/composition 的离线 E2/E3 合同；本轮没有开始 M11-T4 代码 |
+| 前置证据 | M11-T3 `V-20260809-003/004/005/006/007`、`ADR-0024`，以及 M11-T2 `V-20260809-001/002`/`ADR-0023` |
+| 下一动作 | 开始 M11-T4 第一个离线纵切：先固定 ContextAssembler 输入片段、来源标记、确定性优先级和预算报告的最小领域合同；不接在线模型、不提前实现 M11-T5 记忆写入或 M11-T6 评测集 |
 
 ## 里程碑状态
 
@@ -62,7 +63,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1/T2 已 `verified`；M11-T3 已完成确定性 Provider、批次/维度元数据、版本化内存缓存与显式暂时性 retry E3，在线 Adapter/Settings 尚未完成；ContextAssembler、记忆 API、固定 RAG 评测与在线冒烟仍由 M11-T4–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T3 已 `verified`；离线/显式在线 Embedding Adapter、批次/维度、缓存/retry 与 fail-closed composition 均有本地证据。ContextAssembler、记忆 API、固定 RAG 评测与真实在线冒烟仍由 M11-T4–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -75,11 +76,13 @@
 
 ## 未验证范围
 
-- M11-T3 第二纵切见 `V-20260809-004/005`：新增 11 个关键测试方法，最终知识/API 定向 78 项、真实 pgvector 4 项、M1 隔离 10 项和连续性 52/97 通过；验证基线为 `31479b8`，本轮实现提交在结束时固定。
-- 当前有界 LRU 只在单进程内存中有效，没有持久化、跨进程共享、TTL、失效协议或容量压测；retry 只处理显式暂时性同步 Embedding batch，没有 timeout/backoff，也不得复用于副作用。
+- M11-T3 第三纵切见 `V-20260809-006`：真实 SDK `MockTransport`、Settings/Container/Embedding 专项 67 项和共享契约定向 160 项通过；真实 pgvector 4 项、M1 隔离 10 项和完整离线门通过。完整门后端 505 项通过、1 项既有 Windows symlink 跳过，Vue、MCP TypeScript、依赖、Code Agent 与 Compose 配置通过；验证基线为 `813c412`，本轮实现提交在结束时固定。
+- 显式在线 Adapter 的 E2/E3 证据完全来自本地真实 SDK + `httpx.MockTransport`，没有读取真实 Key、访问网络 Provider 或产生费用；模型可用性、语义质量、账单和真实 E4 仍由 M11-T7 在新的单次授权下验证。
+- M11-T3 第二纵切见 `V-20260809-004/005`：新增 11 个关键测试方法，最终知识/API 定向 78 项、真实 pgvector 4 项、M1 隔离 10 项和连续性 52/97 通过；验证基线为 `31479b8`，实现提交为 `813c412`。
+- 当前有界 LRU 只在单进程内存中有效，没有持久化、跨进程共享、TTL、失效协议或容量压测；SDK client 有请求 timeout 且共享 wrapper 有次数上限，但 retry 没有 sleep/backoff，也不得复用于副作用。
 - M11-T3 第一纵切见 `V-20260809-003`：新增 12 个关键测试方法或等价覆盖，最终知识/API 定向 67 项、真实 pgvector 4 项和 M1 隔离 10 项通过；验证基线为 `9b77bfd`，实现提交为 `31479b8`。
-- 当前仍只有标准库 SHA-256 token-hash 离线 Provider；在线 SDK Adapter/Settings、Provider usage/费用和真实模型质量均未验证。没有读取 Key 或执行网络。
-- 第二纵切没有依赖、migration、Settings、构建配置或跨前后端接口变化，未触发完整全仓门；真实 pgvector 证明既有 batch 合同保持进入数据库调用链，但不证明在线 Provider。
+- 标准库 SHA-256 token-hash 离线 Provider 仍只证明确定性工程路径；新增在线 SDK Adapter 已验证本地请求/响应、usage 和错误合同，但不证明 Provider tokenizer、在线可达、语义质量或费用。
+- 第三纵切修改共享 Settings/Container 契约，因此已触发并通过完整离线门；真实 pgvector 证明 batch 合同保持进入数据库调用链，但仍不证明在线 Provider。
 - M11-T2 见 `V-20260809-001`：提交后知识/API 定向 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项和 M1 隔离 10 项通过；完整离线门最终后端 470 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 与主 Compose 配置通过。实现提交为 `7ebaa16`。
 - 完整门首轮在后端阶段遇到一次既有 TypeScript MCP 5 秒 startup timeout；单独 E2E 4 项在 0.943 秒通过，同一完整门从头重跑后退出 0。另一次提交前完整后端回归曾出现 lease timing 单项失败，单项和串行完整后端随后均通过；失败事实保留在 verification。
 - M11-T2 使用确定性三维课程 Embedding，只证明本地 schema、SQL、事务与检索闭环，不证明 Provider Embedding、批处理/缓存、Token/账单、线上质量或固定 RAG 指标；`KI-006` 只降为 mitigated。

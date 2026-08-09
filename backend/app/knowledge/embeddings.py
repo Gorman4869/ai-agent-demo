@@ -45,6 +45,22 @@ class EmbeddingMetadataError(EmbeddingError):
     code = "embedding_metadata_changed"
 
 
+class EmbeddingAuthenticationError(EmbeddingError):
+    code = "embedding_provider_authentication_failed"
+
+
+class EmbeddingQuotaError(EmbeddingError):
+    code = "embedding_provider_quota_or_rate_limited"
+
+
+class EmbeddingProviderRequestError(EmbeddingError):
+    code = "embedding_provider_request_invalid"
+
+
+class EmbeddingUsageError(EmbeddingError):
+    code = "embedding_usage_invalid"
+
+
 class RetryableEmbeddingError(EmbeddingError):
     code = "embedding_provider_temporarily_unavailable"
 
@@ -80,6 +96,23 @@ class EmbeddingMetadata:
             or self.dimensions < 1
         ):
             raise ValueError("embedding dimensions must be positive")
+
+
+@dataclass(frozen=True)
+class EmbeddingUsage:
+    input_tokens: int
+    total_tokens: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.input_tokens, int)
+            or isinstance(self.input_tokens, bool)
+            or self.input_tokens < 0
+            or not isinstance(self.total_tokens, int)
+            or isinstance(self.total_tokens, bool)
+            or self.total_tokens < self.input_tokens
+        ):
+            raise ValueError("embedding usage must contain valid token counts")
 
 
 class EmbeddingProvider(Protocol):
@@ -383,6 +416,7 @@ def _validate_cache_key(key: str) -> None:
 __all__ = [
     "BatchingEmbeddingModel",
     "DeterministicEmbeddingProvider",
+    "EmbeddingAuthenticationError",
     "EmbeddingBatchError",
     "EmbeddingCache",
     "EmbeddingDimensionError",
@@ -392,7 +426,11 @@ __all__ = [
     "EmbeddingMetadataError",
     "EmbeddingModel",
     "EmbeddingProvider",
+    "EmbeddingProviderRequestError",
+    "EmbeddingQuotaError",
     "EmbeddingRetryExhaustedError",
+    "EmbeddingUsage",
+    "EmbeddingUsageError",
     "EmbeddingValueError",
     "InMemoryEmbeddingCache",
     "RetryableEmbeddingError",

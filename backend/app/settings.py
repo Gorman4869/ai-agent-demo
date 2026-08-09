@@ -57,6 +57,53 @@ class RunBudgetSettings(BaseModel):
         return self
 
 
+class EmbeddingSettings(BaseModel):
+    """Server-owned embedding selection, metadata, and request bounds."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+    )
+
+    provider: Literal["offline", "openai"] = "offline"
+    model: str | None = None
+    revision: str | None = None
+    dimensions: int = Field(default=3, ge=1, le=32_768)
+    batch_size: int = Field(default=32, ge=1, le=2_048)
+    cache_max_entries: int = Field(default=256, ge=1, le=100_000)
+    request_timeout_ms: int = Field(default=20_000, ge=100, le=120_000)
+    max_retries: int = Field(default=2, ge=0, le=5)
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def normalize_model(cls, value: object) -> object:
+        return _normalize_optional_provider_label(
+            value,
+            "AI_AGENT_EMBEDDING_MODEL",
+        )
+
+    @field_validator("revision", mode="before")
+    @classmethod
+    def normalize_revision(cls, value: object) -> object:
+        return _normalize_optional_provider_label(
+            value,
+            "AI_AGENT_EMBEDDING_REVISION",
+        )
+
+    def safe_summary(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "model_configured": self.model is not None,
+            "revision_configured": self.revision is not None,
+            "dimensions": self.dimensions,
+            "batch_size": self.batch_size,
+            "cache_max_entries": self.cache_max_entries,
+            "request_timeout_ms": self.request_timeout_ms,
+            "max_retries": self.max_retries,
+        }
+
+
 class McpClientSettings(BaseModel):
     """Server-owned MCP selectors and connection bounds."""
 
@@ -168,6 +215,7 @@ class Settings(BaseModel):
     )
     openai_model: str | None = None
     budget: RunBudgetSettings = Field(default_factory=RunBudgetSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     mcp: McpClientSettings = Field(default_factory=McpClientSettings)
     persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)
 
@@ -219,15 +267,38 @@ class Settings(BaseModel):
             if self.openai_model is None:
                 raise ValueError("openai provider requires OPENAI_MODEL")
         else:
-            if self.online_enabled:
-                raise ValueError("online switch requires an online provider")
             if self.runtime == "agents_sdk":
                 raise ValueError("agents_sdk runtime requires the openai provider")
+        if self.embedding.provider == "openai":
+            if not self.online_enabled:
+                raise ValueError(
+                    "openai embedding requires the explicit online switch"
+                )
+            if self.openai_api_key is None:
+                raise ValueError("openai embedding requires OPENAI_API_KEY")
+            if self.embedding.model is None:
+                raise ValueError(
+                    "openai embedding requires AI_AGENT_EMBEDDING_MODEL"
+                )
+            if self.embedding.revision is None:
+                raise ValueError(
+                    "openai embedding requires AI_AGENT_EMBEDDING_REVISION"
+                )
+        if (
+            self.online_enabled
+            and self.model_provider != "openai"
+            and self.embedding.provider != "openai"
+        ):
+            raise ValueError("online switch requires an online provider")
         return self
 
     @property
     def online_provider_enabled(self) -> bool:
         return self.model_provider == "openai" and self.online_enabled
+
+    @property
+    def online_embedding_enabled(self) -> bool:
+        return self.embedding.provider == "openai" and self.online_enabled
 
     def safe_summary(self) -> dict[str, object]:
         """Return fields suitable for logs without exposing provider secrets."""
@@ -239,6 +310,7 @@ class Settings(BaseModel):
             "openai_api_key_configured": self.openai_api_key is not None,
             "openai_model_configured": self.openai_model is not None,
             "budget": self.budget.model_dump(mode="json"),
+            "embedding": self.embedding.safe_summary(),
             "mcp": self.mcp.model_dump(mode="json"),
             "persistence": self.persistence.safe_summary(),
         }
@@ -304,6 +376,46 @@ class Settings(BaseModel):
                     max_model_retries=_read_int(
                         values,
                         "AI_AGENT_MAX_MODEL_RETRIES",
+                        2,
+                    ),
+                ),
+                embedding=EmbeddingSettings(
+                    provider=_read_name(
+                        values,
+                        "AI_AGENT_EMBEDDING_PROVIDER",
+                        "offline",
+                    ),
+                    model=_read_optional_text(
+                        values,
+                        "AI_AGENT_EMBEDDING_MODEL",
+                    ),
+                    revision=_read_optional_text(
+                        values,
+                        "AI_AGENT_EMBEDDING_REVISION",
+                    ),
+                    dimensions=_read_int(
+                        values,
+                        "AI_AGENT_EMBEDDING_DIMENSIONS",
+                        3,
+                    ),
+                    batch_size=_read_int(
+                        values,
+                        "AI_AGENT_EMBEDDING_BATCH_SIZE",
+                        32,
+                    ),
+                    cache_max_entries=_read_int(
+                        values,
+                        "AI_AGENT_EMBEDDING_CACHE_MAX_ENTRIES",
+                        256,
+                    ),
+                    request_timeout_ms=_read_int(
+                        values,
+                        "AI_AGENT_EMBEDDING_REQUEST_TIMEOUT_MS",
+                        20_000,
+                    ),
+                    max_retries=_read_int(
+                        values,
+                        "AI_AGENT_EMBEDDING_MAX_RETRIES",
                         2,
                     ),
                 ),
@@ -417,6 +529,22 @@ def _read_optional_secret(
 ) -> SecretStr | None:
     value = _read_optional_text(environment, name)
     return SecretStr(value) if value is not None else None
+
+
+def _normalize_optional_provider_label(
+    value: object,
+    name: str,
+) -> object:
+    if value is None or not isinstance(value, str):
+        return value
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if len(normalized) > 200 or any(
+        _is_control_or_whitespace(character) for character in normalized
+    ):
+        raise ValueError(f"{name} has an invalid format")
+    return normalized
 
 
 def _read_csv_names(

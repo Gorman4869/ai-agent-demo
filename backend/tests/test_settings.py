@@ -6,7 +6,12 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from backend.app.settings import McpClientSettings, Settings, SettingsError
+from backend.app.settings import (
+    EmbeddingSettings,
+    McpClientSettings,
+    Settings,
+    SettingsError,
+)
 
 
 class SettingsTest(unittest.TestCase):
@@ -28,6 +33,15 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(2_000, settings.budget.max_output_tokens)
         self.assertEqual(Decimal("0.25"), settings.budget.max_cost_usd)
         self.assertEqual(2, settings.budget.max_model_retries)
+        self.assertEqual("offline", settings.embedding.provider)
+        self.assertIsNone(settings.embedding.model)
+        self.assertIsNone(settings.embedding.revision)
+        self.assertEqual(3, settings.embedding.dimensions)
+        self.assertEqual(32, settings.embedding.batch_size)
+        self.assertEqual(256, settings.embedding.cache_max_entries)
+        self.assertEqual(20_000, settings.embedding.request_timeout_ms)
+        self.assertEqual(2, settings.embedding.max_retries)
+        self.assertFalse(settings.online_embedding_enabled)
         self.assertEqual((), settings.mcp.server_ids)
         self.assertEqual(5_000, settings.mcp.startup_timeout_ms)
         self.assertEqual(5_000, settings.mcp.request_timeout_ms)
@@ -141,6 +155,49 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual("agents_sdk", settings.runtime)
         self.assertEqual("configured-model", settings.openai_model)
 
+    def test_openai_embedding_gate_is_independent_from_chat_runtime(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_ONLINE_ENABLED": "true",
+                "OPENAI_API_KEY": "test-secret-value",
+                "AI_AGENT_EMBEDDING_PROVIDER": "openai",
+                "AI_AGENT_EMBEDDING_MODEL": "configured-embedding",
+                "AI_AGENT_EMBEDDING_REVISION": "course-v1",
+                "AI_AGENT_EMBEDDING_DIMENSIONS": "3",
+                "AI_AGENT_EMBEDDING_BATCH_SIZE": "2",
+                "AI_AGENT_EMBEDDING_CACHE_MAX_ENTRIES": "4",
+                "AI_AGENT_EMBEDDING_REQUEST_TIMEOUT_MS": "1500",
+                "AI_AGENT_EMBEDDING_MAX_RETRIES": "1",
+            }
+        )
+
+        self.assertEqual("manual", settings.runtime)
+        self.assertEqual("mock", settings.model_provider)
+        self.assertFalse(settings.online_provider_enabled)
+        self.assertTrue(settings.online_embedding_enabled)
+        self.assertEqual("configured-embedding", settings.embedding.model)
+        self.assertEqual("course-v1", settings.embedding.revision)
+        self.assertEqual(2, settings.embedding.batch_size)
+        self.assertEqual(4, settings.embedding.cache_max_entries)
+        self.assertEqual(1_500, settings.embedding.request_timeout_ms)
+        self.assertEqual(1, settings.embedding.max_retries)
+        self.assertNotIn(
+            "configured-embedding",
+            str(settings.safe_summary()["embedding"]),
+        )
+
+    def test_embedding_labels_and_key_do_not_enable_inactive_provider(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "OPENAI_API_KEY": "inactive-host-secret",
+                "AI_AGENT_EMBEDDING_MODEL": "configured-embedding",
+                "AI_AGENT_EMBEDDING_REVISION": "course-v1",
+            }
+        )
+
+        self.assertEqual("offline", settings.embedding.provider)
+        self.assertFalse(settings.online_embedding_enabled)
+
     def test_langgraph_can_use_mock_without_online_access(self) -> None:
         settings = Settings.from_environment(
             {
@@ -244,6 +301,70 @@ class SettingsTest(unittest.TestCase):
             with self.subTest(label=label):
                 with self.assertRaises(SettingsError):
                     Settings.from_environment(environment)
+
+    def test_incomplete_openai_embedding_gate_fails_closed(self) -> None:
+        complete = {
+            "AI_AGENT_ONLINE_ENABLED": "true",
+            "OPENAI_API_KEY": "test-secret-value",
+            "AI_AGENT_EMBEDDING_PROVIDER": "openai",
+            "AI_AGENT_EMBEDDING_MODEL": "configured-embedding",
+            "AI_AGENT_EMBEDDING_REVISION": "course-v1",
+        }
+        cases = {
+            "switch disabled": {
+                **complete,
+                "AI_AGENT_ONLINE_ENABLED": "false",
+            },
+            "missing key": {
+                key: value
+                for key, value in complete.items()
+                if key != "OPENAI_API_KEY"
+            },
+            "missing model": {
+                key: value
+                for key, value in complete.items()
+                if key != "AI_AGENT_EMBEDDING_MODEL"
+            },
+            "missing revision": {
+                key: value
+                for key, value in complete.items()
+                if key != "AI_AGENT_EMBEDDING_REVISION"
+            },
+        }
+
+        for label, environment in cases.items():
+            with self.subTest(label=label):
+                with self.assertRaises(SettingsError):
+                    Settings.from_environment(environment)
+
+    def test_invalid_embedding_settings_fail_closed(self) -> None:
+        cases = {
+            "AI_AGENT_EMBEDDING_PROVIDER": ("other",),
+            "AI_AGENT_EMBEDDING_MODEL": ("bad model", "x" * 201),
+            "AI_AGENT_EMBEDDING_REVISION": ("bad\nrevision", "x" * 201),
+            "AI_AGENT_EMBEDDING_DIMENSIONS": ("0", "32769", "many"),
+            "AI_AGENT_EMBEDDING_BATCH_SIZE": ("0", "2049", "many"),
+            "AI_AGENT_EMBEDDING_CACHE_MAX_ENTRIES": (
+                "0",
+                "100001",
+                "many",
+            ),
+            "AI_AGENT_EMBEDDING_REQUEST_TIMEOUT_MS": (
+                "99",
+                "120001",
+                "many",
+            ),
+            "AI_AGENT_EMBEDDING_MAX_RETRIES": ("-1", "6", "many"),
+        }
+
+        for name, values in cases.items():
+            for value in values:
+                with self.subTest(name=name, value=value):
+                    with self.assertRaises(SettingsError):
+                        Settings.from_environment({name: value})
+
+        with self.assertRaises(ValidationError):
+            EmbeddingSettings(model="bad model")
 
     def test_unknown_names_and_invalid_boolean_fail_closed(self) -> None:
         for environment in (
@@ -363,6 +484,17 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("\nAI_AGENT_POSTGRES_DSN=\n", content)
         self.assertIn("\nOPENAI_API_KEY=\n", content)
         self.assertIn("\nOPENAI_MODEL=\n", content)
+        self.assertIn("\nAI_AGENT_EMBEDDING_PROVIDER=offline\n", content)
+        self.assertIn("\nAI_AGENT_EMBEDDING_MODEL=\n", content)
+        self.assertIn("\nAI_AGENT_EMBEDDING_REVISION=\n", content)
+        self.assertIn("\nAI_AGENT_EMBEDDING_DIMENSIONS=3\n", content)
+        self.assertIn("\nAI_AGENT_EMBEDDING_BATCH_SIZE=32\n", content)
+        self.assertIn("\nAI_AGENT_EMBEDDING_CACHE_MAX_ENTRIES=256\n", content)
+        self.assertIn(
+            "\nAI_AGENT_EMBEDDING_REQUEST_TIMEOUT_MS=20000\n",
+            content,
+        )
+        self.assertIn("\nAI_AGENT_EMBEDDING_MAX_RETRIES=2\n", content)
 
 
 if __name__ == "__main__":
