@@ -2793,3 +2793,73 @@
 - `V-20260809-014` 的专项 57 项、共享相关回归 175 项、M1 隔离 10 项和完整离线门证据与当前实现、ADR、plan、known issue、status、后端规约及 handoff 一致。
 - 第三纵切实现提交已按上一 handoff 固定为 `93abc08`；没有发现新的代码/记录漂移。
 - 本记录只关闭第四纵切的文档连续性，不把 M11-T4 提升为 `verified`，也不增加默认 Container、PostgreSQL/pgvector context source、在线摘要、Provider usage/费用或统一 Run 证据。
+
+## V-20260809-016：M11-T4 默认内存 Container Context 任务验收
+
+- 任务：`M11-T4 / verified`；下一任务 `M11-T5 / planned`
+- 时间：2026-08-09 14:36，Asia/Shanghai
+- 验证目标：HEAD `c7971d6` 上的 M11-T4 第五离线纵切工作区
+- 任务等级：A 类默认 composition 与跨模块行为迁移；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用现有 Context/Identity/Memory/Knowledge/Skill/Runtime 合同；没有新增、安装、升级或删除依赖，没有修改数据库、Settings、HTTP 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `c7971d6` 为第四纵切实现提交，`93abc08`、`c0e0b11` 等前序提交连续存在 |
+| 按强制顺序读取 AGENTS、continuity README/status/playbook、M11-T4/M10-T3/M11-T1、ADR-0010/0013/0024/0025/0026、最新 handoff、`V-20260809-014/015` 与后端规约 | 0 | 当前动作确认为默认进程内 Container Context 第五纵切；status 中第四纵切 hash pending 是上一 handoff 明示由本次记录固定的正常提交节奏，没有代码/记录漂移 |
+| `git show --stat c7971d6` 与实际 Runtime/Context/Coordinator 代码复核 | 0 | 第四纵切 15 个文件与 handoff 一致；RuntimeContextIdentity、binding factory 和 execute/resume 传播均存在，没有任务外改动 |
+| handoff identity/Context/Coordinator 相关恢复集 | 0 | 175 项通过；只有既有 Starlette/httpx 警告和故障注入日志 |
+| handoff M1 `python -S` / 修改前连续性 | 0 / 0 | M1 10 项通过；52 个稳定任务、104 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首次修改后 `python -m unittest backend.tests.test_container -q` | 0 | 21 项通过；默认 Context wrapper、五来源真实 Manual 纵切、隔离和失败关闭均执行 |
+| 聚焦复审后最终 Container 专项 | 0 | 22 项通过；新增默认 LangGraph 经 Context wrapper 的真实工具结果/事件回归 |
+| 最终 Container/Context/Runtime/API/lifecycle/Memory/RAG/Settings/PostgreSQL composition 相关回归 | 0 | 244 项通过；只有既有 Starlette/httpx 警告、HTTP 诊断和故障注入日志，没有失败或新增 skip |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；Container Context imports 未进入 M1 标准库 Loop 顶层路径 |
+| 首次 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 1 | 后端 547 项通过、1 项既有 Windows symlink 能力跳过；Vue 因沙箱拒绝写 `frontend/tsconfig.app.tsbuildinfo` 返回 `TS5033/EPERM`，未发现类型或代码错误 |
+| 经授权在沙箱外重跑同一完整离线门 | 0 | 后端 547 项通过、1 项既有 Windows symlink 能力跳过；受控 Code Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建和 Docker Compose 配置全部通过 |
+
+### 实现与风险证据
+
+- `ApplicationContainer.create()` 先解析同一 MemoryStore/KnowledgeBase，再把一个共享 Skill builder、collector、identity binding factory 与固定 server system constraint 注入全部内建 Runtime。默认不再叠加 SkillAwareRuntime。
+- 真实默认 Manual 纵切从 Container 的同一 ConversationMemory 读取 approved fact/recent message，从同一 InMemoryKnowledgeBase 检索 citation，并解析真实 `research-summary` Skill；捕获的 Context prompt 按 system/skill/memory/recent/rag 渲染，trust 分别固定且 owner/session 不出现。
+- 两个 owner 与两个 session 的顺序执行只看到各自 message/fact。缺失 identity 与已有 prompt 都在 source 前返回稳定 `context_unavailable`；未知显式 Skill 不调用 delegate且失败 repr 不含名称。
+- 默认 LangGraph 实际经 Coordinator 和 Context wrapper 调用 `add_numbers`，答案、tool.started/tool.completed 和 Run 生命周期保持。在线 SDK 只验证延迟构造与既有 Mock 协议，不是 Provider 执行证据。
+- 显式 Runtime mapping 继续保持对象身份。PostgreSQL open 的默认 Runtime 继续是 SkillAwareRuntime，没有把同步 persistence Memory/pgvector 调入事件循环。
+
+### 聚焦复审与未验证范围
+
+- 复审核对依赖构造顺序、单一 prompt owner、身份/内容 repr、source 调用顺序、显式注入兼容、默认三 Runtime、PostgreSQL sync 边界和应用生命周期；未发现剩余阻断问题。测试中的真实 Loop 引用改为模块级稳定别名，并补 LangGraph 工具纵切。
+- 没有执行 PostgreSQL Memory/pgvector Context collection、消息持久写入、纠正/删除、版本冲突/审计、在线摘要、真实模型或 Provider。同步 PostgreSQL source 仍被明确排除。
+- 默认 fixed system constraint 是 server-owned 非秘密策略；没有新增外部配置。ContextAssembler 的 `ceil(bytes / 4)` 仍不是 Provider tokenizer、usage、模型窗口或费用。
+- `ContextAwareRuntime` 仍只有 `run()`；默认内建 Runtime 没有 approval resume。M10 显式 resumable Runtime 与 M11-T5 持久记忆恢复不属于本结论。
+- 没有配置 remote、执行 push、读取真实 Key、访问在线 Provider 或产生费用。
+
+### 结论
+
+- M11-T4 达到 `verified`：六来源领域合同、真实 source collector、Context Runtime、可信 Run identity、默认内存 Container 主链、长历史/关键 fact、预算、摘要失败、RAG trust 和用户隔离均有确定性离线 E3 证据。
+- 下一任务为 `M11-T5 / planned`。下一原子动作只固定 AsyncMemoryStore 的 Context 读取边界与取消/超时/隔离合同，不接同步 PostgreSQL/pgvector source，不提前实现消息写入、纠正/删除、版本审计或 M11-T6。
+
+## V-20260809-017：M11-T4 默认 Context Container 连续性闭环
+
+- 任务：`M11-T4 / verified`；当前任务 `M11-T5 / planned`
+- 时间：2026-08-09 14:41，Asia/Shanghai
+- 验证目标：HEAD `c7971d6` 上经 `V-20260809-016` 验证的第五纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 误用 `.\.venv\Scripts\python.exe scripts/verify_continuity.py` | 2 | 仓库不存在该脚本；这是只读命令定位错误，不是实现或连续性失败。随后从实际脚本清单和 handoff 恢复正确命令 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、105 个 Markdown 通过；`M11-T4 verified`、当前 `M11-T5 planned`、`V-20260809-016/017`、新 handoff、known issue 和恢复入口均可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 新 handoff 复核 | 0 | 7 个已跟踪修改与 1 个新 handoff，合计 8 个任务文件；未发现构建产物或任务外改动 |
+
+### 结论
+
+- `V-20260809-016` 的 Container 专项 22 项、相关回归 244 项、M1 隔离 10 项及完整离线门证据，与当前代码、实施计划、known issue、status、后端规约和 handoff 一致。
+- 本记录只关闭 M11-T4 的文档连续性；不新增代码或行为证据。M11-T5 保持 `planned`，下一原子动作仍只固定 async Context Memory 读取边界。

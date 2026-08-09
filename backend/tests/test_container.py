@@ -10,6 +10,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
+from backend.app.agent import (
+    CancellationToken,
+    RuntimeContextIdentity,
+    RuntimeControl,
+    RuntimeRequest,
+)
 from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.agent.sdk_runtime import OpenAIAgentsRuntime
 from backend.app.application_lifecycle import (
@@ -17,16 +23,22 @@ from backend.app.application_lifecycle import (
     ApplicationLifecycleState,
 )
 from backend.app.container import ApplicationContainer
+from backend.app.context import ContextAwareRuntime
+from backend.app.domain import Message
 from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.integrations.mcp import McpClientState
 from backend.app.knowledge import (
+    Document,
     InMemoryKnowledgeBase,
     create_deterministic_embedding_model,
 )
 from backend.app.main import create_app
-from backend.app.memory import ConversationMemory
+from backend.app.memory import ConversationMemory, MemoryScope
 from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import InMemoryRunService, RunCoordinator
+from backend.app.services.run_service import (
+    create_learning_agent_loop as create_original_learning_agent_loop,
+)
 from backend.app.settings import Settings
 from backend.app.settings import SettingsError
 from backend.app.skills import SkillAwareRuntime
@@ -68,7 +80,8 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIsInstance(container.run_service, InMemoryRunService)
         self.assertIsInstance(container.run_store, InMemoryRunStore)
         self.assertIsInstance(container.event_store, InMemoryEventStore)
-        self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
+        self.assertIsInstance(container.runtimes["manual"], ContextAwareRuntime)
+        self.assertNotIsInstance(container.runtimes["manual"], SkillAwareRuntime)
         self.assertNotIn("agents_sdk", container.runtimes)
         self.assertIsInstance(container.run_coordinator, RunCoordinator)
         self.assertEqual(McpClientState.CREATED, container.mcp_clients.state)
@@ -107,6 +120,7 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIs(run_store, container.run_store)
         self.assertIs(event_store, container.event_store)
         self.assertIs(runtime, container.runtimes["manual"])
+        self.assertNotIsInstance(container.runtimes["manual"], ContextAwareRuntime)
         self.assertIs(knowledge_base, container.knowledge_base)
         self.assertIs(embedding_model, container.embedding_model)
         self.assertIs(memory, container.memory)
@@ -148,6 +162,10 @@ class ApplicationContainerTest(unittest.TestCase):
         self.assertIsInstance(
             app.state.container.runtimes["langgraph"].delegate,
             LangGraphRuntime,
+        )
+        self.assertIsInstance(
+            app.state.container.runtimes["langgraph"],
+            ContextAwareRuntime,
         )
 
     def test_create_app_keeps_existing_dependency_injection_compatible(self) -> None:
@@ -205,7 +223,7 @@ class ApplicationContainerTest(unittest.TestCase):
             container.runtimes["agents_sdk"].delegate,
             OpenAIAgentsRuntime,
         )
-        self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
+        self.assertIsInstance(container.runtimes["manual"], ContextAwareRuntime)
 
     def test_online_embedding_composition_is_lazy_and_repr_safe(self) -> None:
         secret = "embedding-container-secret"
@@ -402,6 +420,8 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
             container.async_approval_store,
         )
         self.assertIs(coordinator, container.run_coordinator)
+        self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
+        self.assertNotIsInstance(container.runtimes["manual"], ContextAwareRuntime)
         self.assertEqual(ApplicationLifecycleState.CREATED, container.lifecycle_state)
         self.assertEqual(ApplicationAdmissionState.CREATED, container.admission.state)
         self.assertNotIn(dsn, repr(container))
@@ -480,6 +500,252 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
             ["run.started", "run.completed"],
             [event.type for event in events],
         )
+
+    async def test_default_container_collects_all_context_sources_for_runtime(
+        self,
+    ) -> None:
+        now = datetime(2026, 7, 16, 4, 0, tzinfo=UTC)
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        container.memory.append_message(
+            "context-session",
+            Message(role="user", content="trusted recent context"),
+        )
+        container.memory.remember(
+            owner_id="context-owner",
+            key="preferred_language",
+            value="Chinese",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        container.knowledge_base.add(
+            Document(
+                id="context-document",
+                title="Context evidence",
+                content="Source evidence confirms the container context path.",
+                source="course-fixture",
+            )
+        )
+        run = RunRecord.create(
+            run_id="context-container-run",
+            session_id="context-session",
+            owner_id="context-owner",
+            runtime="manual",
+            input_text=(
+                "Use $research-summary to summarize source evidence."
+            ),
+            idempotency_key="context-container-key",
+            created_at=now,
+        )
+        await container.run_store.create(run)
+        prompt_contexts: list[str | None] = []
+
+        def capture_loop(message: str, **kwargs):
+            prompt_contexts.append(kwargs.get("prompt_context"))
+            return create_original_learning_agent_loop(message, **kwargs)
+
+        with patch(
+            "backend.app.container.create_learning_agent_loop",
+            side_effect=capture_loop,
+        ):
+            completed = await container.run_coordinator.execute(
+                run.id,
+                owner_id=run.owner_id,
+            )
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(1, len(prompt_contexts))
+        payload = _context_payload(prompt_contexts[0])
+        fragments = payload["fragments"]
+        self.assertEqual(
+            ["system", "skill", "memory", "recent", "rag"],
+            [fragment["source"] for fragment in fragments],
+        )
+        self.assertEqual(
+            [
+                "trusted_policy",
+                "application_guidance",
+                "owner_scoped_data",
+                "user_content",
+                "untrusted_evidence",
+            ],
+            [fragment["trust"] for fragment in fragments],
+        )
+        rendered = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("application-owned identity", rendered)
+        self.assertIn("research-summary", rendered)
+        self.assertIn("preferred_language", rendered)
+        self.assertIn("trusted recent context", rendered)
+        self.assertIn("container context path", rendered)
+        self.assertNotIn(run.owner_id, rendered)
+        self.assertNotIn(run.session_id, rendered)
+
+    async def test_default_container_context_is_owner_and_session_isolated(
+        self,
+    ) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        for suffix in ("a", "b"):
+            container.memory.append_message(
+                f"session-{suffix}",
+                Message(role="user", content=f"recent-{suffix}-private"),
+            )
+            container.memory.remember(
+                owner_id=f"owner-{suffix}",
+                key=f"fact-{suffix}",
+                value=f"value-{suffix}-private",
+                scope=MemoryScope.USER,
+                approved=True,
+            )
+            await container.run_store.create(
+                RunRecord.create(
+                    run_id=f"isolated-run-{suffix}",
+                    session_id=f"session-{suffix}",
+                    owner_id=f"owner-{suffix}",
+                    runtime="manual",
+                    input_text=f"hello-{suffix}",
+                    idempotency_key=f"isolated-key-{suffix}",
+                    created_at=datetime(2026, 7, 16, 4, 0, tzinfo=UTC),
+                )
+            )
+        prompt_contexts: list[str | None] = []
+
+        def capture_loop(message: str, **kwargs):
+            prompt_contexts.append(kwargs.get("prompt_context"))
+            return create_original_learning_agent_loop(message, **kwargs)
+
+        with patch(
+            "backend.app.container.create_learning_agent_loop",
+            side_effect=capture_loop,
+        ):
+            for suffix in ("a", "b"):
+                completed = await container.run_coordinator.execute(
+                    f"isolated-run-{suffix}",
+                    owner_id=f"owner-{suffix}",
+                )
+                self.assertEqual(RunStatus.COMPLETED, completed.status)
+
+        first = json.dumps(_context_payload(prompt_contexts[0]), ensure_ascii=False)
+        second = json.dumps(_context_payload(prompt_contexts[1]), ensure_ascii=False)
+        self.assertIn("recent-a-private", first)
+        self.assertIn("value-a-private", first)
+        self.assertNotIn("recent-b-private", first)
+        self.assertNotIn("value-b-private", first)
+        self.assertIn("recent-b-private", second)
+        self.assertIn("value-b-private", second)
+        self.assertNotIn("recent-a-private", second)
+        self.assertNotIn("value-a-private", second)
+
+    async def test_default_container_context_failures_do_not_reach_sources(
+        self,
+    ) -> None:
+        memory = Mock()
+        knowledge = Mock()
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({}),
+            memory=memory,
+            knowledge_base=knowledge,
+        )
+        runtime = container.runtimes["manual"]
+        control = RuntimeControl(CancellationToken())
+
+        missing_identity = await runtime.run(
+            RuntimeRequest(run_id="missing-identity", input_text="private"),
+            emit=_ignore_event,
+            control=control,
+        )
+        existing_prompt = await runtime.run(
+            RuntimeRequest(
+                run_id="existing-prompt",
+                input_text="private",
+                prompt_context="untrusted prompt",
+                context_identity=RuntimeContextIdentity(
+                    owner_id="trusted-owner",
+                    session_id="trusted-session",
+                ),
+            ),
+            emit=_ignore_event,
+            control=control,
+        )
+
+        self.assertEqual("context_unavailable", missing_identity.failure.code)
+        self.assertEqual("context_unavailable", existing_prompt.failure.code)
+        memory.messages.assert_not_called()
+        memory.facts.assert_not_called()
+        knowledge.search.assert_not_called()
+
+    async def test_default_container_unknown_skill_fails_closed(self) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        run = RunRecord.create(
+            run_id="unknown-skill-run",
+            session_id="unknown-skill-session",
+            owner_id="unknown-skill-owner",
+            runtime="manual",
+            input_text="Use $missing-private-skill now.",
+            idempotency_key="unknown-skill-key",
+            created_at=datetime(2026, 7, 16, 4, 0, tzinfo=UTC),
+        )
+        await container.run_store.create(run)
+
+        failed = await container.run_coordinator.execute(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertEqual(RunStatus.FAILED, failed.status)
+        self.assertEqual("context_unavailable", failed.failure.code)
+        self.assertNotIn("missing-private-skill", repr(failed))
+
+    async def test_default_langgraph_keeps_tool_result_through_context(self) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment(
+                {"AI_AGENT_RUNTIME": "langgraph"}
+            )
+        )
+        run = RunRecord.create(
+            run_id="context-langgraph-run",
+            session_id="context-langgraph-session",
+            owner_id="context-langgraph-owner",
+            runtime="langgraph",
+            input_text="calculate 2 and 3",
+            idempotency_key="context-langgraph-key",
+            created_at=datetime(2026, 7, 16, 4, 0, tzinfo=UTC),
+        )
+        await container.run_store.create(run)
+
+        completed = await container.run_coordinator.execute(
+            run.id,
+            owner_id=run.owner_id,
+        )
+        events = await container.event_store.list_for_run(
+            run.id,
+            owner_id=run.owner_id,
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual("计算结果是 5", completed.answer)
+        self.assertEqual(
+            [
+                "run.started",
+                "tool.started",
+                "tool.completed",
+                "run.completed",
+            ],
+            [event.type for event in events],
+        )
+
+
+def _context_payload(prompt_context: str | None) -> dict[str, object]:
+    assert prompt_context is not None
+    return json.loads(prompt_context[prompt_context.index("{") :])
+
+
+async def _ignore_event(event) -> None:
+    del event
 
 
 if __name__ == "__main__":

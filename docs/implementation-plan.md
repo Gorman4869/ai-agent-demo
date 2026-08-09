@@ -709,6 +709,15 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 7 个关键测试方法或等价覆盖；专项 57 项、共享相关回归 175 项、M1 隔离 10 项通过。因修改跨模块共享 `RuntimeRequest` 合同，完整离线门已触发：后端 542 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。
 - 本纵切达到可信身份传播的显式离线 E3，但 M11-T4 保持 `in_progress`：默认 Container 尚未采用 ContextAwareRuntime，持久 PostgreSQL Memory/pgvector source 仍缺适当 async 边界。下一纵切只迁移默认进程内组合并保持显式 Runtime 注入不变，不进入 M11-T5/M11-T6。
 
+#### M11-T4 第五个离线纵切与任务验收结果
+
+- 默认内存 `ApplicationContainer.create()` 先解析同一份 ConversationMemory 与 InMemoryKnowledgeBase，再用共享 SkillContextBuilder、ContextSourceCollector、RuntimeIdentityBindingFactory 和固定应用 system constraint 包装所有内建 Manual/LangGraph/SDK Runtime；旧 SkillAwareRuntime 不再叠加。
+- 显式 caller-supplied Runtime mapping 仍原对象透传。显式 PostgreSQL `ApplicationContainer.open()` 继续保留旧 Skill wrapper，没有把同步 PostgreSQL Memory 或 pgvector 放入 async Context collector；持久 source 接线由 M11-T5 的 async 边界承接。
+- 默认 Container→RunCoordinator→ContextAwareRuntime→真实进程内 system/Skill/Memory/recent/RAG→ManualRuntime 纵切已执行；捕获的 prompt 保持固定 render/trust 顺序且不含 owner/session。另有默认 LangGraph 工具执行纵切证明结果与事件语义保持不变。
+- 新增 5 个关键测试方法并收紧既有 Container 等价覆盖：五来源注入、两组 owner/session 隔离、缺失 identity/已有 prompt 在 source 前失败、未知 Skill 脱敏失败、默认 LangGraph 工具结果、显式 Runtime 保留与 PostgreSQL 边界均通过。
+- Container 专项 22 项、Context/Runtime/Container/API/lifecycle/Memory/RAG/Settings/PostgreSQL composition 相关回归 244 项和 M1 隔离 10 项通过。共享默认 composition 行为变化触发完整离线门：后端 547 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。
+- M11-T4 达到 `verified`：长历史裁剪、关键 approved fact 保留、恶意 RAG trust 隔离、预算/摘要失败、不同用户隔离、可解释报告、可信 Run 身份和默认内存主链均有离线 E3。该结论不是 PostgreSQL/pgvector Context、持久消息写入、在线摘要、Provider Token/费用或真实模型质量证据；下一任务为 M11-T5。
+
 ### M11-T5：持久记忆进入主 Run
 
 - 依赖：M11-T1、M11-T4。

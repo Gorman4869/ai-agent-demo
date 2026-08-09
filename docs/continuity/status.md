@@ -3,7 +3,7 @@
 - 更新时间：2026-08-09，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`93abc08`
+- 最近已确认实现提交：`c7971d6`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -41,7 +41,8 @@
 - M11-T4 第一纵切验证基线提交：`02664b8`；实现提交：`9b052c2`
 - M11-T4 第二纵切验证基线提交：`9b052c2`；实现提交：`c0e0b11`
 - M11-T4 第三纵切验证基线提交：`c0e0b11`；实现提交：`93abc08`
-- M11-T4 第四纵切验证基线提交：`93abc08`；实现提交待本轮 Git 固定
+- M11-T4 第四纵切验证基线提交：`93abc08`；实现提交：`c7971d6`
+- M11-T4 第五纵切验证基线提交：`c7971d6`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -49,14 +50,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M11-T4` |
-| 状态 | `in_progress` |
-| 目标 | 建立 ContextAssembler 的来源选择、排序、Token 预算和可解释报告合同 |
-| 设计依据 | 实施计划 M11-T4、M10-T3 上下文入口、`ADR-0010`、`ADR-0013`、`ADR-0024`、`ADR-0025` 与 `ADR-0026` |
+| 任务 ID | `M11-T5` |
+| 状态 | `planned` |
+| 目标 | 让持久记忆进入主 Run，覆盖消息写入、短期窗口、经批准长期事实、纠正/删除、版本冲突和审计 |
+| 设计依据 | 实施计划 M11-T5、已 verified 的 M11-T1/M11-T4、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025` 与 `ADR-0026` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T4 第四纵切已新增 repr-safe RuntimeContextIdentity，共享 RunCoordinator execute/resume 只从 owned RunRecord 传播 owner/session；具体 binding factory 只映射受信身份，缺失或 checkpoint owner 冲突 fail closed，并已完成 Coordinator→真实进程内 collector/Assembler→delegate 纵切，但尚未接默认 Container |
-| 前置证据 | `V-20260809-014`、`ADR-0026`、第四纵切验证基线与第三纵切实现提交 `93abc08`，以及前三纵切 `V-20260809-008` 至 `013` |
-| 下一动作 | 继续 M11-T4 第五个纵切：只让默认进程内 Container Runtime 采用单一 ContextAwareRuntime/collector 组合，替换而非叠加 SkillAwareRuntime，并保持显式 caller-supplied Runtime mapping 不变；不接同步 PostgreSQL/pgvector context source，不进入 M11-T5/M11-T6 |
+| 当前修改 | M11-T4 第五纵切已让默认内存 Container 使用单一 ContextAwareRuntime，共享同一 Memory/Knowledge/Skill collector 与固定 system constraint；默认 Manual/LangGraph 真实纵切、owner/session 隔离和失败关闭通过，显式 Runtime 与 PostgreSQL 同步 source 边界保持不变，M11-T4 已 verified |
+| 前置证据 | `V-20260809-016/017`、`ADR-0025`、`ADR-0026`、第五纵切验证基线与第四纵切实现提交 `c7971d6`，以及 M11-T4 前四纵切 `V-20260809-008` 至 `015` |
+| 下一动作 | 开始 M11-T5 第一个离线纵切：先固定异步 Context Memory 读取边界，复用现有 AsyncMemoryStore messages/facts 且保留同步内存 collector；覆盖取消/超时、owner/session 隔离和 no-sync-on-event-loop，再决定默认 PostgreSQL Context 接线。不实现消息写入、纠正/删除、版本审计或 M11-T6 |
 
 ## 里程碑状态
 
@@ -67,7 +68,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T3 已 `verified`；M11-T4 已完成有界 Context 领域合同、同步 Memory/RAG/Skill source collector、显式 ContextAwareRuntime E3 和可信 RunRecord owner/session 传播。默认 Container 接线、持久 source async 边界、记忆 API 主链、固定 RAG 评测与在线冒烟仍由 M11-T4–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T4 已 `verified`；默认内存 Container 已使用有界 ContextAssembler、真实 Memory/RAG/Skill source 和可信 Run identity。持久 source async 边界、记忆写入/纠正/删除、固定 RAG 评测与在线冒烟由 M11-T5–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -80,22 +81,26 @@
 
 ## 未验证范围
 
+- M11-T4 第五纵切见 `V-20260809-016`：新增 5 个关键测试方法并收紧既有 Container 覆盖，专项 22 项、相关回归 244 项、M1 隔离 10 项和完整离线门通过；全量后端 547 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线和第四纵切实现提交均为 `c7971d6`，本轮实现提交在结束时固定。
+- 默认内存 Container 已用单一 ContextAwareRuntime 替换 SkillAwareRuntime 叠加，真实 system/Skill/approved fact/recent/RAG prompt 进入 ManualRuntime，默认 LangGraph 工具结果和事件保持。显式 caller Runtime 不包装；PostgreSQL open 保留旧 Skill wrapper，不能描述成持久 Context 主链。
+- 第五纵切没有执行 PostgreSQL Memory/pgvector Context、消息持久写入、纠正/删除、版本审计、在线摘要或 Provider；SDK 默认 Runtime 只完成离线构造与既有 Mock 边界回归，没有在线模型调用、Token/usage 或费用证据。
+- M11-T4 已 `verified` 只代表确定性离线 Context 选择、预算、隔离和默认内存主链满足任务验收。M11-T5–T7 与 M12/M13 的持久记忆、RAG 指标、在线 E4、统一 Run 和生产边界不属于该结论。
 - M11-T4 第四纵切见 `V-20260809-014`：新增 7 个关键测试方法或等价覆盖，专项 57 项、共享相关回归 175 项、M1 隔离 10 项和完整离线门通过；全量后端 542 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线和第三纵切实现提交均为 `93abc08`，本轮实现提交在结束时固定。
-- RunCoordinator execute/resume 现在都从 owned RunRecord 构造 RuntimeContextIdentity，并与 checkpoint owner 一致；显式 ContextAwareRuntime 已通过真实 ConversationMemory/Knowledge/Skill collector 和 Assembler 到 delegate。默认 Container 尚未采用该 adapter，不能描述为默认 Agent 或统一 Run 主链已经使用完整 Context。
+- 第四纵切当时只完成显式 ContextAwareRuntime；第五纵切已让默认内存 Container 采用该 adapter。RunCoordinator execute/resume 继续只从 owned RunRecord 构造 identity 并与 checkpoint owner 一致；默认 PostgreSQL 与统一 Run 仍未采用持久 Context source。
 - 第四纵切没有执行 PostgreSQL Memory/pgvector context collection、在线摘要、Provider 或真实模型。同步 source 仍不得进入 async 数据库主链；delegate 是确定性测试替身，证据不包含回答质量、Token/usage、费用或线上提示遵循。
 - 共享 RuntimeRequest 合同变化已触发完整离线门。首次沙箱内门禁的后端 542 项通过，但 Vue 因沙箱拒绝写 `tsconfig.app.tsbuildinfo` 返回 EPERM；同一命令经授权在沙箱外重跑后全部通过，该环境失败不作为代码失败也不被隐藏。
 - M11-T4 第三纵切见 `V-20260809-012`：新增 10 个关键测试方法，专项 10 项、Context/collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 108 项和 M1 隔离 10 项通过；验证基线与第二纵切实现提交均为 `c0e0b11`，本轮实现提交在结束时固定。
-- 当前 ContextAwareRuntime 是显式同步 source adapter。可信 factory 实际收到原 RuntimeRequest 并提供 owner/session/system，query 强制取 input_text；但 RunCoordinator 尚未从 RunRecord 传播这组身份，默认 Container 仍只使用 SkillAwareRuntime，不能描述成默认 Agent 主链已使用完整 Context。
+- 第三纵切当时的 ContextAwareRuntime 是显式同步 source adapter；第四纵切已补 RunRecord 身份传播，第五纵切已补默认内存 Container，但持久 PostgreSQL source 仍未接入。
 - 新增离线纵切使用真实 ConversationMemory、InMemoryKnowledgeBase、SkillContextBuilder、collector 和 Assembler，但 AgentRuntime delegate 是确定性 Fake；没有运行 PostgreSQL Memory/pgvector、在线摘要、Provider 或默认 HTTP/Container 上下文调用。
 - ContextAwareRuntime 位于 async Runtime 边界却调用同步 collector；当前仅证明离线内存路径。不得把同步 PostgreSQL/pgvector 接入事件循环，后续默认组合需要可信身份传播和适当 async source 边界。
 - 第三纵切没有修改现有 RuntimeRequest/AgentRuntime/Store/Container 公共契约、依赖、数据库、构建或跨前后端接口；108 项相关回归和 M1 隔离覆盖修改面，因此按交付协议未运行完整全仓门、Vue/MCP 构建或真实数据库集成。
 - M11-T4 第二纵切见 `V-20260809-010/011`：新增 10 个关键测试方法或等价覆盖，collector 专项 10 项、相关定向 98 项、M1 隔离 10 项和连续性 52/101 通过；验证基线与第一纵切实现提交均为 `9b052c2`，本轮实现提交在结束时固定。
 - 当前 collector 同步调用现有 MemoryStore/KnowledgeBase/SkillContextBuilder，并由 `ConversationMemory`、`InMemoryKnowledgeBase` 和真实 SkillContextBuilder 离线 fixture 证明 E3；没有运行 PostgreSQL Memory/pgvector、在线摘要或 Provider，不能描述为持久/在线证据。
-- MemoryStore 的消息合同只有 server-provided session ID，没有消息 owner 字段；collector 能校验每条 fact owner，但 session→owner 绑定仍由可信调用方负责。collector 尚未进入 Runtime/Container，不能证明默认 Agent 主链已经使用这些上下文。
+- MemoryStore 的消息合同只有 server-provided session ID，没有消息 owner 字段；collector 能校验每条 fact owner，默认内存 Container 已通过 RunRecord identity 绑定 session→owner，但合同仍依赖应用只创建合法 RunRecord，M11-T5 持久主链必须保持该边界。
 - 摘要使用显式 `ContextSummaryResult` fixture 表示成功、无摘要或 unavailable，没有调用模型。失败不会拼回窗口外历史，但这不证明真实摘要质量、Provider Token/usage、费用或在线故障行为。
 - 第二纵切没有修改既有 Store/Runtime/Container 协议、依赖、数据库、构建或跨前后端接口；98 项相关回归和 M1 隔离覆盖修改面，因此按交付协议未重复运行完整全仓门、Vue/MCP 构建或真实数据库集成。
 - M11-T4 第一纵切见 `V-20260809-008/009`：新增 10 个关键测试方法或等价覆盖，最终 Context/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 88 项、M1 隔离 10 项和连续性 52/100 通过；验证基线为 `02664b8`，本轮实现提交在结束时固定。
-- 当前 ContextAssembler 只消费应用层已收集片段，不直接读取 MemoryStore/KnowledgeBase/SkillBuilder，不生成摘要，也没有接入默认 Runtime/Container。它证明领域选择与隔离合同，不证明真实主链长对话质量。
+- 第一纵切的 ContextAssembler 仍只消费应用层已收集片段；后续 collector/Runtime/default memory Container 已提供真实离线主链，但它仍不生成在线摘要或证明持久/真实模型长对话质量。
 - `ceil(UTF-8 bytes / 4)` 是离线估算，8,000 单位只用于守住 32 KB prompt_context 字节边界；不是 Provider tokenizer、usage、模型上下文窗口、费用或账单证据，`KI-018` 保持 open。
 - RAG JSON 逃逸测试证明内容不能伪造 source/trust 结构，不能证明真实模型永远遵循安全头部。在线模型、持久记忆读取/纠正、固定 50 条 RAG 指标与统一 Run 仍未验证。
 - 本纵切没有修改依赖、锁文件、共享 Runtime/Container/Store、数据库、构建或跨前后端接口；88 项定向与 M1 隔离覆盖修改面，因此按交付协议未重复运行完整全仓门、Vue/MCP 构建或真实数据库集成。
@@ -185,4 +190,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t4-runtime-context-identity.md`，再核对 `V-20260809-014/015`、`ADR-0010`、`ADR-0013`、`ADR-0025`、`ADR-0026`、验证基线 `93abc08`、实施计划 M11-T4 和实际 RuntimeContextIdentity/RunCoordinator/ContextAwareRuntime 代码。按 handoff 重跑 identity/Context/Coordinator 相关 175 项、M1 10 项和连续性 52/104；若一致，不要重做 M11-T1–T3 或 M11-T4 前四纵切，下一步只接默认进程内 Container Context runtime，不接同步 PostgreSQL/pgvector source。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T5/M11-T6/M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t4-default-context-container.md`，再核对 `V-20260809-016/017`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、验证基线 `c7971d6`、实施计划 M11-T5 和实际 Container/Context/AsyncMemoryStore 代码。按 handoff 重跑 Container/Context/Runtime/API/lifecycle/Memory/RAG/Settings/PostgreSQL composition 相关 244 项、M1 10 项和连续性 52/105；若一致，不要重做 M11-T1–T4，下一步只固定 async Context Memory 读取边界，不接同步 PostgreSQL/pgvector source，不提前实现写入/纠正/删除。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T6/M12/M13。
