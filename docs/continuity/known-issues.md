@@ -9,7 +9,7 @@
 | KI-003 | high | closed | M8 | LangChain 已通过 `create_agent().invoke()` 实际执行离线工具循环，并保留不接入主 Run 的取舍结论 | `V-20260716-008`：对照实验、零网络测试和取舍文档通过 |
 | KI-004 | high | mitigated | M10–M12 | M10 已完成审批与同进程结果未知故障边界；M11-T1 已跨进程恢复 checkpoint、审批私有状态和 ToolExecution，并把 lease、scanner、quiesce、async façade 与默认 opt-in Container/FastAPI 生命周期接通。真实应用 fact 可跨两个 lifespan 恢复，但旧 Run HTTP 仍是内存 service | `V-20260722-009`、`V-20260803-001`、`V-20260803-003`、`V-20260803-005`、`V-20260808-002`、`V-20260808-005`、`V-20260808-007`、`V-20260808-009`、`V-20260808-013`；M12 统一 durable Run API 的进程重启/续传证据通过后关闭 |
 | KI-005 | high | mitigated | M10–M12 | M10-T3 已把有界动态计划、失败诊断、白名单重规划、预算/循环停止和副作用禁重放接入可注入的 durable Coordinator Run；M11-T1 已迁移默认 opt-in PostgreSQL Container，但旧 Run/ContextAssembler 的上下文选择和记忆注入仍未进入统一主链 | `V-20260722-001`、`V-20260808-013`；M11 长对话、记忆纠错与 M12 统一 Run 上下文评测通过后关闭 |
-| KI-006 | high | mitigated | M11 | M11-T2 已完成真实 pgvector schema/CRUD/seed；M11-T3 第一纵切已完成确定性离线 Embedding、批次和维度元数据。缓存/重试、在线 Provider 与固定检索指标仍未完成 | `V-20260809-001`：真实 pgvector；`V-20260809-003`：离线 Embedding 批次 E3；最终关闭仍需 M11-T3/M11-T6 固定评测集 |
+| KI-006 | high | mitigated | M11 | M11-T2 已完成真实 pgvector schema/CRUD/seed；M11-T3 已完成确定性离线 Embedding、批次/维度元数据、版本化进程内缓存和显式暂时性批次 retry。在线 Provider、持久/跨进程缓存与固定检索指标仍未完成 | `V-20260809-001`：真实 pgvector；`V-20260809-003`：离线 Embedding 批次 E3；`V-20260809-004`：缓存/retry E3；最终关闭仍需 M11-T3/M11-T6 固定评测集 |
 | KI-007 | high | open | M12 | SSE 在 Run 完成后回放；前端再次调用 Research API 覆盖答案 | 单 Run 真流式、续传和刷新恢复 E2E 通过 |
 | KI-008 | high | open | M12–M13 | M9-T3 已补 TypeScript MCP STDIO 协议自动化；仍缺前端和真实数据库自动化测试及统一分层门 | 分层测试进入统一验证和 CI |
 | KI-009 | medium | open | M13 | Compose 仅配置通过，镜像和容器健康未验证 | Docker 构建、健康和 Nginx SSE 验证通过 |

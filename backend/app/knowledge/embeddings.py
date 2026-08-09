@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import math
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from hashlib import sha256
+from json import dumps
+from threading import Lock
 from typing import Protocol, Sequence
 
 
 _MAX_METADATA_TEXT = 200
 _TOKEN_PATTERN = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]")
+_CACHE_KEY_VERSION = 1
+_CACHE_KEY_PATTERN = re.compile(
+    rf"embedding:v{_CACHE_KEY_VERSION}:[0-9a-f]{{64}}"
+)
 
 
 class EmbeddingError(RuntimeError):
@@ -36,6 +43,14 @@ class EmbeddingValueError(EmbeddingError):
 
 class EmbeddingMetadataError(EmbeddingError):
     code = "embedding_metadata_changed"
+
+
+class RetryableEmbeddingError(EmbeddingError):
+    code = "embedding_provider_temporarily_unavailable"
+
+
+class EmbeddingRetryExhaustedError(EmbeddingError):
+    code = "embedding_retry_exhausted"
 
 
 @dataclass(frozen=True)
@@ -77,6 +92,12 @@ class EmbeddingProvider(Protocol):
     ) -> Sequence[Sequence[float]]: ...
 
 
+class EmbeddingCache(Protocol):
+    def get(self, key: str) -> Sequence[float] | None: ...
+
+    def put(self, key: str, vector: Sequence[float]) -> None: ...
+
+
 class EmbeddingModel(Protocol):
     @property
     def metadata(self) -> EmbeddingMetadata: ...
@@ -89,6 +110,84 @@ class EmbeddingModel(Protocol):
     ) -> Sequence[Sequence[float]]: ...
 
 
+class InMemoryEmbeddingCache:
+    """Bounded process-local cache for validated embedding vectors."""
+
+    def __init__(self, *, max_entries: int = 256) -> None:
+        if (
+            not isinstance(max_entries, int)
+            or isinstance(max_entries, bool)
+            or max_entries < 1
+        ):
+            raise ValueError("embedding cache max_entries must be positive")
+        self._max_entries = max_entries
+        self._entries: OrderedDict[str, tuple[float, ...]] = OrderedDict()
+        self._lock = Lock()
+
+    def get(self, key: str) -> tuple[float, ...] | None:
+        _validate_cache_key(key)
+        with self._lock:
+            vector = self._entries.get(key)
+            if vector is not None:
+                self._entries.move_to_end(key)
+            return vector
+
+    def put(self, key: str, vector: Sequence[float]) -> None:
+        _validate_cache_key(key)
+        stored = tuple(vector)
+        with self._lock:
+            self._entries[key] = stored
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+
+
+class RetryingEmbeddingProvider:
+    """Retry only explicitly classified transient provider failures."""
+
+    def __init__(
+        self,
+        provider: EmbeddingProvider,
+        *,
+        max_retries: int = 2,
+    ) -> None:
+        if (
+            not isinstance(max_retries, int)
+            or isinstance(max_retries, bool)
+            or max_retries < 0
+        ):
+            raise ValueError("embedding max_retries must not be negative")
+        self._provider = provider
+        self._metadata = provider.metadata
+        self._max_retries = max_retries
+
+    @property
+    def metadata(self) -> EmbeddingMetadata:
+        return self._metadata
+
+    def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> Sequence[Sequence[float]]:
+        batch = tuple(texts)
+        for retry_attempt in range(self._max_retries + 1):
+            self._ensure_metadata()
+            try:
+                vectors = self._provider.embed_batch(batch)
+            except RetryableEmbeddingError:
+                self._ensure_metadata()
+                if retry_attempt >= self._max_retries:
+                    raise EmbeddingRetryExhaustedError() from None
+                continue
+            self._ensure_metadata()
+            return vectors
+        raise AssertionError("embedding retry loop exhausted unexpectedly")
+
+    def _ensure_metadata(self) -> None:
+        if self._provider.metadata != self._metadata:
+            raise EmbeddingMetadataError()
+
+
 class BatchingEmbeddingModel:
     """Validate and split arbitrary input into provider-owned batches."""
 
@@ -97,6 +196,7 @@ class BatchingEmbeddingModel:
         provider: EmbeddingProvider,
         *,
         batch_size: int = 32,
+        cache: EmbeddingCache | None = None,
     ) -> None:
         if (
             not isinstance(batch_size, int)
@@ -107,6 +207,7 @@ class BatchingEmbeddingModel:
         self._provider = provider
         self._metadata = provider.metadata
         self._batch_size = batch_size
+        self._cache = cache
 
     @property
     def metadata(self) -> EmbeddingMetadata:
@@ -123,12 +224,47 @@ class BatchingEmbeddingModel:
         if not normalized:
             return ()
 
+        if self._cache is None:
+            return self._embed_provider_batches(normalized)
+
+        keys = tuple(
+            build_embedding_cache_key(self._metadata, text)
+            for text in normalized
+        )
+        resolved: dict[str, tuple[float, ...]] = {}
+        missing: dict[str, str] = {}
+        for key, text in zip(keys, normalized):
+            if key in resolved or key in missing:
+                continue
+            cached = self._cache.get(key)
+            if cached is None:
+                missing[key] = text
+            else:
+                resolved[key] = _validate_vector(
+                    cached,
+                    self._metadata.dimensions,
+                )
+
+        new_entries: tuple[tuple[str, tuple[float, ...]], ...] = ()
+        if missing:
+            vectors = self._embed_provider_batches(tuple(missing.values()))
+            new_entries = tuple(zip(missing, vectors))
+            resolved.update(new_entries)
+
+        for key, vector in new_entries:
+            self._cache.put(key, vector)
+        return tuple(resolved[key] for key in keys)
+
+    def _embed_provider_batches(
+        self,
+        normalized: Sequence[str],
+    ) -> tuple[tuple[float, ...], ...]:
         vectors: list[tuple[float, ...]] = []
         for start in range(0, len(normalized), self._batch_size):
-            if self._provider.metadata != self._metadata:
-                raise EmbeddingMetadataError()
+            self._ensure_metadata()
             batch = normalized[start : start + self._batch_size]
             provided = tuple(self._provider.embed_batch(batch))
+            self._ensure_metadata()
             if len(provided) != len(batch):
                 raise EmbeddingBatchError()
             vectors.extend(
@@ -136,6 +272,10 @@ class BatchingEmbeddingModel:
                 for vector in provided
             )
         return tuple(vectors)
+
+    def _ensure_metadata(self) -> None:
+        if self._provider.metadata != self._metadata:
+            raise EmbeddingMetadataError()
 
 
 class DeterministicEmbeddingProvider:
@@ -179,11 +319,36 @@ def create_deterministic_embedding_model(
     *,
     dimensions: int = 3,
     batch_size: int = 32,
+    cache: EmbeddingCache | None = None,
 ) -> BatchingEmbeddingModel:
     return BatchingEmbeddingModel(
         DeterministicEmbeddingProvider(dimensions=dimensions),
         batch_size=batch_size,
+        cache=cache,
     )
+
+
+def build_embedding_cache_key(
+    metadata: EmbeddingMetadata,
+    text: str,
+) -> str:
+    normalized = _normalize_text(text)
+    payload = {
+        "dimensions": metadata.dimensions,
+        "model": metadata.model,
+        "provider": metadata.provider,
+        "revision": metadata.revision,
+        "text_sha256": sha256(normalized.encode("utf-8")).hexdigest(),
+        "version": _CACHE_KEY_VERSION,
+    }
+    canonical = dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = sha256(canonical.encode("utf-8")).hexdigest()
+    return f"embedding:v{_CACHE_KEY_VERSION}:{digest}"
 
 
 def _normalize_text(text: str) -> str:
@@ -210,10 +375,16 @@ def _validate_vector(
     return values
 
 
+def _validate_cache_key(key: str) -> None:
+    if not isinstance(key, str) or _CACHE_KEY_PATTERN.fullmatch(key) is None:
+        raise ValueError("embedding cache key is invalid")
+
+
 __all__ = [
     "BatchingEmbeddingModel",
     "DeterministicEmbeddingProvider",
     "EmbeddingBatchError",
+    "EmbeddingCache",
     "EmbeddingDimensionError",
     "EmbeddingError",
     "EmbeddingInputError",
@@ -221,6 +392,11 @@ __all__ = [
     "EmbeddingMetadataError",
     "EmbeddingModel",
     "EmbeddingProvider",
+    "EmbeddingRetryExhaustedError",
     "EmbeddingValueError",
+    "InMemoryEmbeddingCache",
+    "RetryableEmbeddingError",
+    "RetryingEmbeddingProvider",
+    "build_embedding_cache_key",
     "create_deterministic_embedding_model",
 ]

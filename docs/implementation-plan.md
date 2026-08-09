@@ -653,6 +653,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 12 个关键测试方法或等价覆盖；知识/API 定向 67 项、M1 隔离 10 项通过。没有依赖、Settings、schema 或跨前后端接口变化，因此不重复完整全仓门。
 - 本纵切达到本地 E3，但 M11-T3 保持 `in_progress`：缓存命中、暂时性重试、显式在线 SDK Adapter/Settings 和真实授权冒烟尚未实现。
 
+#### M11-T3 第二个离线纵切边界
+
+- 新增版本化 `embedding:v1:<sha256>` key、线程安全且容量有界的进程内 LRU，以及可选缓存的 Batching Model；规范化重复输入只请求一次 Provider，缓存命中仍复核向量合同。
+- 所有 miss 批次成功且完成 metadata/数量/维度/有限值校验后才写缓存；后批失败或 retry 耗尽不缓存已成功前缀，非法 key 和污染向量 fail closed。
+- 新增 `RetryableEmbeddingError` 与 `RetryingEmbeddingProvider`；每次尝试快照同一 Provider batch，只重试显式暂时性错误，耗尽映射稳定错误，协议/维度/metadata 错误不重试。
+- 新增 11 个关键测试方法；Embedding/PgVector/RAG/API/Container 定向 78 项、真实 pgvector 4 项和 M1 隔离 10 项通过。没有依赖、Settings、schema 或跨前后端接口变化，因此不重复完整全仓门。
+- 本纵切达到本地 E3，但 M11-T3 保持 `in_progress`：显式在线 SDK Adapter、embedding-specific Settings/composition 与真实授权冒烟尚未完成；内存缓存也不是持久或跨进程证据。
+
 ### M11-T4：ContextAssembler 与 Token 预算
 
 - 依赖：M10-T3、M11-T3。

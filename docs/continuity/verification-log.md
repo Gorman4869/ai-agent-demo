@@ -2352,3 +2352,76 @@
 
 - M11-T3 第一纵切达到本地 E3：确定性离线 Provider、冻结维度元数据、通用批次拆分和 PgVector 批次调用链可从基线 `9b77bfd` 上的工作区复现。
 - M11-T3 更新为 `in_progress`，不能标记 `verified`。下一原子动作只实现版本化内存缓存与按批次暂时性错误重试 wrapper，覆盖缓存命中、失败不缓存、可重试/不可重试和耗尽；在线 SDK/真实调用继续后置。
+
+## V-20260809-004：M11-T3 版本化内存缓存与批次重试纵切
+
+- 任务：`M11-T3 / in_progress`
+- 时间：2026-08-09 10:28，Asia/Shanghai
+- 验证目标：基线 HEAD `31479b8` 上的 M11-T3 第二离线纵切工作区
+- 任务等级：B 类普通离线缓存与确定性 retry wrapper；时间盒 30–90 分钟
+- 环境：Python 3.12.10、Docker Compose v5.1.1、本地缓存 `pgvector/pgvector:0.8.1-pg17`
+- 模式：默认离线 E3；没有读取 Key、构造在线 Embedding Client、访问网络 Provider 或产生费用，费用 0
+- 依赖事实：没有新增、安装、升级或删除 Python/Node 依赖；没有修改 Settings、数据库 schema、主 Compose 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `31479b8`，第一纵切实现提交存在 |
+| 首次按推测文件名读取 ADR-0005 | 1 | 文件名猜测错误；用 `rg --files` 定位并读取实际文件，不是仓库漂移 |
+| 修改前知识/PgVector/RAG/API/Container 定向集 | 0 | 67 项通过；仅有既有 Starlette/httpx 弃用警告 |
+| 沙箱内 `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 1 | 沙箱拒绝 Docker config 和 named pipe；没有下载镜像，也不是容器或代码失败 |
+| 同一 Compose 命令使用已授权本机 Docker 权限 | 0 | 固定 integration 容器 healthy，只使用本地缓存 image |
+| 修改前真实 pgvector integration | 0 | 4 项通过 |
+| 修改前 M1 `python -S` 隔离 | 0 | 10 项通过 |
+| 修改前 `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、96 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_embeddings -v` | 0 | 21 项通过；新增 11 个关键测试方法，缓存键/命中/容量/失败原子性和 retry 边界均实际执行 |
+| 聚焦自审后的 `python -m unittest backend.tests.test_embeddings -q` | 0 | 21 项再次通过；retry 复用不可变 batch，暂时性错误耗尽不缓存已完成前缀 |
+| 最终 Embedding/PgVector/RAG/API/Container 定向集 | 0 | 78 项通过；既有 Starlette/httpx 弃用警告不变 |
+| 设置 `AI_AGENT_TEST_PGVECTOR_DSN` 后真实 pgvector integration | 0 | 4 项通过；schema、CRUD、查询、幂等 seed 和回滚路径保持可运行 |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；knowledge cache/retry 未进入 M1 标准库 Loop 导入路径 |
+
+### 实现与风险证据
+
+- `build_embedding_cache_key()` 先规范化文本，只把 metadata namespace、规范化文本 SHA-256 和版本写入 canonical payload；公开 key 只有 `embedding:v1:<sha256>`，原文不能作为合法内存缓存 key。
+- `InMemoryEmbeddingCache` 是线程安全、容量有界的进程内 LRU，只保存不可变向量副本；它不是持久缓存、分布式缓存或跨进程一致性证据。
+- `BatchingEmbeddingModel` 对命中向量重新执行维度/有限值校验，按版本化 key 去重 miss，并在所有 Provider 批次完整成功和校验后才写入新缓存；后续批次失败或 retry 耗尽不会缓存成功前缀。
+- `RetryingEmbeddingProvider` 快照同一 Provider batch，只捕获显式 `RetryableEmbeddingError`，最多执行 `max_retries + 1` 次；耗尽映射为稳定 `embedding_retry_exhausted`。维度、metadata、输入及其他协议错误原样 fail closed，不重试。
+- Batching Model 现在也在每次 Provider 返回后复核 metadata；最终批次内发生的漂移不再延迟到下一批才发现。
+
+### 未验证范围与全量门说明
+
+- 没有在线 SDK Adapter、Embedding Settings/composition、Key、Provider usage/费用、真实网络结果、Provider timeout 或退避；真实在线 E4 仍需用户新的单次授权并由 M11-T7 记录。
+- 缓存是当前进程内的有界 LRU，没有持久化、跨进程共享、TTL、外部失效协议或容量压测。Retry 没有 sleep/backoff，且只覆盖同步只读 Embedding batch；不得复用于工具、数据库或副作用。
+- 三维 SHA-256 token-hash 仍只证明确定性工程路径，不证明语义质量、Provider tokenizer、Recall@K、MRR 或回答依据正确率；`KI-006` 仍不能关闭。
+- 本纵切没有依赖、锁文件、构建配置、Settings、migration、跨前后端接口或多个里程碑共享核心契约变化；78 项受影响回归、真实 pgvector 4 项和 M1 10 项覆盖修改面，因此没有重复运行 `scripts/verify.ps1`、Vue 或 MCP 构建。
+- integration Compose 是 localhost trust/tmpfs 测试基础设施，不是生产部署、鉴权、TLS、备份、高可用或容量证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T3 第二纵切达到本地 E3：版本化敏感安全缓存键、有界内存命中、完整成功后写入和显式暂时性批次 retry 可从基线 `31479b8` 上的工作区复现。
+- M11-T3 保持 `in_progress`，不能标记 `verified`。下一原子动作是显式在线 SDK Adapter 与 embedding-specific Settings/composition 的离线 fail-closed 纵切；未获新授权时仍不读取 Key 或执行真实调用。
+
+## V-20260809-005：M11-T3 缓存与重试连续性闭环
+
+- 任务：`M11-T3 / in_progress`
+- 时间：2026-08-09，Asia/Shanghai
+- 验证目标：基线 HEAD `31479b8` 上经 `V-20260809-004` 验证的第二纵切工作区与连续性文档
+- 模式：纯本地文档、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、97 个 Markdown 通过；新 handoff、status、plan、ADR/verification 引用可解析 |
+| `git diff --check` | 0 | 无空白错误；只输出现有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` | 0 | 8 个已跟踪修改与 1 个新 handoff，均属于 M11-T3 第二纵切；没有发现任务外改动 |
+| `git diff --stat` | 0 | 已跟踪实现、测试、规约与连续性变更范围符合本纵切；未跟踪 handoff 由 status 单独确认 |
+
+### 结论
+
+- `V-20260809-004` 的代码/真实 pgvector/M1 证据与当前 plan、known issue、status、后端规约和 handoff 一致，没有发现代码与记录漂移。
+- 本记录只关闭第二纵切的文档连续性，不改变 `M11-T3 / in_progress`，也不增加在线 Provider、持久缓存或完整全仓门证据。
