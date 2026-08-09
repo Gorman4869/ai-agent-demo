@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from backend.app.knowledge import (
     Document,
+    EmbeddingMetadata,
     PgVectorKnowledgeBase,
     create_psycopg_connection_factory,
 )
@@ -17,13 +18,43 @@ from backend.app.stores.postgres_migrations import (
 
 
 class _EmbeddingModel:
-    def __init__(self, vector: Sequence[float] = (1.0, 2.0, 3.0)) -> None:
+    def __init__(
+        self,
+        vector: Sequence[float] = (1.0, 2.0, 3.0),
+        *,
+        metadata_dimensions: int = 3,
+    ) -> None:
         self.vector = vector
         self.texts: list[str] = []
+        self.batches: list[tuple[str, ...]] = []
+        self.metadata = EmbeddingMetadata(
+            provider="test",
+            model="fixture",
+            revision="v1",
+            dimensions=metadata_dimensions,
+        )
 
     def embed(self, text: str) -> Sequence[float]:
         self.texts.append(text)
         return self.vector
+
+    def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[Sequence[float], ...]:
+        batch = tuple(texts)
+        self.batches.append(batch)
+        self.texts.extend(batch)
+        return tuple(self.vector for _ in batch)
+
+
+class _IncompleteEmbeddingModel(_EmbeddingModel):
+    def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[Sequence[float], ...]:
+        vectors = super().embed_batch(texts)
+        return vectors[:-1]
 
 
 class _FakeCursor:
@@ -159,6 +190,10 @@ class PgVectorKnowledgeBaseTest(unittest.TestCase):
         self.assertEqual(2, len(records))
         self.assertEqual(("rag", 0, "12345678901234567890"), records[0][:3])
         self.assertEqual("[1,2,3]", records[0][3])
+        self.assertEqual(
+            [("12345678901234567890", "abcdefghij")],
+            embedding.batches,
+        )
         self.assertEqual(1, connection.commits)
         self.assertEqual(0, connection.rollbacks)
 
@@ -200,6 +235,42 @@ class PgVectorKnowledgeBaseTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "embedding dimension"):
             knowledge.search("query")
+
+        self.assertEqual(0, factory.calls)
+
+    def test_incomplete_embedding_batch_fails_before_opening_connection(
+        self,
+    ) -> None:
+        factory = _ConnectionFactory(_FakeConnection(_FakeCursor()))
+        knowledge = PgVectorKnowledgeBase(
+            factory,
+            _IncompleteEmbeddingModel(),
+            dimensions=3,
+            chunk_size=20,
+            overlap=0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "batch size"):
+            knowledge.add(
+                Document(
+                    id="rag",
+                    title="RAG",
+                    source="rag.md",
+                    content="12345678901234567890abcdefghij",
+                )
+            )
+
+        self.assertEqual(0, factory.calls)
+
+    def test_metadata_dimension_mismatch_fails_before_connection(self) -> None:
+        factory = _ConnectionFactory(_FakeConnection(_FakeCursor()))
+
+        with self.assertRaisesRegex(ValueError, "metadata dimensions"):
+            PgVectorKnowledgeBase(
+                factory,
+                _EmbeddingModel(metadata_dimensions=2),
+                dimensions=3,
+            )
 
         self.assertEqual(0, factory.calls)
 
@@ -264,7 +335,7 @@ class PgVectorKnowledgeBaseTest(unittest.TestCase):
         factory = _ConnectionFactory(_FakeConnection(_FakeCursor()))
         knowledge = PgVectorKnowledgeBase(
             factory,
-            _EmbeddingModel((1.0, 2.0)),
+            _EmbeddingModel((1.0, 2.0), metadata_dimensions=2),
             dimensions=2,
         )
 

@@ -2299,3 +2299,56 @@
 - M11-T2 的 implementation plan、ADR、backend standards、known issue、status、verification 和最新 handoff 已固定真实 pgvector migration/CRUD/seed 证据与未验证范围；恢复入口指向实现提交 `7ebaa16`。
 - 本步骤没有代码或行为变化，因此没有重复运行业务测试或完整门；提交后知识/API 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项、M1 10 项和最终完整离线门继续引用 `V-20260809-001`。
 - 当前任务为 `M11-T3 / planned`。下一条原子动作只做确定性离线 Embedding、批次与维度元数据最小纵切；不得重做 M11-T2、读取 Key、执行在线 Embedding 或扩大到 M12/M13。
+
+## V-20260809-003：M11-T3 确定性离线 Embedding 与批次纵切
+
+- 任务：`M11-T3 / in_progress`
+- 时间：2026-08-09，Asia/Shanghai
+- 验证目标：基线 HEAD `9b77bfd` 上的 M11-T3 第一纵切工作区
+- 任务等级：B 类普通离线 Adapter 与确定性批次功能；时间盒 30–90 分钟
+- 模式：默认离线 E3；没有读取 Key、访问在线模型或产生付费调用，费用 0
+- 依赖事实：没有新增、安装、升级或删除 Python/Node 依赖；没有修改 Settings、数据库 schema、主 Compose 或前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `9b77bfd`，M11-T2 实现 `7ebaa16` 与文档锚点存在 |
+| 首次按推测文件名读取 ADR-0005 | 1 | 文件名猜测错误；用 `rg --files` 定位实际 `ADR-0005-explicit-settings-without-dotenv.md` 后读取成功，不是仓库漂移 |
+| `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 0 | 只使用本地缓存 image，pgvector integration 容器 healthy，没有下载 |
+| 修改前真实 pgvector integration | 0 | 4 项通过 |
+| 修改前知识/PgVector/RAG/API/Container 集 | 0 | 55 项通过；仅有既有 Starlette/httpx 弃用警告 |
+| 修改前 M11-T1 PostgreSQL 完整集 | 0 | 91 项通过；不可达数据库 pool timeout 为预期负向输出 |
+| `python -S ... test_manual_agent_loop -q` | 0 | M1 隔离 10 项通过 |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、94 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `test_embeddings + test_pgvector -v` | 0 | 22 项通过；批次拆分/顺序、空批/空文本、部分返回、维度/metadata 漂移、非法值和 PgVector 数据库前失败均执行 |
+| 聚焦自审 | 0 | 发现非整数 dimensions/batch size 会延迟到 Python 容器操作、绕过 Batcher 的非数字向量可能暴露转换文本；补构造期整数校验、DEL 控制字符拒绝和稳定数值错误 |
+| 最终 Embedding/PgVector/RAG/API/Container 定向集 | 0 | 67 项通过；本纵切新增 12 个关键测试方法或等价覆盖，既有 Starlette/httpx 弃用警告不变 |
+| 设置 `AI_AGENT_TEST_PGVECTOR_DSN` 后真实 pgvector integration | 0 | 4 项通过；新 metadata/batch fixture 实际完成 schema、CRUD、查询、幂等 seed 和回滚路径 |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过，knowledge Embedding 模块未进入 M1 标准库 Loop 导入路径 |
+
+### 实现与风险证据
+
+- `EmbeddingMetadata` 冻结 provider/model/revision/dimensions，拒绝空值、控制字符、异常长度和非正整数维度；公开错误只有稳定 code，不包含输入文本。
+- `BatchingEmbeddingModel` 统一单条/批次路径，先规范化并完整校验输入，再按固定 batch size 调用 Provider。空批不调用 Provider，返回数量不匹配时不暴露已完成前缀。
+- 确定性离线 Provider 使用标准库 SHA-256 token hash 和 L2 归一化；相同规范化文本跨实例得到同一固定维度向量。它不是在线模型或语义质量证据。
+- `PgVectorKnowledgeBase` 对所有文档切片执行一次 Model batch；Model 再按 Provider 限额拆分。metadata、数量、维度、非数字或非有限值在 connection factory 前失败，数据库事务不包住 Embedding。
+- 真实 pgvector 4 项使用更新后的 metadata/batch 合同通过，因此当前结论不是 import 或 Fake-only 证据。
+
+### 未验证范围与全量门说明
+
+- 尚未实现缓存 Store/命中、版本化 key 代码、暂时性 Provider 错误重试、显式在线 SDK Adapter、Embedding Settings 或 Provider usage/cost；这些继续属于 M11-T3。
+- 没有读取 `OPENAI_API_KEY`、构造在线 Embedding Client 或执行网络。ADR-0024 只固定未来在线 composition 所有权，不能描述成在线兼容证据。
+- SHA-256 token-hash 三维向量不证明语义质量、Provider tokenizer、Recall@K、MRR 或回答依据正确率；`KI-006` 保持 mitigated，M11-T6 仍需固定评测集。
+- 本纵切没有依赖、锁文件、构建配置、数据库 migration、Settings、跨前后端接口或多个里程碑共享核心领域契约变化；67 项受影响回归、真实 pgvector 4 项和 M1 10 项覆盖修改面，因此没有重复运行 `scripts/verify.ps1`、Vue 或 MCP 构建。
+- integration Compose 继续是 localhost trust/tmpfs 测试基础设施，不是生产部署证据。没有配置 remote 或执行 push。
+
+### 结论
+
+- M11-T3 第一纵切达到本地 E3：确定性离线 Provider、冻结维度元数据、通用批次拆分和 PgVector 批次调用链可从基线 `9b77bfd` 上的工作区复现。
+- M11-T3 更新为 `in_progress`，不能标记 `verified`。下一原子动作只实现版本化内存缓存与按批次暂时性错误重试 wrapper，覆盖缓存命中、失败不缓存、可重试/不可重试和耗尽；在线 SDK/真实调用继续后置。

@@ -8,6 +8,7 @@ import psycopg
 
 from backend.app.knowledge import (
     Document,
+    EmbeddingMetadata,
     PGVECTOR_DIMENSIONS,
     PgVectorKnowledgeBase,
     create_psycopg_connection_factory,
@@ -23,6 +24,13 @@ def setUpModule() -> None:
 
 
 class _KeywordEmbedding:
+    metadata = EmbeddingMetadata(
+        provider="test",
+        model="keyword",
+        revision="v1",
+        dimensions=3,
+    )
+
     def embed(self, text: str) -> Sequence[float]:
         lowered = text.lower()
         if "mcp" in lowered or "协议" in text:
@@ -31,11 +39,30 @@ class _KeywordEmbedding:
             return (0.0, 0.0, 1.0)
         return (1.0, 0.0, 0.0)
 
+    def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[Sequence[float], ...]:
+        return tuple(self.embed(text) for text in texts)
+
 
 class _TwoDimensionalEmbedding:
+    metadata = EmbeddingMetadata(
+        provider="test",
+        model="two-dimensional",
+        revision="v1",
+        dimensions=2,
+    )
+
     def embed(self, text: str) -> Sequence[float]:
         del text
         return (1.0, 0.0)
+
+    def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[Sequence[float], ...]:
+        return tuple(self.embed(text) for text in texts)
 
 
 class PgVectorIntegrationTest(unittest.TestCase):

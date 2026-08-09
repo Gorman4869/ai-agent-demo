@@ -35,6 +35,7 @@
 - M11-T1 第九纵切验证基线提交：`0c30a28`；实现提交：`bffeab7`
 - M11-T1 第十纵切验证基线提交：`1e867bc`；实现提交：`be2c818`
 - M11-T2 验证基线提交：`41871c4`；实现提交：`7ebaa16`
+- M11-T3 第一纵切验证基线提交：`9b77bfd`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -43,13 +44,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M11-T3` |
-| 状态 | `planned` |
+| 状态 | `in_progress` |
 | 目标 | 建立确定性离线与显式在线 Embedding Adapter、批处理、重试、缓存键和维度元数据合同 |
 | 设计依据 | 实施计划 M11-T3、M8-T1 模型边界、`ADR-0023` 与 M11-T2 已验收 pgvector schema/CRUD/seed 合同 |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T2 已完成独立 knowledge migration、`vector(3)`/cosine HNSW、事务 CRUD、显式摘要 seed、integration Compose 与真实 pgvector 证据；实现提交 `7ebaa16` |
-| 前置证据 | `V-20260809-001/002`、`ADR-0023`、实现提交 `7ebaa16`，以及 M11-T1 `V-20260808-013/014` |
-| 下一动作 | 进入 M11-T3 首个原子纵切：先审计现有 Embedding/模型 adapter 与 `PgVectorKnowledgeBase` 调用边界，用 ADR 固定批次、维度、重试、缓存键和在线授权所有权；首步只交付确定性离线 Embedding + 批次/维度元数据最小纵切，不读取 Key、不执行在线调用 |
+| 当前修改 | M11-T3 第一纵切已新增冻结 Embedding metadata、确定性离线 Provider、通用 Batching Model，并让 PgVector 文档/查询实际走批次合同；缓存、重试和在线 Adapter 尚未实现 |
+| 前置证据 | `V-20260809-003`、`ADR-0024`、验证基线 `9b77bfd`，以及 M11-T2 `V-20260809-001/002`/`ADR-0023` |
+| 下一动作 | 继续 M11-T3 第二个 B 类离线纵切：实现版本化内存缓存与按批次暂时性错误重试 wrapper，覆盖缓存命中、失败不缓存、可重试/不可重试和耗尽；不读取 Key、不实现在线 SDK Adapter |
 
 ## 里程碑状态
 
@@ -60,7 +61,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1 PostgreSQL persistence/application lifecycle 与 M11-T2 真实 pgvector schema/CRUD/seed 均已 `verified`；Embedding、ContextAssembler、记忆 API、固定 RAG 评测与在线冒烟仍由 M11-T3–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1/T2 已 `verified`；M11-T3 第一离线纵切已完成确定性 Provider、批次与维度元数据 E3，缓存/重试/在线 Adapter 尚未完成；ContextAssembler、记忆 API、固定 RAG 评测与在线冒烟仍由 M11-T4–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -73,6 +74,9 @@
 
 ## 未验证范围
 
+- M11-T3 第一纵切见 `V-20260809-003`：新增 12 个关键测试方法或等价覆盖，最终知识/API 定向 67 项、真实 pgvector 4 项和 M1 隔离 10 项通过；验证基线为 `9b77bfd`，本轮实现提交在结束时固定。
+- 当前只有标准库 SHA-256 token-hash 离线 Provider；缓存命中、失败不缓存、暂时性重试、在线 SDK Adapter/Settings、Provider usage/费用和真实模型质量均未验证。没有读取 Key 或执行网络。
+- 本纵切没有依赖、migration、Settings、构建配置或跨前后端接口变化，未触发完整全仓门；真实 pgvector 证明 batch 合同进入数据库调用链，但不证明在线 Provider。
 - M11-T2 见 `V-20260809-001`：提交后知识/API 定向 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项和 M1 隔离 10 项通过；完整离线门最终后端 470 项通过、1 项既有 Windows symlink 跳过，Code Agent、依赖、Vue、MCP TypeScript 与主 Compose 配置通过。实现提交为 `7ebaa16`。
 - 完整门首轮在后端阶段遇到一次既有 TypeScript MCP 5 秒 startup timeout；单独 E2E 4 项在 0.943 秒通过，同一完整门从头重跑后退出 0。另一次提交前完整后端回归曾出现 lease timing 单项失败，单项和串行完整后端随后均通过；失败事实保留在 verification。
 - M11-T2 使用确定性三维课程 Embedding，只证明本地 schema、SQL、事务与检索闭环，不证明 Provider Embedding、批处理/缓存、Token/账单、线上质量或固定 RAG 指标；`KI-006` 只降为 mitigated。
@@ -152,4 +156,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t2-real-pgvector.md`，再核对 `V-20260809-001/002`、`ADR-0023`、实现提交 `7ebaa16`、实施计划 M11-T2/M11-T3 和实际 knowledge migration/PgVector/seed/integration Compose。先确认 Docker 与两个本地测试容器状态，再按 handoff 重跑知识/API 55 项、真实 pgvector 4 项、M11-T1 PostgreSQL 91 项、M1 10 项和连续性检查；若一致，不要重做 M11-T1/M11-T2，下一步只进入 M11-T3 的离线 Embedding 最小纵切。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t3-offline-embedding-batching.md`，再核对 `V-20260809-003`、`ADR-0024`、验证基线 `9b77bfd`、实施计划 M11-T3 和实际 embeddings/PgVector batch 代码。按 handoff 重跑知识/API 67 项、真实 pgvector 4 项、M1 10 项和连续性检查；若一致，不要重做 M11-T2 或 M11-T3 第一纵切，下一步只实现版本化内存缓存与按批次暂时性错误重试。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T4/M12/M13。

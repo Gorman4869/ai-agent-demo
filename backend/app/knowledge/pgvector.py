@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from importlib import import_module
 from typing import Callable, Iterator, Protocol, Sequence, cast
 
+from .embeddings import EmbeddingModel
 from .pgvector_migrations import apply_pgvector_migrations
 from .rag import (
     Citation,
@@ -19,11 +20,6 @@ from .rag import (
 PGVECTOR_DIMENSIONS = 3
 PGVECTOR_DOCUMENT_TABLE = "knowledge_documents"
 PGVECTOR_CHUNK_TABLE = "knowledge_chunks"
-
-
-class EmbeddingModel(Protocol):
-    def embed(self, text: str) -> Sequence[float]:
-        """Return one fixed-size vector for the supplied text."""
 
 
 class DatabaseCursor(Protocol):
@@ -77,6 +73,10 @@ class PgVectorKnowledgeBase:
     ) -> None:
         if dimensions < 1:
             raise ValueError("dimensions must be positive")
+        if embedding_model.metadata.dimensions != dimensions:
+            raise ValueError(
+                "embedding metadata dimensions must match knowledge schema"
+            )
         if chunk_size < 20:
             raise ValueError("chunk_size must be at least 20")
         if overlap < 0 or overlap >= chunk_size:
@@ -166,7 +166,7 @@ class PgVectorKnowledgeBase:
     def search(self, query: str, *, limit: int = 3) -> tuple[SearchResult, ...]:
         if not query.strip() or limit < 1:
             return ()
-        query_vector = self._embed(query)
+        query_vector = self._embed_batch((query,))[0]
         with self._transaction() as cursor:
             cursor.execute(
                 f"""
@@ -222,14 +222,15 @@ class PgVectorKnowledgeBase:
         if not document.content.strip():
             raise ValueError("document content must not be empty")
         chunks = _split_text(document.content, self._chunk_size, self._overlap)
+        vectors = self._embed_batch(chunks)
         records: list[Sequence[object]] = []
-        for chunk_index, excerpt in enumerate(chunks):
+        for chunk_index, (excerpt, vector) in enumerate(zip(chunks, vectors)):
             records.append(
                 (
                     document.id,
                     chunk_index,
                     excerpt,
-                    self._embed(excerpt),
+                    vector,
                 )
             )
         return chunks, _document_digest(document, chunks), records
@@ -283,15 +284,30 @@ class PgVectorKnowledgeBase:
             records,
         )
 
-    def _embed(self, text: str) -> str:
-        values = tuple(float(value) for value in self._embedding_model.embed(text))
-        if len(values) != self._dimensions:
-            raise ValueError(
-                f"embedding dimension must be {self._dimensions}, got {len(values)}"
+    def _embed_batch(self, texts: Sequence[str]) -> tuple[str, ...]:
+        if self._embedding_model.metadata.dimensions != self._dimensions:
+            raise ValueError("embedding metadata dimensions changed")
+        vectors = tuple(self._embedding_model.embed_batch(texts))
+        if len(vectors) != len(texts):
+            raise ValueError("embedding batch size must match input size")
+
+        serialized: list[str] = []
+        for vector in vectors:
+            try:
+                values = tuple(float(value) for value in vector)
+            except (TypeError, ValueError):
+                raise ValueError("embedding values must be numeric") from None
+            if len(values) != self._dimensions:
+                raise ValueError(
+                    f"embedding dimension must be {self._dimensions}, "
+                    f"got {len(values)}"
+                )
+            if not all(math.isfinite(value) for value in values):
+                raise ValueError("embedding values must be finite")
+            serialized.append(
+                f"[{','.join(format(value, '.17g') for value in values)}]"
             )
-        if not all(math.isfinite(value) for value in values):
-            raise ValueError("embedding values must be finite")
-        return f"[{','.join(format(value, '.17g') for value in values)}]"
+        return tuple(serialized)
 
     @contextmanager
     def _transaction(self) -> Iterator[DatabaseCursor]:

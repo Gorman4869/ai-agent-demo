@@ -645,6 +645,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 约束：在线模型和费用显式启用；离线默认测试不调用网络。
 - 测试：批次拆分、空输入、维度漂移、部分失败、缓存命中和敏感日志脱敏。
 
+#### M11-T3 第一个离线纵切边界
+
+- `ADR-0024` 固定 knowledge 层 Provider/Model 所有权、冻结 provider/model/revision/dimensions 元数据、单条复用批次、版本化缓存键、按批次暂时性重试和在线 composition 授权边界。
+- 新增标准库 SHA-256 token-hash Provider 与通用 Batching Model；确定性输入先规范化空白，批次保持顺序，空批不调用 Provider，部分返回、metadata/维度漂移及非法向量 fail closed。
+- `PgVectorKnowledgeBase` 对文档所有切片执行一次 Model batch，并在打开数据库前校验完整结果；真实 pgvector CRUD/查询 4 项继续通过，证明批次协议已进入数据库调用链。
+- 新增 12 个关键测试方法或等价覆盖；知识/API 定向 67 项、M1 隔离 10 项通过。没有依赖、Settings、schema 或跨前后端接口变化，因此不重复完整全仓门。
+- 本纵切达到本地 E3，但 M11-T3 保持 `in_progress`：缓存命中、暂时性重试、显式在线 SDK Adapter/Settings 和真实授权冒烟尚未实现。
+
 ### M11-T4：ContextAssembler 与 Token 预算
 
 - 依赖：M10-T3、M11-T3。

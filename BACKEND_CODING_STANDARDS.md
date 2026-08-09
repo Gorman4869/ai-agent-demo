@@ -263,4 +263,15 @@
 - Demo content is seeded only by an explicit application command. Compare a canonical SHA-256 document digest under a transaction advisory lock and skip database rewrites for unchanged content; application import, `create_app()`, and lifespan must not seed implicitly.
 - Fake cursors may prove parameterization and rollback branches, but real pgvector evidence requires the integration-only Compose service and explicit DSN. It must execute migration, fixed dimensions/index inspection, insert, replace, delete, similarity search, dimension failure, and transaction rollback.
 - `deploy/compose.integration.yaml` is localhost-only trust/tmpfs test infrastructure. It is not the production Compose, persistence, authentication, TLS, backup, capacity, or high-availability contract.
-- M11-T2 uses a deterministic three-dimensional test embedding only. Provider adapters, batching, caching, dimension metadata, online authorization, retrieval metrics, and production integration remain M11-T3/M11-T6/M11-T7/M13 work.
+- M11-T2 uses a deterministic three-dimensional test embedding only. Provider caching/retry, online authorization, retrieval metrics, and production integration remain M11-T3/M11-T6/M11-T7/M13 work.
+
+## 25. Embedding Adapter and Batching
+
+- Embedding contracts live in `backend.app.knowledge.embeddings`. A Provider handles one bounded batch; a Model exposes single and arbitrary-length batch calls. PgVector depends only on the Model and never reads environment settings or creates an SDK client.
+- Every Model exposes frozen provider, model, revision, and dimension metadata. Metadata drift, output-count mismatch, dimension mismatch, non-numeric values, and non-finite values fail with stable content-free errors.
+- Single embedding calls use the same batch path. Normalize whitespace before the Provider, preserve input order across batches, return an empty tuple for an empty batch, and reject blank batch items before any Provider call.
+- Resolve all document embeddings before opening a PgVector transaction. A failed or partial Provider batch must not return a prefix or rewrite existing document rows.
+- The offline SHA-256 token-hash Provider is deterministic course infrastructure, not semantic-quality, tokenizer, online Provider, or billing evidence. Its metadata dimensions must match the fixed pgvector schema.
+- Future cache keys use a versioned metadata namespace plus a digest of normalized text; raw text never enters a key, log, or error. Cache only complete validated vectors.
+- Only an explicit retry wrapper may retry classified transient Provider failures by batch. Input, metadata, protocol, dimension, authentication, and policy errors are not retryable.
+- Online Embedding adapters receive configuration and secrets from composition only after the global online gate and embedding-specific provider/model gate pass. They never read environment state directly, and real execution still requires per-run user authorization.
