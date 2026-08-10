@@ -15,7 +15,7 @@ from backend.app.context.assembler import (
 )
 from backend.app.domain import Message
 from backend.app.knowledge.rag import Citation, KnowledgeBase, SearchResult
-from backend.app.memory.store import MemoryFact, MemoryScope, MemoryStore
+from backend.app.memory.store import MemoryFact, MemoryScope
 from backend.app.skills.catalog import SkillCatalogError
 from backend.app.skills.context import (
     SkillContext,
@@ -136,6 +136,12 @@ class ContextSummarizer(Protocol):
     ) -> ContextSummaryResult: ...
 
 
+class _ContextMemoryReader(Protocol):
+    def messages(self, session_id: str) -> tuple[Message, ...]: ...
+
+    def facts(self, owner_id: str) -> tuple[MemoryFact, ...]: ...
+
+
 @dataclass(frozen=True)
 class CollectedContext:
     owner_id: str = field(repr=False)
@@ -183,19 +189,13 @@ class ContextSourceCollector:
     def __init__(
         self,
         *,
-        memory_store: MemoryStore,
+        memory_store: _ContextMemoryReader,
         knowledge_base: KnowledgeBase,
         skill_context_builder: SkillContextBuilder,
         summarizer: ContextSummarizer | None = None,
         rag_limit: int = 3,
     ) -> None:
-        if (
-            not isinstance(rag_limit, int)
-            or isinstance(rag_limit, bool)
-            or rag_limit < 1
-            or rag_limit > _MAX_RAG_RESULTS
-        ):
-            raise ValueError("rag_limit is outside the allowed range")
+        _validate_rag_limit(rag_limit)
         self._memory_store = memory_store
         self._knowledge_base = knowledge_base
         self._skill_context_builder = skill_context_builder
@@ -499,6 +499,16 @@ def _require_scope_id(value: object, field_name: str) -> None:
         or any(not character.isprintable() for character in value)
     ):
         raise ValueError(f"{field_name} has an invalid format")
+
+
+def _validate_rag_limit(value: object) -> None:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < 1
+        or value > _MAX_RAG_RESULTS
+    ):
+        raise ValueError("rag_limit is outside the allowed range")
 
 
 __all__ = [

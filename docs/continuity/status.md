@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-08-09，Asia/Shanghai
+- 更新时间：2026-08-10，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`c7971d6`
+- 最近已确认实现提交：`a96ea6d`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -42,7 +42,8 @@
 - M11-T4 第二纵切验证基线提交：`9b052c2`；实现提交：`c0e0b11`
 - M11-T4 第三纵切验证基线提交：`c0e0b11`；实现提交：`93abc08`
 - M11-T4 第四纵切验证基线提交：`93abc08`；实现提交：`c7971d6`
-- M11-T4 第五纵切验证基线提交：`c7971d6`；实现提交待本轮 Git 固定
+- M11-T4 第五纵切验证基线提交：`c7971d6`；实现提交：`a96ea6d`
+- M11-T5 第一纵切验证基线提交：`a96ea6d`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -51,13 +52,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M11-T5` |
-| 状态 | `planned` |
+| 状态 | `in_progress` |
 | 目标 | 让持久记忆进入主 Run，覆盖消息写入、短期窗口、经批准长期事实、纠正/删除、版本冲突和审计 |
 | 设计依据 | 实施计划 M11-T5、已 verified 的 M11-T1/M11-T4、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025` 与 `ADR-0026` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M11-T4 第五纵切已让默认内存 Container 使用单一 ContextAwareRuntime，共享同一 Memory/Knowledge/Skill collector 与固定 system constraint；默认 Manual/LangGraph 真实纵切、owner/session 隔离和失败关闭通过，显式 Runtime 与 PostgreSQL 同步 source 边界保持不变，M11-T4 已 verified |
-| 前置证据 | `V-20260809-016/017`、`ADR-0025`、`ADR-0026`、第五纵切验证基线与第四纵切实现提交 `c7971d6`，以及 M11-T4 前四纵切 `V-20260809-008` 至 `015` |
-| 下一动作 | 开始 M11-T5 第一个离线纵切：先固定异步 Context Memory 读取边界，复用现有 AsyncMemoryStore messages/facts 且保留同步内存 collector；覆盖取消/超时、owner/session 隔离和 no-sync-on-event-loop，再决定默认 PostgreSQL Context 接线。不实现消息写入、纠正/删除、版本审计或 M11-T6 |
+| 当前修改 | 第一纵切新增独立 AsyncMemoryContextSourceCollector，经现有 AsyncMemoryStore 读取 message/fact，使用一个总 timeout 和调用方取消边界，再以请求级快照复用同步 collector/Assembler；真实 AsyncLocal、两组 owner/session、Store/bridge timeout、取消、非法 payload 和 PostgreSQL façade no-direct-sync 覆盖通过，尚未接 Runtime/Container |
+| 前置证据 | `V-20260810-001/002`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、M11-T4 实现提交 `a96ea6d` 与验收 `V-20260809-016/017` |
+| 下一动作 | 开始 M11-T5 第二个离线纵切：只固定 async Context Runtime request preparation，await AsyncMemoryContextSourceCollector 并保留既有 prompt_context、可信 identity、Assembler、稳定 context_unavailable、delegate 单次调用和取消传播合同；同步 ContextAwareRuntime、默认 Container 与显式 Runtime 注入保持不变。不接默认 PostgreSQL Container，不实现消息写入、纠正/删除、版本冲突/审计或 M11-T6 |
 
 ## 里程碑状态
 
@@ -68,7 +69,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T4 已 `verified`；默认内存 Container 已使用有界 ContextAssembler、真实 Memory/RAG/Skill source 和可信 Run identity。持久 source async 边界、记忆写入/纠正/删除、固定 RAG 评测与在线冒烟由 M11-T5–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T4 已 `verified`；M11-T5 第一纵切已固定 async Memory Context source seam，但尚未进入 Runtime/默认 PostgreSQL Container。其余持久主链、记忆写入/纠正/删除、固定 RAG 评测与在线冒烟由 M11-T5–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -81,6 +82,10 @@
 
 ## 未验证范围
 
+- M11-T5 第一纵切见 `V-20260810-001`：新增 11 个关键测试方法，async/sync collector 与 bridge 专项 30 项、Context/async Store/Container/Memory/PostgreSQL composition 相关回归 116 项和 M1 隔离 10 项通过；验证基线和 M11-T4 实现提交均为 `a96ea6d`，本轮实现提交在结束时固定。
+- 新 AsyncMemoryContextSourceCollector 只让 Memory 读取进入 async façade；两次读取共享有界总 timeout，调用方取消原样传播，结果快照复用既有 owner/source/trust/Assembler 合同。同步 ContextAwareRuntime 尚未 await 它，不能描述成 PostgreSQL fact 已进入 Agent。
+- PostgreSQL façade no-direct-sync 纵切使用受控 bridge，结合既有 bridge 回归证明事件循环边界；本轮没有运行真实 PostgreSQL、数据库重启、pgvector Context、消息写入、纠正/删除、版本冲突/审计、在线摘要或 Provider。同步 Knowledge/Skill/summary 仍只允许进程内非阻塞实现。
+- 第一纵切没有修改既有 Store/Runtime/Container 协议、依赖、数据库、构建或跨前后端接口；116 项风险定向与 M1 隔离覆盖修改面，因此按交付协议未重复运行完整全仓门、Vue/MCP 构建或真实数据库集成。
 - M11-T4 第五纵切见 `V-20260809-016`：新增 5 个关键测试方法并收紧既有 Container 覆盖，专项 22 项、相关回归 244 项、M1 隔离 10 项和完整离线门通过；全量后端 547 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线和第四纵切实现提交均为 `c7971d6`，本轮实现提交在结束时固定。
 - 默认内存 Container 已用单一 ContextAwareRuntime 替换 SkillAwareRuntime 叠加，真实 system/Skill/approved fact/recent/RAG prompt 进入 ManualRuntime，默认 LangGraph 工具结果和事件保持。显式 caller Runtime 不包装；PostgreSQL open 保留旧 Skill wrapper，不能描述成持久 Context 主链。
 - 第五纵切没有执行 PostgreSQL Memory/pgvector Context、消息持久写入、纠正/删除、版本审计、在线摘要或 Provider；SDK 默认 Runtime 只完成离线构造与既有 Mock 边界回归，没有在线模型调用、Token/usage 或费用证据。
@@ -92,7 +97,7 @@
 - M11-T4 第三纵切见 `V-20260809-012`：新增 10 个关键测试方法，专项 10 项、Context/collector/Assembler/Runtime/Skill/Memory/RAG/M10-T3/Container 定向 108 项和 M1 隔离 10 项通过；验证基线与第二纵切实现提交均为 `c0e0b11`，本轮实现提交在结束时固定。
 - 第三纵切当时的 ContextAwareRuntime 是显式同步 source adapter；第四纵切已补 RunRecord 身份传播，第五纵切已补默认内存 Container，但持久 PostgreSQL source 仍未接入。
 - 新增离线纵切使用真实 ConversationMemory、InMemoryKnowledgeBase、SkillContextBuilder、collector 和 Assembler，但 AgentRuntime delegate 是确定性 Fake；没有运行 PostgreSQL Memory/pgvector、在线摘要、Provider 或默认 HTTP/Container 上下文调用。
-- ContextAwareRuntime 位于 async Runtime 边界却调用同步 collector；当前仅证明离线内存路径。不得把同步 PostgreSQL/pgvector 接入事件循环，后续默认组合需要可信身份传播和适当 async source 边界。
+- ContextAwareRuntime 位于 async Runtime 边界但默认内存路径仍调用同步 collector；M11-T5 第一纵切已提供 async Memory collector，却尚未接入 Runtime。不得把同步 PostgreSQL/pgvector 接入事件循环，下一纵切必须先固定独立 async request preparation。
 - 第三纵切没有修改现有 RuntimeRequest/AgentRuntime/Store/Container 公共契约、依赖、数据库、构建或跨前后端接口；108 项相关回归和 M1 隔离覆盖修改面，因此按交付协议未运行完整全仓门、Vue/MCP 构建或真实数据库集成。
 - M11-T4 第二纵切见 `V-20260809-010/011`：新增 10 个关键测试方法或等价覆盖，collector 专项 10 项、相关定向 98 项、M1 隔离 10 项和连续性 52/101 通过；验证基线与第一纵切实现提交均为 `9b052c2`，本轮实现提交在结束时固定。
 - 当前 collector 同步调用现有 MemoryStore/KnowledgeBase/SkillContextBuilder，并由 `ConversationMemory`、`InMemoryKnowledgeBase` 和真实 SkillContextBuilder 离线 fixture 证明 E3；没有运行 PostgreSQL Memory/pgvector、在线摘要或 Provider，不能描述为持久/在线证据。
@@ -190,4 +195,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-09-m11-t4-default-context-container.md`，再核对 `V-20260809-016/017`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、验证基线 `c7971d6`、实施计划 M11-T5 和实际 Container/Context/AsyncMemoryStore 代码。按 handoff 重跑 Container/Context/Runtime/API/lifecycle/Memory/RAG/Settings/PostgreSQL composition 相关 244 项、M1 10 项和连续性 52/105；若一致，不要重做 M11-T1–T4，下一步只固定 async Context Memory 读取边界，不接同步 PostgreSQL/pgvector source，不提前实现写入/纠正/删除。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T6/M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-10-m11-t5-async-memory-context-source.md`，再核对 `V-20260810-001/002`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、验证基线与前序实现提交 `a96ea6d`、实施计划 M11-T5 和实际 async/sync Context collector、AsyncMemoryStore、Runtime/Container 代码。按 handoff 重跑相关 116 项、M1 10 项和连续性 52/106；若一致，不要重做 M11-T1–T4 或第一纵切，下一步只固定 async Context Runtime request preparation，不接默认 PostgreSQL Container，不提前实现写入/纠正/删除。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T6/M12/M13。

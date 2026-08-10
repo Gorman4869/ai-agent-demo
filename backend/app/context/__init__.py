@@ -13,6 +13,7 @@ from .assembler import (
     ContextTrust,
     default_context_budget_policy,
 )
+from .async_collector import AsyncMemoryContextSourceCollector
 from .collector import (
     CollectedContext,
     ContextCollectionError,
@@ -33,6 +34,7 @@ from .runtime import (
 )
 
 __all__ = [
+    "AsyncMemoryContextSourceCollector",
     "CollectedContext",
     "ContextAwareRuntime",
     "ContextAssembler",

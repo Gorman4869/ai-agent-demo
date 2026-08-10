@@ -725,6 +725,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：重启恢复、错误记忆纠正、删除后不再注入、跨用户隔离、模型推测不自动写入。
 - 关闭目标：KI-014；KI-005 的上下文与记忆部分。
 
+#### M11-T5 第一个离线纵切边界
+
+- 新增独立 `AsyncMemoryContextSourceCollector`，通过现有 `AsyncMemoryStore.messages()`/`facts()` 读取请求绑定的 session/owner 数据；不扩宽同步或异步 Store Protocol，不修改 Runtime/Container。
+- 两次 Memory 读取共享有界总 timeout；外层与 Store timeout 归一为 `memory_context_timeout`，其他 Store 失败为 `memory_context_unavailable`，调用方取消原样传播。任一失败、非法 payload 或 fact owner 不匹配均停止 Knowledge/Skill/summary。
+- async 结果形成请求级非阻塞 Memory 快照后复用既有同步 collector，因此 source/trust、owner 校验、摘要、RAG/Skill 映射和 Assembler 预算合同保持单一实现。同步 Knowledge/Skill/summary 暂只允许进程内非阻塞实现。
+- 新增 11 个关键测试方法：真实 AsyncLocal 全来源纵切、两组 owner/session 隔离、消息/事实 Store 失败、总 timeout、bridge timeout 归一、调用方取消、PostgreSQL façade 不直调同步 Store、非法 payload 与配置边界。专项/bridge 30 项、相关定向 116 项和 M1 隔离 10 项通过。
+- 本纵切达到本地 E3，但 M11-T5 保持 `in_progress`：新 collector 尚未进入 Runtime/默认 PostgreSQL Container，没有运行真实数据库或证明重启后 fact 进入 Agent。下一纵切只固定 async Runtime request preparation，不提前实现消息写入、纠正/删除、版本冲突或审计。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。

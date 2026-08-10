@@ -2863,3 +2863,69 @@
 
 - `V-20260809-016` 的 Container 专项 22 项、相关回归 244 项、M1 隔离 10 项及完整离线门证据，与当前代码、实施计划、known issue、status、后端规约和 handoff 一致。
 - 本记录只关闭 M11-T4 的文档连续性；不新增代码或行为证据。M11-T5 保持 `planned`，下一原子动作仍只固定 async Context Memory 读取边界。
+
+## V-20260810-001：M11-T5 async Memory Context source 首个纵切
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-10 09:57，Asia/Shanghai
+- 验证目标：HEAD `a96ea6d` 上的 M11-T5 第一离线纵切工作区
+- 任务等级：A 类 async persistence/context 边界；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务、运行真实数据库或产生费用，费用 0
+- 依赖事实：复用现有 `AsyncMemoryStore`、同步 collector/Assembler、Knowledge 与 Skill 合同；没有新增、安装、升级或删除依赖，没有修改数据库、RuntimeRequest、AgentRuntime、Container、HTTP 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` | 0 / 0 | 初始工作区干净；HEAD `a96ea6d` 为 M11-T4 第五纵切实现提交，前序 Context 提交连续存在 |
+| 按强制顺序读取 AGENTS、continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026、最新 handoff、`V-20260809-016/017` 与后端规约 | 0 | 当前动作确认为 async Context Memory 读取 seam；status 中第五纵切 hash pending 是上一 handoff 明示由本轮固定的正常提交节奏，没有代码/记录漂移 |
+| `git show --stat a96ea6d` 与实际 Context/AsyncMemoryStore/Container 代码复核 | 0 | 8 个提交文件与 handoff 一致；同步 collector 仍只用于内存，PostgreSQL 默认 Runtime 仍未接 Context |
+| handoff Container/Context/Runtime/API/lifecycle/Memory/RAG/Settings/PostgreSQL composition 恢复集 | 0 | 244 项通过；只有既有 Starlette/httpx 警告、HTTP 诊断和故障注入日志 |
+| handoff M1 `python -S` / 修改前连续性 | 0 / 0 | M1 10 项通过；52 个稳定任务、105 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首次 async collector 与既有同步 collector 专项 | 0 | 20 项通过；真实 AsyncLocal Memory→collector→Assembler、隔离、Store 失败、timeout、取消和 façade 边界执行 |
+| 聚焦复审后 async collector/同步 collector/PostgreSQL bridge 专项 | 0 | 30 项通过；补充 bridge `store_operation_timeout` 归一且不暴露 `result_unknown` 的精确合同 |
+| 最终 Context/async Store/Container/Memory/PostgreSQL composition 相关回归 | 0 | 116 项通过；只有既有 Starlette/httpx 警告，没有失败或新增 skip |
+| 最终 M1 `python -S` 隔离 | 0 | 10 项通过；新 async Context 模块未进入 M1 标准库 Loop 顶层路径 |
+| 修改前连续性 / `git diff --check` | 0 / 0 | 52 个稳定任务、105 个 Markdown 通过；无 whitespace 错误，只有既有 LF→CRLF 提示 |
+
+### 实现与风险证据
+
+- 新增 `AsyncMemoryContextSourceCollector`，只通过现有 `AsyncMemoryStore.messages()`/`facts()` 读取短期消息和 approved fact；读取后形成请求级非阻塞快照，再复用既有同步 `ContextSourceCollector` 的类型、owner、RAG、Skill、摘要和 fragment 映射。
+- 两次 Memory 读取共享一个有界总 timeout。外层 timeout 与稳定 `store_operation_timeout` 均归一为无内容 `memory_context_timeout`；其他 Store 错误为 `memory_context_unavailable`。调用方 `CancelledError` 原样传播，不查询后续 source。
+- fact owner 在 Knowledge/Skill 前由既有 collector 完整校验；两组 owner/session 的真实 AsyncLocal 读取只渲染各自 message/fact。错误、collector repr 和测试诊断不包含 owner、session、内容或 bridge 的 `result_unknown`。
+- `AsyncPostgresMemoryStore` 纵切通过 façade 的 `bridge.run` 获取消息和事实；受控同步 Store 方法若被事件循环直接调用会立即失败，实际测试中调用次数为 0。既有 bridge 专项继续证明 blocking worker 不阻塞事件循环、timeout/cancel 受生命周期追踪。
+
+### 聚焦复审与未验证范围
+
+- 复审核对 sequential read、总 timeout、queued/running bridge timeout、调用方取消、fact owner fail-closed、下游调用顺序、同步 collector 兼容和公开导出；未发现剩余阻断问题。
+- 本纵切没有让 `ContextAwareRuntime` await 新 collector，也没有修改默认 PostgreSQL Container；因此没有执行真实 PostgreSQL fact→Runtime/Agent 主链、数据库重启恢复或 pgvector Context。
+- KnowledgeBase、SkillContextBuilder 与 summarizer 在本类中仍是进程内同步依赖；不得注入会阻塞事件循环的数据库/网络实现。取消只覆盖 async Memory 等待，不能中断随后执行的同步进程内 source。
+- 没有写入 Run 消息、实现纠正/删除、版本冲突/审计、在线摘要、真实模型或 Provider。没有触发依赖、数据库、既有共享协议、构建或跨前后端接口变化，因此按交付协议未重复运行全量门、Vue/MCP 构建或真实数据库集成。
+
+### 结论
+
+- M11-T5 第一纵切达到 async Memory source seam 的本地 E3，任务更新为 `in_progress`；这不是持久 Memory 已进入默认 Agent 主链的证据。
+- 下一原子动作只固定 async Context Runtime request preparation：await 新 collector、保留既有 prompt/identity/assembly/failure/cancellation 合同，并保持同步 `ContextAwareRuntime` 与显式 Runtime 注入不变；不接默认 PostgreSQL Container，不提前实现写入/纠正/删除。
+
+## V-20260810-002：M11-T5 async Memory Context source 连续性闭环
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-10 10:00，Asia/Shanghai
+- 验证目标：HEAD `a96ea6d` 上经 `V-20260810-001` 验证的第一纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、106 个 Markdown 通过；M11-T5 in_progress、`V-20260810-001/002`、新 handoff、plan、known issue、后端规约和恢复入口引用可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| 关键引用 `rg` / `git status --short` / `git diff --stat` / 三个未跟踪文件复核 | 0 | 7 个已跟踪修改与 3 个新文件，合计 10 个任务文件；没有构建产物或任务外改动 |
+
+### 结论
+
+- `V-20260810-001` 的 11 个关键测试、专项/bridge 30 项、相关回归 116 项和 M1 隔离 10 项，与当前实现、计划、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第一纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加 async Runtime、默认 PostgreSQL Container、真实数据库、写入/纠正/删除或在线 Provider 证据。
