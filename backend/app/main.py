@@ -282,6 +282,25 @@ def create_app(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    @app.get("/api/sessions/{session_id}", response_model=SessionResponse)
+    def get_session(
+        session_id: str,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> SessionResponse:
+        service = current_container().run_service
+        session = service.get_session(
+            session_id,
+            principal_id=principal.principal_id if principal.authenticated else None,
+            access_token=x_session_token if not principal.authenticated else None,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return SessionResponse(
+            id=session.id,
+            created_at=session.created_at,
+        )
+
     @app.get("/api/runs/{run_id}", response_model=RunResponse)
     def get_run(
         run_id: str,

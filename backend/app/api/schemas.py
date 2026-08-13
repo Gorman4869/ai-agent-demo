@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -44,6 +44,13 @@ class DocumentResponse(BaseModel):
 
 class ResearchRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4_000)
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value
 
 
 class EvidenceResponse(BaseModel):

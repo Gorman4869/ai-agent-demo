@@ -122,6 +122,24 @@ class ApiTest(unittest.TestCase):
         )
         self.assertEqual(404, response.status_code)
 
+    def test_not_existing_session_returns_404(self) -> None:
+        session = self.client.post("/api/sessions").json()
+        response = self.client.get(
+            "/api/sessions/missing",
+            headers=self._session_auth(session),
+        )
+        self.assertEqual(404, response.status_code)
+
+    def test_existing_session_returns_200(self) -> None:
+        session = self.client.post("/api/sessions").json()
+        response = self.client.get(
+            f"/api/sessions/{session['id']}",
+            headers=self._session_auth(session),
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(session['id'], response.json()['id'])
+        self.assertEqual(None, response.json()['access_token'])
+
     def test_stream_run_returns_sse_event_contract(self) -> None:
         session = self.client.post("/api/sessions").json()
         response = self.client.post(
@@ -167,6 +185,12 @@ class ApiTest(unittest.TestCase):
             f"/api/sessions/{session['id']}/runs",
             json={"message": ""},
             headers=self._session_auth(session),
+        )
+        self.assertEqual(422, response.status_code)
+
+    def test_blank_research_question_returns_422(self) -> None:
+        response = self.client.post(
+            "/api/research", json={"question": "   "}
         )
         self.assertEqual(422, response.status_code)
 

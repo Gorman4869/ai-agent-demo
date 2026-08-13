@@ -81,6 +81,23 @@ class InMemoryRunService:
             access_token=access_token,
         )
 
+    def get_session(
+        self,
+        session_id: str,
+        *,
+        principal_id: str | None = None,
+        access_token: str | None = None,
+    ) -> SessionRecord | None:
+        session = self._sessions.get(session_id)
+        if session is not None and _session_access_matches(
+            session,
+            principal_id=principal_id,
+            access_token=access_token,
+        ):
+            return session
+        else:
+            return None
+
     def resolve_session_principal(
         self,
         session_id: str,
