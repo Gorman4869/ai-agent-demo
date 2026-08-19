@@ -65,6 +65,15 @@ INVALID_ARGUMENTS_CASE = RuntimeContractCase(
     error_code="invalid_arguments",
 )
 
+INVALID_TYPE_CASE = RuntimeContractCase(
+    name="invalid-type",
+    input_text="参数类型错误",
+    arguments={"a": "2", "b": 3},
+    answer="工具参数无效，未执行计算",
+    terminal_tool_event="tool.failed",
+    error_code="invalid_arguments",
+)
+
 
 @dataclass
 class RuntimeHarness:
@@ -293,6 +302,7 @@ def _text_delta(text: str) -> RawResponsesStreamEvent:
 
 
 __all__ = [
+    "INVALID_TYPE_CASE",
     "INVALID_ARGUMENTS_CASE",
     "RuntimeContractCase",
     "RuntimeHarness",

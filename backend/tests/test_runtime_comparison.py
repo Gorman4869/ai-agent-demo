@@ -9,6 +9,7 @@ from backend.app.domain.run import RunStatus
 from backend.app.models import MockModel
 from backend.app.tools.builtin import create_default_registry
 from backend.tests.runtime_comparison_fixtures import (
+    INVALID_TYPE_CASE,
     INVALID_ARGUMENTS_CASE,
     SUCCESS_CASE,
     RuntimeContractCase,
@@ -148,6 +149,10 @@ class RuntimeComparisonContractTest(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertEqual([], harness.executed_arguments)
 
+    async def test_invalid_type_case_is_semantically_equal_across_three_runtimes(
+        self,
+    ) -> None:
+        await self._assert_case(INVALID_TYPE_CASE)
 
 def _collecting_sink(events: list[RuntimeEvent]):
     async def collect(event: RuntimeEvent) -> None:
