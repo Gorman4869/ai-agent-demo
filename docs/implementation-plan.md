@@ -733,6 +733,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 11 个关键测试方法：真实 AsyncLocal 全来源纵切、两组 owner/session 隔离、消息/事实 Store 失败、总 timeout、bridge timeout 归一、调用方取消、PostgreSQL façade 不直调同步 Store、非法 payload 与配置边界。专项/bridge 30 项、相关定向 116 项和 M1 隔离 10 项通过。
 - 本纵切达到本地 E3，但 M11-T5 保持 `in_progress`：新 collector 尚未进入 Runtime/默认 PostgreSQL Container，没有运行真实数据库或证明重启后 fact 进入 Agent。下一纵切只固定 async Runtime request preparation，不提前实现消息写入、纠正/删除、版本冲突或审计。
 
+#### M11-T5 第二个离线纵切边界
+
+- 新增独立 `prepare_async_context_request()` 与 `AsyncContextAwareRuntime`，只 await 已验证的 `AsyncMemoryContextSourceCollector`，随后复用既有 binding、Assembler、`PreparedContextRequest` 与 `AgentRuntime` 合同；同步 `ContextAwareRuntime` 文件和行为不变。
+- 已有 `prompt_context` 在 binding/Store 前失败；缺失可信 identity、跨 owner、Store failure/timeout 与 assembly failure 在 delegate 前统一为无内容 `context_unavailable`。调用方取消与依赖程序错误原样传播，不被伪装成 Runtime 失败。
+- 非空 assembly 只替换 `prompt_context`，execution/checkpoint/context identity 保持同一对象；空 assembly 复用原请求。正常终态与 approval pause 原样透传，delegate 至多调用一次。
+- 新增 11 个关键测试方法；async/sync Runtime 专项 24 项、Context/async Store/Container/Memory/PostgreSQL composition 相关回归 127 项和 M1 隔离 10 项通过。
+- 本纵切达到显式 async Runtime preparation 的本地 E3，但 M11-T5 保持 `in_progress`：adapter 尚未进入默认 PostgreSQL Container，没有运行真实数据库或证明重启后 fact 进入 Agent。下一纵切只迁移 PostgreSQL built-in Runtime composition，保持默认内存与显式 caller Runtime mappings 不变。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。

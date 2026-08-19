@@ -14,6 +14,10 @@ from .assembler import (
     default_context_budget_policy,
 )
 from .async_collector import AsyncMemoryContextSourceCollector
+from .async_runtime import (
+    AsyncContextAwareRuntime,
+    prepare_async_context_request,
+)
 from .collector import (
     CollectedContext,
     ContextCollectionError,
@@ -34,6 +38,7 @@ from .runtime import (
 )
 
 __all__ = [
+    "AsyncContextAwareRuntime",
     "AsyncMemoryContextSourceCollector",
     "CollectedContext",
     "ContextAwareRuntime",
@@ -61,5 +66,6 @@ __all__ = [
     "RuntimeContextBindingFactory",
     "RuntimeIdentityBindingFactory",
     "default_context_budget_policy",
+    "prepare_async_context_request",
     "prepare_context_request",
 ]

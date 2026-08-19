@@ -2929,3 +2929,67 @@
 
 - `V-20260810-001` 的 11 个关键测试、专项/bridge 30 项、相关回归 116 项和 M1 隔离 10 项，与当前实现、计划、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第一纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加 async Runtime、默认 PostgreSQL Container、真实数据库、写入/纠正/删除或在线 Provider 证据。
+
+## V-20260819-001：M11-T5 async Context Runtime preparation 第二纵切
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-19 18:01，Asia/Shanghai
+- 验证目标：HEAD `f06b510` 上的 M11-T5 第二离线纵切工作区；第一纵切实现提交 `2b248a5`
+- 任务等级：A 类 async persistence/context 边界；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务、运行真实数据库或产生费用，费用 0
+- 依赖事实：复用现有 AsyncMemoryContextSourceCollector、Runtime binding、Assembler 与 AgentRuntime 合同；没有新增、安装、升级或删除依赖，没有修改 RuntimeRequest、AgentRuntime、Store、Container、HTTP、数据库或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -8 --oneline` | 0 / 0 | 初始工作区干净；第一纵切已提交为 `2b248a5`，其后两个提交只包含学习者 M2/Week 4 代码与进度，不修改 M11 Context 实现 |
+| 按强制顺序读取 continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026、最新 handoff、`V-20260810-001/002` 与后端规约 | 0 | 当前动作确认为独立 async Runtime preparation；学习进度与工程状态已分离，没有恢复旧工作区 |
+| handoff Context/async Store/Container/Memory/PostgreSQL composition 恢复集 | 0 | 116 项通过；只有既有 Starlette/httpx 警告 |
+| handoff M1 `python -S` / 修改前连续性 | 0 / 0 | M1 10 项通过；52 个稳定任务、106 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_async_context_runtime -v` | 0 | 新增 11 个关键测试通过；真实 AsyncLocal preparation、空 Context、delegate 单次调用、已有 prompt、缺失 identity、跨 owner、Store failure/timeout、取消、程序错误与 approval pause 执行 |
+| async/sync Runtime 专项 | 0 | 24 项通过；新增 async adapter 与既有同步 adapter 语义一致，且同步 Runtime 文件无 diff |
+| 最终 Context/async Store/Container/Memory/PostgreSQL composition 相关回归 | 0 | 127 项通过；只有既有 Starlette/httpx 警告，没有失败或新增 skip |
+| 最终 M1 `python -S` 隔离 / `git diff --check` | 0 / 0 | M1 10 项通过；无 whitespace 错误，只有既有 LF→CRLF 提示 |
+
+### 实现与风险证据
+
+- 新增独立 `backend.app.context.async_runtime`；`prepare_async_context_request()` await 已验证 collector，非空 assembly 仅以 dataclass replace 填充 prompt_context，空 assembly 复用原请求，execution/checkpoint/context identity 保持。
+- `AsyncContextAwareRuntime` 只捕获稳定 preparation/collection/assembly 错误并返回无内容 `context_unavailable`；已有 prompt、缺失 identity、cross-owner、Store failure/timeout 均在 delegate 前失败。调用方 CancelledError 与依赖 TypeError 原样传播。
+- 正常 RuntimeResult 与 RuntimeApprovalPause 原样透传，emit/control 不替换且 delegate 只调用一次。失败 repr 不包含 owner、session、query、fact value 或原始 Store 错误。
+- 聚焦复审后把 async 实现从同步 `context/runtime.py` 移到独立模块；最终同步 Runtime 文件无 diff，Context package 仅新增公开导出。
+
+### 聚焦复审与未验证范围
+
+- 复审核对 prompt-before-Store、可信 identity、checkpoint owner 合同、owner mismatch、stable failure、取消、程序错误、delegate 次数、approval pause、repr 和同步兼容；未发现剩余阻断问题。
+- 本纵切仍是显式 adapter，未修改默认内存或 PostgreSQL Container；没有证明持久 fact 经应用 composition 进入 Agent，也没有运行真实 PostgreSQL、重启恢复或 pgvector Context。
+- Knowledge、Skill 与 summary 仍须是进程内非阻塞实现；没有消息写入、纠正/删除、版本冲突/审计、在线摘要、Provider、Token/usage 或费用证据。
+- 没有触发依赖、数据库、共享 Runtime/Store/Container/HTTP 契约或跨前后端接口变化，因此按交付协议未运行完整全仓门、Vue/MCP 构建或真实数据库集成。
+
+### 结论
+
+- M11-T5 第二纵切达到显式 async Runtime preparation 的本地 E3，任务保持 `in_progress`；这不是持久 Memory 已进入默认 Agent 主链的证据。
+- 下一原子动作只迁移 PostgreSQL built-in Runtime composition 到单一 AsyncContextAwareRuntime，保持默认内存 create() 与显式 caller Runtime mappings 不变；不提前实现消息写入、纠正/删除、版本冲突/审计或 M11-T6。
+
+## V-20260819-002：M11-T5 async Context Runtime 连续性闭环
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-19 18:01，Asia/Shanghai
+- 验证目标：HEAD `f06b510` 上经 `V-20260819-001` 验证的第二纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、107 个 Markdown 通过；M11-T5 in_progress、`V-20260819-001/002`、新 handoff、plan、known issue、后端规约和恢复入口可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 三个未跟踪文件复核 | 0 | 6 个已跟踪修改与 3 个新文件，合计 9 个任务文件；没有构建产物或任务外改动 |
+
+### 结论
+
+- `V-20260819-001` 的 11 个关键测试、async/sync Runtime 专项 24 项、相关回归 127 项和 M1 隔离 10 项，与当前实现、计划、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第二纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加默认 PostgreSQL Container、真实数据库、写入/纠正/删除或在线 Provider 证据。
