@@ -23,7 +23,7 @@ from backend.app.application_lifecycle import (
     ApplicationLifecycleState,
 )
 from backend.app.container import ApplicationContainer
-from backend.app.context import ContextAwareRuntime
+from backend.app.context import AsyncContextAwareRuntime, ContextAwareRuntime
 from backend.app.domain import Message
 from backend.app.domain.run import RunRecord, RunStatus
 from backend.app.integrations.mcp import McpClientState
@@ -343,6 +343,7 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
             persistence=SimpleNamespace(
                 approval_store=InMemoryApprovalStore(),
             ),
+            runtimes={"manual": Mock()},
             close=AsyncMock(side_effect=RuntimeError("cleanup failed")),
         )
 
@@ -378,38 +379,76 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
         )
         run_store = InMemoryRunStore()
         event_store = InMemoryEventStore(run_store)
-        memory = ConversationMemory()
+        context_memory = ConversationMemory()
+        context_memory.append_message(
+            "postgres-context-session",
+            Message(role="user", content="postgres async recent"),
+        )
+        context_memory.remember(
+            owner_id="postgres-context-owner",
+            key="preferred_language",
+            value="Chinese",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        sync_memory = Mock()
         approvals = InMemoryApprovalStore()
+        knowledge = InMemoryKnowledgeBase()
+        knowledge.add(
+            Document(
+                id="postgres-context-document",
+                title="PostgreSQL context",
+                content="PostgreSQL async context enters the runtime.",
+                source="course-fixture",
+            )
+        )
 
         persistence = SimpleNamespace(
             run_store=run_store,
             event_store=event_store,
-            memory_store=memory,
+            memory_store=sync_memory,
             approval_store=approvals,
-            async_memory_store=AsyncLocalMemoryStore(memory),
+            async_memory_store=AsyncLocalMemoryStore(context_memory),
             async_approval_store=AsyncLocalApprovalStore(approvals),
         )
-        coordinator = Mock(spec=RunCoordinator)
         composition = SimpleNamespace(
             persistence=persistence,
-            coordinator=coordinator,
+            runtimes=None,
+            coordinator=None,
             close=AsyncMock(),
         )
-        open_composition = AsyncMock(return_value=composition)
+
+        async def open_composition(_dsn, **kwargs):
+            runtime_factory = kwargs.pop("runtime_factory")
+            self.assertNotIn("runtimes", kwargs)
+            resolved_runtimes = runtime_factory(persistence)
+            composition.runtimes = resolved_runtimes
+            composition.coordinator = RunCoordinator(
+                run_store=run_store,
+                event_store=event_store,
+                runtimes=resolved_runtimes,
+                run_timeout_ms=kwargs["run_timeout_ms"],
+            )
+            return composition
+
+        open_composition_mock = AsyncMock(side_effect=open_composition)
 
         with (
             patch.dict(os.environ, {}, clear=True),
             patch(
                 "backend.app.postgres_execution."
                 "PostgresExecutionComposition.open",
-                new=open_composition,
+                new=open_composition_mock,
             ),
         ):
-            container = await ApplicationContainer.open(settings=settings)
+            container = await ApplicationContainer.open(
+                settings=settings,
+                knowledge_base=knowledge,
+            )
 
         self.assertIs(run_store, container.run_store)
         self.assertIs(event_store, container.event_store)
-        self.assertIs(memory, container.memory)
+        self.assertIs(sync_memory, container.memory)
         self.assertIs(approvals, container.approval_store)
         self.assertIs(
             persistence.async_memory_store,
@@ -419,14 +458,52 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
             persistence.async_approval_store,
             container.async_approval_store,
         )
-        self.assertIs(coordinator, container.run_coordinator)
-        self.assertIsInstance(container.runtimes["manual"], SkillAwareRuntime)
+        self.assertIs(composition.coordinator, container.run_coordinator)
+        self.assertIsInstance(
+            container.runtimes["manual"],
+            AsyncContextAwareRuntime,
+        )
+        self.assertNotIsInstance(container.runtimes["manual"], SkillAwareRuntime)
         self.assertNotIsInstance(container.runtimes["manual"], ContextAwareRuntime)
         self.assertEqual(ApplicationLifecycleState.CREATED, container.lifecycle_state)
         self.assertEqual(ApplicationAdmissionState.CREATED, container.admission.state)
         self.assertNotIn(dsn, repr(container))
-        open_composition.assert_awaited_once()
-        self.assertEqual(dsn, open_composition.await_args.args[0])
+        open_composition_mock.assert_awaited_once()
+        self.assertEqual(dsn, open_composition_mock.await_args.args[0])
+
+        run = RunRecord.create(
+            run_id="postgres-context-run",
+            session_id="postgres-context-session",
+            owner_id="postgres-context-owner",
+            runtime="manual",
+            input_text="Use $research-summary for PostgreSQL context.",
+            idempotency_key="postgres-context-key",
+            created_at=datetime(2026, 7, 16, 4, 0, tzinfo=UTC),
+        )
+        await run_store.create(run)
+        prompt_contexts: list[str | None] = []
+
+        def capture_loop(message: str, **kwargs):
+            prompt_contexts.append(kwargs.get("prompt_context"))
+            return create_original_learning_agent_loop(message, **kwargs)
+
+        with patch(
+            "backend.app.container.create_learning_agent_loop",
+            side_effect=capture_loop,
+        ):
+            completed = await container.run_coordinator.execute(
+                run.id,
+                owner_id=run.owner_id,
+            )
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        fragments = _context_payload(prompt_contexts[0])["fragments"]
+        self.assertEqual(
+            ["system", "skill", "memory", "recent", "rag"],
+            [fragment["source"] for fragment in fragments],
+        )
+        sync_memory.messages.assert_not_called()
+        sync_memory.facts.assert_not_called()
 
         await container.start()
         self.assertEqual(ApplicationLifecycleState.RUNNING, container.lifecycle_state)
@@ -439,6 +516,57 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
         composition.close.assert_awaited_once()
         self.assertEqual(ApplicationLifecycleState.CLOSED, container.lifecycle_state)
         self.assertEqual(McpClientState.CLOSED, container.mcp_clients.state)
+
+    async def test_postgres_open_preserves_explicit_runtime(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": (
+                    "postgresql://course@127.0.0.1:55432/agent_test"
+                ),
+            }
+        )
+        run_store = InMemoryRunStore()
+        event_store = InMemoryEventStore(run_store)
+        memory = ConversationMemory()
+        approvals = InMemoryApprovalStore()
+        runtime = Mock()
+        persistence = SimpleNamespace(
+            run_store=run_store,
+            event_store=event_store,
+            memory_store=memory,
+            approval_store=approvals,
+            async_memory_store=AsyncLocalMemoryStore(memory),
+            async_approval_store=AsyncLocalApprovalStore(approvals),
+        )
+        composition = SimpleNamespace(
+            persistence=persistence,
+            runtimes=None,
+            coordinator=Mock(spec=RunCoordinator),
+            close=AsyncMock(),
+        )
+
+        async def open_composition(_dsn, **kwargs):
+            self.assertNotIn("runtime_factory", kwargs)
+            composition.runtimes = kwargs["runtimes"]
+            return composition
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "backend.app.postgres_execution."
+                "PostgresExecutionComposition.open",
+                new=AsyncMock(side_effect=open_composition),
+            ),
+        ):
+            container = await ApplicationContainer.open(
+                settings=settings,
+                runtimes={"manual": runtime},
+            )
+
+        self.assertIs(runtime, container.runtimes["manual"])
+        self.assertNotIsInstance(runtime, AsyncContextAwareRuntime)
+        self.assertNotIsInstance(runtime, SkillAwareRuntime)
 
     async def test_default_event_store_is_bound_to_default_run_store(self) -> None:
         now = datetime(2026, 7, 16, 4, 0, tzinfo=UTC)

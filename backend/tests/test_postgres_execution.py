@@ -94,6 +94,7 @@ class PostgresExecutionCompositionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(PostgresExecutionCompositionState.RUNNING, composition.state)
         self.assertIs(composition.persistence, persistence)
+        self.assertIsInstance(composition.runtimes["manual"], _Runtime)
         self.assertIs(composition.recovery_supervisor, supervisor)
         self.assertIsInstance(composition.coordinator, RunCoordinator)
         quiesce = AsyncMock(
@@ -114,6 +115,101 @@ class PostgresExecutionCompositionTest(unittest.IsolatedAsyncioTestCase):
         )
         quiesce.assert_awaited_once_with(timeout_ms=5_000)
         self.assertEqual(PostgresExecutionCompositionState.CLOSED, composition.state)
+
+    async def test_runtime_factory_runs_after_setup_and_exposes_runtimes(
+        self,
+    ) -> None:
+        events: list[str] = []
+        persistence = _FakePersistence(events)
+        runtime = _Runtime()
+
+        def runtime_factory(resolved_persistence):
+            self.assertIs(persistence, resolved_persistence)
+            events.append("runtime_factory")
+            return {"manual": runtime}
+
+        with self._patch_components(
+            persistence,
+            _FakeSupervisor(events),
+        ):
+            composition = await PostgresExecutionComposition.open(
+                "postgresql://private-connection",
+                runtime_factory=runtime_factory,
+            )
+
+        self.assertEqual(
+            ["persistence.setup", "runtime_factory", "supervisor.start"],
+            events,
+        )
+        self.assertIs(runtime, composition.runtimes["manual"])
+
+    async def test_runtime_factory_failure_closes_persistence(self) -> None:
+        events: list[str] = []
+        persistence = _FakePersistence(events)
+
+        def broken_factory(_persistence):
+            events.append("runtime_factory")
+            raise RuntimeError("runtime-factory-failed")
+
+        with self._patch_components(
+            persistence,
+            _FakeSupervisor(events),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime-factory-failed",
+            ):
+                await PostgresExecutionComposition.open(
+                    "postgresql://private-connection",
+                    runtime_factory=broken_factory,
+                )
+
+        self.assertEqual(
+            ["persistence.setup", "runtime_factory", "persistence.close"],
+            events,
+        )
+
+    async def test_runtime_factory_invalid_result_closes_persistence(
+        self,
+    ) -> None:
+        events: list[str] = []
+        persistence = _FakePersistence(events)
+
+        with self._patch_components(
+            persistence,
+            _FakeSupervisor(events),
+        ):
+            with self.assertRaisesRegex(ValueError, "returned no runtimes"):
+                await PostgresExecutionComposition.open(
+                    "postgresql://private-connection",
+                    runtime_factory=lambda _persistence: None,
+                )
+
+        self.assertEqual(
+            ["persistence.setup", "persistence.close"],
+            events,
+        )
+
+    async def test_exactly_one_runtime_source_is_required_before_open(
+        self,
+    ) -> None:
+        opened = AsyncMock()
+
+        with patch.object(PostgresPersistence, "open", new=opened):
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                await PostgresExecutionComposition.open(
+                    "postgresql://private-connection",
+                )
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                await PostgresExecutionComposition.open(
+                    "postgresql://private-connection",
+                    runtimes={"manual": _Runtime()},
+                    runtime_factory=lambda _persistence: {
+                        "manual": _Runtime()
+                    },
+                )
+
+        opened.assert_not_awaited()
 
     async def test_repeated_close_is_idempotent(self) -> None:
         events: list[str] = []

@@ -5,6 +5,8 @@ import logging
 from collections.abc import Mapping
 from datetime import timedelta
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Protocol
 
 from backend.app.agent import AgentRuntime
 from backend.app.domain.run import RuntimeName
@@ -32,6 +34,13 @@ class PostgresExecutionCompositionLifecycleError(RuntimeError):
         super().__init__(self.code)
 
 
+class PostgresRuntimeFactory(Protocol):
+    def __call__(
+        self,
+        persistence: PostgresPersistence,
+    ) -> Mapping[RuntimeName | str, AgentRuntime]: ...
+
+
 class PostgresExecutionComposition:
     """Own one explicit PostgreSQL execution and recovery lifecycle.
 
@@ -43,11 +52,13 @@ class PostgresExecutionComposition:
         self,
         *,
         persistence: PostgresPersistence,
+        runtimes: Mapping[RuntimeName | str, AgentRuntime],
         coordinator: RunCoordinator,
         recovery_supervisor: RunRecoverySupervisor,
         coordinator_quiesce_timeout_ms: int,
     ) -> None:
         self._persistence = persistence
+        self._runtimes = runtimes
         self._coordinator = coordinator
         self._recovery_supervisor = recovery_supervisor
         self._coordinator_quiesce_timeout_ms = coordinator_quiesce_timeout_ms
@@ -59,7 +70,8 @@ class PostgresExecutionComposition:
         cls,
         conninfo: str,
         *,
-        runtimes: Mapping[RuntimeName | str, AgentRuntime],
+        runtimes: Mapping[RuntimeName | str, AgentRuntime] | None = None,
+        runtime_factory: PostgresRuntimeFactory | None = None,
         notifier: EventNotifier | None = None,
         run_timeout_ms: int = 30_000,
         notify_timeout_ms: int | None = None,
@@ -71,14 +83,26 @@ class PostgresExecutionComposition:
         recovery_ttl: timedelta = timedelta(seconds=30),
     ) -> PostgresExecutionComposition:
         _validate_quiesce_timeout(coordinator_quiesce_timeout_ms)
+        if (runtimes is None) == (runtime_factory is None):
+            raise ValueError(
+                "provide exactly one of runtimes or runtime_factory"
+            )
         persistence = await PostgresPersistence.open(conninfo)
         supervisor: RunRecoverySupervisor | None = None
         try:
             await persistence.setup()
+            resolved_runtimes = (
+                runtimes
+                if runtime_factory is None
+                else runtime_factory(persistence)
+            )
+            if resolved_runtimes is None:
+                raise ValueError("runtime_factory returned no runtimes")
+            resolved_runtimes = MappingProxyType(dict(resolved_runtimes))
             coordinator = RunCoordinator(
                 run_store=persistence.run_store,
                 event_store=persistence.event_store,
-                runtimes=runtimes,
+                runtimes=resolved_runtimes,
                 notifier=notifier,
                 run_timeout_ms=run_timeout_ms,
                 notify_timeout_ms=notify_timeout_ms,
@@ -100,6 +124,7 @@ class PostgresExecutionComposition:
             )
             composition = cls(
                 persistence=persistence,
+                runtimes=resolved_runtimes,
                 coordinator=coordinator,
                 recovery_supervisor=supervisor,
                 coordinator_quiesce_timeout_ms=coordinator_quiesce_timeout_ms,
@@ -122,6 +147,10 @@ class PostgresExecutionComposition:
     @property
     def persistence(self) -> PostgresPersistence:
         return self._persistence
+
+    @property
+    def runtimes(self) -> Mapping[RuntimeName | str, AgentRuntime]:
+        return self._runtimes
 
     @property
     def coordinator(self) -> RunCoordinator:
@@ -222,4 +251,5 @@ __all__ = [
     "PostgresExecutionComposition",
     "PostgresExecutionCompositionLifecycleError",
     "PostgresExecutionCompositionState",
+    "PostgresRuntimeFactory",
 ]

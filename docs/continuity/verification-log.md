@@ -2993,3 +2993,70 @@
 
 - `V-20260819-001` 的 11 个关键测试、async/sync Runtime 专项 24 项、相关回归 127 项和 M1 隔离 10 项，与当前实现、计划、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第二纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加默认 PostgreSQL Container、真实数据库、写入/纠正/删除或在线 Provider 证据。
+
+## V-20260819-003：M11-T5 默认 PostgreSQL Context composition 第三纵切
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-19 18:21，Asia/Shanghai
+- 验证目标：HEAD `ad7eafb` 上的 M11-T5 第三离线纵切工作区；第二纵切实现提交 `ad7eafb`
+- 任务等级：A 类 async persistence/composition 边界；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务、运行真实 PostgreSQL 或产生费用，费用 0
+- 依赖事实：复用现有 `AsyncMemoryStore`、`AsyncMemoryContextSourceCollector`、`AsyncContextAwareRuntime`、Skill/Knowledge 与 PostgreSQL execution composition；没有新增、安装、升级或删除依赖，没有修改 RuntimeRequest、AgentRuntime、Store、HTTP、数据库 schema 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -4 --oneline` | 0 / 0 | 初始工作区干净；HEAD `ad7eafb` 为第二纵切实现提交，前序 `f06b510`/`a56ebe6` 是学习者 M2/Week 4 提交且未改 M11 Context 代码 |
+| 按强制顺序读取 continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026、最新 handoff、`V-20260819-001/002` 与后端规约 | 0 | 当前动作确认为默认 PostgreSQL built-in Runtime composition 接线；不重做已提交 async collector/Runtime，也不进入消息写入或 M11-T6 |
+| handoff Context/async Store/Container/Memory/PostgreSQL composition 恢复集 | 0 | 127 项通过；只有既有 Starlette/httpx 警告 |
+| handoff M1 `python -S` / 修改前连续性 | 0 / 0 | M1 10 项通过；52 个稳定任务、107 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首次 PostgreSQL composition/Container 专项 | 1 | 34 项中 2 项旧 Container 测试桩缺少新增只读 `composition.runtimes` 属性；实现链未失败。测试桩按新内部 composition 形状补齐后重跑 |
+| 最终 `python -m unittest backend.tests.test_postgres_execution backend.tests.test_container -v` | 0 | 39 项通过；覆盖 factory setup 顺序、互斥输入、失败/空结果清理、Runtime 暴露、默认 async Context 主链、同步 Memory 零调用与显式 Runtime 身份保持 |
+| Context/async Store/Container/Memory/PostgreSQL composition 相关回归 | 0 | 聚焦集合 131 项通过；扩大共享集合 283 项通过。随后新增的 factory 空结果用例由最终专项 39 项和全量门覆盖 |
+| 首次 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1` | 1 | 当前终端 Node 14.21.3 低于安装的 MCP SDK 1.29.0 所声明 `node >=18`；后端阶段只有 3 个 TypeScript MCP STDIO E2E `startup_timeout`，隔离重跑稳定复现。没有把环境不兼容记录成代码通过 |
+| 用户切换 Node 后 `node --version` 与 MCP E2E 隔离重跑 | 0 | Node `v22.16.0`；4 项目录/发现/调用/非法参数 E2E 全部通过 |
+| Node 22 下沙箱内重跑完整门 | 1 | 后端 578 项通过、1 项既有 Windows symlink 能力跳过，Code Agent 和依赖检查通过；Vue 写 `frontend/tsconfig.app.tsbuildinfo` 因沙箱 `TS5033/EPERM` 失败 |
+| 经授权在沙箱外重跑同一 `scripts/verify.ps1` | 0 | 后端 578 项通过、1 项既有 Windows symlink 能力跳过；受控 Code Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建和 Docker Compose 配置全部通过 |
+
+### 实现与风险证据
+
+- `PostgresExecutionComposition.open()` 现在要求显式 Runtime mapping 与同步 runtime factory 二选一。factory 只在 persistence setup 成功后运行，解析结果复制为只读 mapping，再构造 Coordinator/supervisor；factory 异常或空结果均关闭 persistence。
+- 默认 PostgreSQL `ApplicationContainer.open()` 先构造进程内 MCP/Run service/Knowledge/embedding，再由 composition factory 获取 owned `async_memory_store`，共享一个 async collector、Skill builder 与 binding factory包装全部 built-in Runtime。旧 `SkillAwareRuntime` 不再叠加。
+- 真实 Container 测试通过 Coordinator 执行 `AsyncContextAwareRuntime`，从独立 AsyncLocal façade 读取 recent message/approved fact，并装配 system/skill/memory/recent/rag 五类 source；同步 compatibility Memory 的 `messages()`/`facts()` 调用次数均为 0。
+- 默认内存 `create()` 仍使用同步 `ContextAwareRuntime`。显式 caller Runtime mapping 仍保持对象身份，不被 factory 或 Context wrapper 替换；应用 start/close 顺序和失败回滚保持。
+
+### 聚焦复审与未验证范围
+
+- 复审核对 persistence/factory/Coordinator 构造顺序、异常清理、mapping snapshot、单一 prompt owner、async façade、显式注入兼容和应用生命周期；未发现剩余阻断问题。该内部、可逆 composition seam 与既有 ADR 一致，无需新增 ADR。
+- 没有运行真实 PostgreSQL、数据库/进程重启或 pgvector Context；AsyncLocal 纵切证明应用接线与事件循环边界，不是持久恢复证据。
+- 没有写入 Run 消息、实现纠正/删除、版本冲突/审计、在线摘要、真实模型或 Provider。没有读取真实 Key、产生费用、配置 remote 或执行 push。
+- Node 14 失败、切换 Node 22 后恢复和沙箱 Vue EPERM 均如实保留；最终通过来自同一完整门在满足 SDK 引擎与构建写权限后的重跑。
+
+### 结论
+
+- M11-T5 第三纵切达到默认 PostgreSQL composition 的确定性离线 E3，任务保持 `in_progress`；这不是 PostgreSQL 持久 fact 重启后进入 Agent 的实证。
+- 下一原子动作只固定主 Run 的 user/assistant 消息写入边界、顺序、失败语义与幂等责任，并复用现有 AsyncMemoryStore；不提前实现纠正/删除、版本冲突/审计或 M11-T6。
+
+## V-20260819-004：M11-T5 默认 PostgreSQL Context composition 连续性闭环
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-19 18:21，Asia/Shanghai
+- 验证目标：HEAD `ad7eafb` 上经 `V-20260819-003` 验证的第三纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、108 个 Markdown 通过；M11-T5 in_progress、`V-20260819-003/004`、新 handoff、plan、known issue、后端规约和恢复入口可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 新 handoff 复核 | 0 | 9 个已跟踪修改与 1 个新 handoff，合计 10 个任务文件；没有构建产物、诊断临时文件或任务外改动 |
+
+### 结论
+
+- `V-20260819-003` 的最终专项 39 项、共享回归 283 项与完整离线门证据，与当前实现、计划、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第三纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加真实 PostgreSQL/重启、消息写入、纠正/删除、版本审计或在线 Provider 证据。

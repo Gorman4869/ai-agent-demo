@@ -16,6 +16,8 @@ from backend.app.application_lifecycle import (
     ApplicationRunCommands,
 )
 from backend.app.context import (
+    AsyncContextAwareRuntime,
+    AsyncMemoryContextSourceCollector,
     ContextAwareRuntime,
     ContextSourceCollector,
     ContextSystemConstraint,
@@ -253,7 +255,6 @@ class ApplicationContainer:
         if postgres_dsn is None:
             raise ValueError("postgres persistence requires a configured DSN")
 
-        resolved_runtimes = _resolve_runtimes(resolved_settings, runtimes)
         resolved_mcp_clients = _resolve_mcp_clients(
             resolved_settings,
             mcp_clients=mcp_clients,
@@ -275,13 +276,27 @@ class ApplicationContainer:
 
         from backend.app.postgres_execution import PostgresExecutionComposition
 
-        composition = await PostgresExecutionComposition.open(
-            postgres_dsn.get_secret_value(),
-            runtimes=resolved_runtimes,
-            run_timeout_ms=resolved_settings.budget.run_timeout_ms,
-        )
+        if runtimes is None:
+            composition = await PostgresExecutionComposition.open(
+                postgres_dsn.get_secret_value(),
+                runtime_factory=lambda persistence: (
+                    _resolve_async_context_runtimes(
+                        resolved_settings,
+                        context_memory_store=persistence.async_memory_store,
+                        context_knowledge_base=resolved_knowledge_base,
+                    )
+                ),
+                run_timeout_ms=resolved_settings.budget.run_timeout_ms,
+            )
+        else:
+            composition = await PostgresExecutionComposition.open(
+                postgres_dsn.get_secret_value(),
+                runtimes=_resolve_runtimes(resolved_settings, runtimes),
+                run_timeout_ms=resolved_settings.budget.run_timeout_ms,
+            )
         try:
             persistence = composition.persistence
+            resolved_runtimes = composition.runtimes
             resolved_authenticator = (
                 authenticator
                 if authenticator is not None
@@ -335,23 +350,7 @@ def _resolve_runtimes(
     if runtimes is not None:
         return MappingProxyType(dict(runtimes))
 
-    manual_runtime = ManualRuntime(
-        lambda request, token: create_learning_agent_loop(
-            request.input_text,
-            execution_context=request.execution_context,
-            cancellation_token=token,
-            max_steps=settings.budget.max_steps,
-            max_model_retries=settings.budget.max_model_retries,
-            prompt_context=request.prompt_context,
-        )
-    )
-    runtime_map: dict[RuntimeName | str, AgentRuntime] = {
-        "manual": manual_runtime
-    }
-    if settings.runtime == "agents_sdk":
-        runtime_map["agents_sdk"] = _create_agents_sdk_runtime(settings)
-    elif settings.runtime == "langgraph":
-        runtime_map["langgraph"] = _create_langgraph_runtime(settings)
+    runtime_map = _create_built_in_runtimes(settings)
     skill_context_builder = default_skill_context_builder()
     if context_memory_store is not None:
         assert context_knowledge_base is not None
@@ -382,6 +381,55 @@ def _resolve_runtimes(
             for name, runtime in runtime_map.items()
         }
     )
+
+
+def _resolve_async_context_runtimes(
+    settings: Settings,
+    *,
+    context_memory_store: AsyncMemoryStore,
+    context_knowledge_base: KnowledgeBase,
+) -> Mapping[RuntimeName | str, AgentRuntime]:
+    collector = AsyncMemoryContextSourceCollector(
+        memory_store=context_memory_store,
+        knowledge_base=context_knowledge_base,
+        skill_context_builder=default_skill_context_builder(),
+    )
+    binding_factory = RuntimeIdentityBindingFactory(
+        system_constraints=_DEFAULT_CONTEXT_SYSTEM_CONSTRAINTS,
+    )
+    return MappingProxyType(
+        {
+            name: AsyncContextAwareRuntime(
+                runtime,
+                binding_factory=binding_factory,
+                collector=collector,
+            )
+            for name, runtime in _create_built_in_runtimes(settings).items()
+        }
+    )
+
+
+def _create_built_in_runtimes(
+    settings: Settings,
+) -> dict[RuntimeName | str, AgentRuntime]:
+    manual_runtime = ManualRuntime(
+        lambda request, token: create_learning_agent_loop(
+            request.input_text,
+            execution_context=request.execution_context,
+            cancellation_token=token,
+            max_steps=settings.budget.max_steps,
+            max_model_retries=settings.budget.max_model_retries,
+            prompt_context=request.prompt_context,
+        )
+    )
+    runtime_map: dict[RuntimeName | str, AgentRuntime] = {
+        "manual": manual_runtime
+    }
+    if settings.runtime == "agents_sdk":
+        runtime_map["agents_sdk"] = _create_agents_sdk_runtime(settings)
+    elif settings.runtime == "langgraph":
+        runtime_map["langgraph"] = _create_langgraph_runtime(settings)
+    return runtime_map
 
 
 def _resolve_mcp_clients(

@@ -741,6 +741,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 11 个关键测试方法；async/sync Runtime 专项 24 项、Context/async Store/Container/Memory/PostgreSQL composition 相关回归 127 项和 M1 隔离 10 项通过。
 - 本纵切达到显式 async Runtime preparation 的本地 E3，但 M11-T5 保持 `in_progress`：adapter 尚未进入默认 PostgreSQL Container，没有运行真实数据库或证明重启后 fact 进入 Agent。下一纵切只迁移 PostgreSQL built-in Runtime composition，保持默认内存与显式 caller Runtime mappings 不变。
 
+#### M11-T5 第三个离线纵切边界
+
+- `PostgresExecutionComposition.open()` 支持在 persistence setup 后执行一个同步 runtime factory，使默认应用组合只能从已打开 composition 获取 owned `async_memory_store`，再构造 Coordinator；factory 失败或返回空结果时关闭 persistence，且 runtimes 与 factory 必须且只能提供一个。
+- 默认 PostgreSQL `ApplicationContainer.open()` 用进程内 Knowledge、Skill 和固定 system source 构造 `AsyncMemoryContextSourceCollector` 与单一 `AsyncContextAwareRuntime`，不叠加旧 `SkillAwareRuntime`，也不让同步 PostgreSQL Memory adapter 进入事件循环。
+- 默认内存 `ApplicationContainer.create()` 继续使用同步 `ContextAwareRuntime`；显式 caller Runtime mapping 原对象透传。RuntimeRequest、AgentRuntime、Store、HTTP、数据库 schema 和外部 API 均未改。
+- 新增 5 个 composition factory 关键测试并扩展 2 个 Container 纵切：setup/工厂/Coordinator 顺序、失败清理、非法返回、互斥输入、Runtime 暴露、真实 async Memory 五来源装配、同步 Memory 禁用和显式 Runtime 身份保持。专项 39 项、共享相关回归 283 项与完整离线门通过；全量后端 578 项通过、1 项既有 Windows symlink 条件跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置均通过。
+- 本纵切达到默认 PostgreSQL composition 的确定性离线 E3，但没有运行真实 PostgreSQL、数据库重启或 pgvector Context。M11-T5 保持 `in_progress`；下一纵切只固定主 Run 的 user/assistant 消息写入边界、顺序、失败语义和幂等责任，不提前实现纠正/删除、版本冲突/审计或 M11-T6。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。
