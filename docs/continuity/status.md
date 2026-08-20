@@ -3,7 +3,7 @@
 - 更新时间：2026-08-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`4ec5444`
+- 最近已确认实现提交：`07ec390`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -50,7 +50,7 @@
 - M11-T5 第五纵切验证基线提交：`8fe9ef8`；实现提交：`7954c23`
 - M11-T5 第六纵切验证基线提交：`7954c23`；实现提交：`9ae5e8a`
 - M11-T5 第七纵切验证基线提交：`f066a90`；实现提交：`4ec5444`
-- M11-T6 第一纵切验证基线提交：`f441615`；实现提交在结束时固定
+- M11-T6 第一纵切验证基线提交：`f441615`；实现提交：`07ec390`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -64,7 +64,7 @@
 | 设计依据 | 实施计划 M11-T6、已 verified 的 M11-T2–T5、`ADR-0023`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | 第一纵切固定 `m11-rag-v1` 的 10 篇文档、50 条查询、相关文档/依据词、top_k 与 sparse/pgvector 阈值；通用 evaluator 计算 Recall@K/MRR/依据正确率并输出内容安全失败分析，真实 sparse 基线三项均为 1.0 |
-| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T2/T3/T5 实现提交 `7ebaa16`/`02664b8`/`4ec5444` |
+| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T2/T3/T5 实现提交 `7ebaa16`/`02664b8`/`4ec5444`、M11-T6 第一纵切实现提交 `07ec390` |
 | 下一动作 | 开始 M11-T6 第二纵切：只用同一 `m11-rag-v1` canonical 内容摘要、top_k 与冻结阈值执行真实 pgvector，形成 sparse/pgvector 对照和实际失败分析；不得为通过而静默改数据或阈值，不进入 M11-T7/前端 |
 
 ## 里程碑状态
@@ -89,7 +89,7 @@
 
 ## 未验证范围
 
-- M11-T6 第一纵切见 `V-20260820-011/012`：新专项 12 项、Knowledge/Embedding/pgvector/Context/eval 相关 78 项、M1 隔离 10 项、sparse CLI 50 条与连续性通过。版本 `m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，Recall@3/MRR/依据正确率为 1.0/1.0/1.0，高于冻结阈值 0.9/0.8/0.9。
+- M11-T6 第一纵切见 `V-20260820-011/012/013`：新专项 12 项、Knowledge/Embedding/pgvector/Context/eval 相关 78 项、M1 隔离 10 项、sparse CLI 50 条与连续性通过；实现提交为 `07ec390`。版本 `m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，Recall@3/MRR/依据正确率为 1.0/1.0/1.0，高于冻结阈值 0.9/0.8/0.9。
 - 第一纵切只证明真实 `InMemoryKnowledgeBase.search()` 上的固定 sparse E3 和通用指标/脱敏合同。尚未用同一数据与阈值运行真实 pgvector，没有 retriever 对照结论；本地 wall-clock 不是生产延迟，Provider usage unavailable、费用 unknown，也不是在线模型回答质量。
 - M11-T5 第七纵切见 `V-20260820-008/009/010`：API 27 项、相关离线回归 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL integration 110 项、M1 隔离 10 项和完整门通过；全量后端 599 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线为 `f066a90`，实现提交为 `4ec5444`。
 - 新 HTTP owner 只来自认证 Principal；兼容 create/no-version delete 保持。active list/detail、approved correction、version delete 与 audit 已固定 401/403/404/409/422；错误无事实内容，audit 只含 ID/version/action/digest。纠正后下一主 Run 只读新值，删除后再下一 Run 不读新旧值，第三个 application lifespan 恢复空 active set 和完整动作序列。

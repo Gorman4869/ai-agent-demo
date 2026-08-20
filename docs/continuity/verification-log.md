@@ -3449,3 +3449,22 @@
 
 - `V-20260820-011` 的 12 项专项、78 项相关回归、M1 10 项、50 条 sparse 指标和边界说明，与当前 fixture、evaluator、tests、plan、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第一纵切文档连续性；不把 M11-T6 提升为 verified，不增加真实 pgvector、在线 Provider、生产延迟/容量、模型回答质量、Token 或费用证据。
+
+## V-20260820-013：M11-T6 第一纵切实现提交后复验
+
+- 任务：`M11-T6 / in_progress`
+- 时间：2026-08-20 14:01，Asia/Shanghai
+- 验证目标：实现提交 `07ec390`（`feat: add fixed rag retrieval evaluation`）
+- 模式：纯本地离线复验；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_rag_retrieval_eval -q` | 0 | 实现提交上专项 12 项通过 |
+| `python -m backend.app.evals.rag_retrieval` 后提取摘要 | 0 | `m11-rag-v1`、canonical digest `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`、50 条 sparse；Recall@3/MRR/依据正确率 1.0/1.0/1.0，阈值门通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 实现提交上 52 个稳定任务、115 个 Markdown 通过 |
+| `git status --short` / `git log -3 --oneline` | 0 | 实现提交复验前工作区干净；`07ec390` 为当前 HEAD，随后只修改本条提交锚点、status 与 handoff |
+
+### 结论
+
+- 实现提交上的固定数据集、规范化内容摘要、sparse 指标、阈值和内容安全报告合同均保持稳定；第一纵切证据闭环。
+- M11-T6 仍为 `in_progress`：真实 pgvector 同数据对照和实际失败分析尚未执行，不能提升为 `verified`。
