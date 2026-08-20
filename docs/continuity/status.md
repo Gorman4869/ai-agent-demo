@@ -3,7 +3,7 @@
 - 更新时间：2026-08-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`9ae5e8a`
+- 最近已确认实现提交：`4ec5444`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -49,7 +49,7 @@
 - M11-T5 第四纵切验证基线提交：`b87b6c8`；实现提交：`8fe9ef8`
 - M11-T5 第五纵切验证基线提交：`8fe9ef8`；实现提交：`7954c23`
 - M11-T5 第六纵切验证基线提交：`7954c23`；实现提交：`9ae5e8a`
-- M11-T5 第七纵切验证基线提交：`f066a90`；实现提交在结束时固定
+- M11-T5 第七纵切验证基线提交：`f066a90`；实现提交：`4ec5444`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -63,7 +63,7 @@
 | 设计依据 | 实施计划 M11-T5、已 verified 的 M11-T1/M11-T4、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、`ADR-0027` 与 `ADR-0028` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
 | 当前修改 | 第七纵切增加可信 owner 的 active fact list/detail、approved version CAS correction、audit 和可选 version DELETE；保留既有 create/no-version delete 兼容形状。真实 PostgreSQL 三个 application lifespan 已证明纠正后的主 Run 只读新值、删除后的主 Run 不再注入且重启后 audit 可恢复 |
-| 前置证据 | `V-20260810-001/002`、`V-20260819-001/002/003/004`、`V-20260820-001/002/003/004/005/006/007/008/009`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、`ADR-0027`、`ADR-0028`、M11-T5 前六纵切实现提交 `2b248a5`/`ad7eafb`/`b87b6c8`/`8fe9ef8`/`7954c23`/`9ae5e8a` |
+| 前置证据 | `V-20260810-001/002`、`V-20260819-001/002/003/004`、`V-20260820-001/002/003/004/005/006/007/008/009/010`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、`ADR-0027`、`ADR-0028`、M11-T5 七个纵切实现提交 `2b248a5`/`ad7eafb`/`b87b6c8`/`8fe9ef8`/`7954c23`/`9ae5e8a`/`4ec5444` |
 | 下一动作 | M11-T5 已 verified；下一原子任务为 M11-T6 固定 RAG 评测集与指标，需按其依赖和验收重新恢复后再开始。本轮不修改前端、不实现 M11-T6 |
 
 ## 里程碑状态
@@ -88,7 +88,7 @@
 
 ## 未验证范围
 
-- M11-T5 第七纵切见 `V-20260820-008`：API 27 项、相关离线回归 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL integration 110 项、M1 隔离 10 项和完整门通过；全量后端 599 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线为 `f066a90`，实现提交在结束时固定。
+- M11-T5 第七纵切见 `V-20260820-008/009/010`：API 27 项、相关离线回归 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL integration 110 项、M1 隔离 10 项和完整门通过；全量后端 599 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线为 `f066a90`，实现提交为 `4ec5444`。
 - 新 HTTP owner 只来自认证 Principal；兼容 create/no-version delete 保持。active list/detail、approved correction、version delete 与 audit 已固定 401/403/404/409/422；错误无事实内容，audit 只含 ID/version/action/digest。纠正后下一主 Run 只读新值，删除后再下一 Run 不读新旧值，第三个 application lifespan 恢复空 active set 和完整动作序列。
 - M11-T5 `verified` 不表示 Run/Event 与 Memory 同事务、后台扫描、mutation 自动重试、外部不可篡改审计、生产数据库、在线模型质量、Provider Token/usage 或费用已完成。SHA-256 对低熵事实仍可猜测，兼容 no-version delete 仍可绕过客户端 CAS；这些边界已显式保留给 M12/M13 或调用方迁移。
 - M11-T5 第六纵切见 `V-20260820-005`：Memory/Context 26 项、共享相关回归 156 项、真实 PostgreSQL integration 109 项、四 PID audit probe 1 项、M1 隔离 10 项和完整门通过；全量后端 597 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线和第五纵切实现提交均为 `7954c23`，本轮实现提交在结束时固定。
@@ -219,4 +219,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-20-m11-t5-versioned-memory-http.md`，再核对 `V-20260820-008/009`、`ADR-0028`、验证基线 `f066a90`、第七纵切实现提交字段、实施计划 M11-T5 和实际 versioned fact HTTP/application lifespan 代码。按 handoff 重跑 API 27 项、真实 PostgreSQL application lifespan 2 项和连续性；若一致，不要重做 M11-T1–T5，下一步按实施计划恢复 M11-T6 固定 RAG 评测集。本轮不修改前端、不提前实现 M11-T6；没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-20-m11-t5-versioned-memory-http.md`，再核对 `V-20260820-008/009/010`、`ADR-0028`、验证基线 `f066a90`、第七纵切实现提交 `4ec5444`、实施计划 M11-T5 和实际 versioned fact HTTP/application lifespan 代码。按 handoff 重跑 API 27 项、真实 PostgreSQL application lifespan 2 项和连续性；若一致，不要重做 M11-T1–T5，下一步按实施计划恢复 M11-T6 固定 RAG 评测集。本轮不修改前端、不提前实现 M11-T6；没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M12/M13。

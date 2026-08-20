@@ -3353,9 +3353,28 @@
 | --- | ---: | --- |
 | `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、114 个 Markdown 通过；M11-T5 verified、`V-20260820-008/009`、ADR-0028、新 handoff、plan、known issue、status、后端规约和恢复入口可解析 |
 | `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
-| `git status --short` / `git diff --stat` / 任务文件复核 | 0 | 10 个已跟踪修改与 1 个新 handoff；没有构建产物、缓存、诊断临时文件或任务外改动 |
+| `git status --short` / `git diff --stat` / 任务文件复核 | 0 | 9 个已跟踪修改与 1 个新 handoff，共 10 个任务文件；没有构建产物、缓存、诊断临时文件或任务外改动 |
 
 ### 结论
 
 - `V-20260820-008` 的 API 27 项、相关离线 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL 110 项、全量后端 599 项、M1 隔离 10 项与完整构建门证据，和当前代码、计划、known issue、status、后端规约及 handoff 一致。
 - `KI-026` 关闭；M11-T5 达到 `verified`，下一恢复动作只进入 M11-T6 的独立计划，不重做 M11-T1–T5，也不扩大到前端或 M12/M13。
+
+## V-20260820-010：M11-T5 第七纵切实现提交后复验
+
+- 任务：`M11-T5 / verified`
+- 时间：2026-08-20 11:49，Asia/Shanghai
+- 验证目标：实现提交 `4ec5444`（`feat: expose versioned memory facts`）
+- 模式：提交后本地 API、真实 PostgreSQL application lifespan 与连续性复验；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_api -q` | 0 | 实现提交上 API 27 项通过；只有既有 Starlette/httpx warning |
+| 配置本地 DSN 后运行 `PostgresFastApiApplicationTest -q` | 0 | 实现提交上真实 PostgreSQL application lifespan 2 项通过；三个 lifespan 的 versioned 主 Run 用例保持通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 实现提交上 52 个稳定任务、114 个 Markdown 通过 |
+| `git status --short` | 0 | 实现提交复验前工作区干净；随后只修改本条提交锚点、status 与 handoff |
+
+### 结论
+
+- 第七纵切实现由 `4ec5444` 固定；提交后关键 API、真实 PostgreSQL application lifespan 与连续性均保持通过。
+- 后续文档提交只记录该实现锚点，不改变代码、测试、`verified` 结论或 M11-T6 尚未开始的范围。
