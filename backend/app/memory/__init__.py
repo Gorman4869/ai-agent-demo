@@ -1,6 +1,13 @@
 from .store import (
     ConversationMemory,
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    DeleteMemoryFactResult,
     MemoryFact,
+    MemoryFactAuditAction,
+    MemoryFactAuditRecord,
+    MemoryFactConflictError,
+    MemoryFactNotFoundError,
     MemoryScope,
     MemoryStore,
     MemoryTurnConflictError,
@@ -10,7 +17,14 @@ from .store import (
 
 __all__ = [
     "ConversationMemory",
+    "CorrectMemoryFact",
+    "DeleteMemoryFact",
+    "DeleteMemoryFactResult",
     "MemoryFact",
+    "MemoryFactAuditAction",
+    "MemoryFactAuditRecord",
+    "MemoryFactConflictError",
+    "MemoryFactNotFoundError",
     "MemoryScope",
     "MemoryStore",
     "MemoryTurnConflictError",

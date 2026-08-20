@@ -14,6 +14,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from psycopg import Error as PsycopgError
 
 from backend.app.agent import RuntimeResult
 from backend.app.application_lifecycle import ApplicationLifecycleState
@@ -26,7 +27,13 @@ from backend.app.domain.run import (
     ToolExecution,
     ToolExecutionStatus,
 )
-from backend.app.memory import MemoryScope, PublishTurn
+from backend.app.memory import (
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    MemoryFactAuditAction,
+    MemoryScope,
+    PublishTurn,
+)
 from backend.app.postgres_execution import PostgresExecutionComposition
 from backend.app.services.run_recovery import (
     RunRecoveryService,
@@ -324,6 +331,26 @@ class PostgresAsyncApprovalMemoryTest(unittest.IsolatedAsyncioTestCase):
             scope=MemoryScope.USER,
             approved=True,
         )
+        corrected = await memory.correct_fact(
+            CorrectMemoryFact(
+                fact_id=fact.id,
+                owner_id=fact.owner_id,
+                expected_version=fact.version,
+                value="French",
+                approved=True,
+            )
+        )
+        deleted = await memory.delete_fact(
+            DeleteMemoryFact(
+                fact_id=corrected.id,
+                owner_id=corrected.owner_id,
+                expected_version=corrected.version,
+            )
+        )
+        audit = await memory.fact_audit(
+            fact.id,
+            owner_id=request.principal_id,
+        )
 
         self.assertEqual(arguments, approved_arguments)
         self.assertTrue(first.approved)
@@ -333,7 +360,16 @@ class PostgresAsyncApprovalMemoryTest(unittest.IsolatedAsyncioTestCase):
             (turn.user_message, turn.assistant_message),
             await memory.messages("async-facade-session"),
         )
-        self.assertEqual((fact,), await memory.facts(request.principal_id))
+        self.assertEqual(2, deleted.version)
+        self.assertEqual((), await memory.facts(request.principal_id))
+        self.assertEqual(
+            (
+                MemoryFactAuditAction.CREATED,
+                MemoryFactAuditAction.CORRECTED,
+                MemoryFactAuditAction.DELETED,
+            ),
+            tuple(record.action for record in audit),
+        )
 
     async def test_exhausted_shared_sync_pool_returns_stable_store_error(
         self,
@@ -651,12 +687,59 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         first = await apply_postgres_migrations(self.persistence.pool)
         second = await apply_postgres_migrations(self.persistence.pool)
 
-        self.assertEqual((1, 2, 3, 4, 5), first)
+        self.assertEqual((1, 2, 3, 4, 5, 6), first)
         self.assertEqual((), second)
         self.assertEqual(
-            [1, 2, 3, 4, 5],
+            [1, 2, 3, 4, 5, 6],
             await _applied_versions(self.persistence),
         )
+
+    async def test_sixth_migration_backfills_existing_fact_audit(self) -> None:
+        migrations = load_sql_migrations()
+        await apply_postgres_migrations(
+            self.persistence.pool,
+            migrations=migrations[:5],
+        )
+        async with self.persistence.pool.connection() as connection:
+            await connection.execute(
+                """
+                INSERT INTO conversation_memory_facts (
+                    id,
+                    owner_id,
+                    key,
+                    value,
+                    scope,
+                    created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    "legacy-memory-fact",
+                    "legacy-memory-owner",
+                    "language",
+                    "Chinese",
+                    MemoryScope.USER.value,
+                    STORE_NOW,
+                ),
+            )
+
+        applied = await apply_postgres_migrations(self.persistence.pool)
+        audit = self.persistence.memory_store.fact_audit(
+            "legacy-memory-fact",
+            owner_id="legacy-memory-owner",
+        )
+        digest = CorrectMemoryFact(
+            fact_id="legacy-memory-fact",
+            owner_id="legacy-memory-owner",
+            expected_version=0,
+            value="Chinese",
+            approved=True,
+        ).value_digest
+
+        self.assertEqual((6,), applied)
+        self.assertEqual(1, len(audit))
+        self.assertEqual(0, audit[0].version)
+        self.assertEqual(MemoryFactAuditAction.CREATED, audit[0].action)
+        self.assertEqual(digest, audit[0].value_digest)
 
     async def test_changed_applied_migration_is_rejected(self) -> None:
         await apply_postgres_migrations(self.persistence.pool)
@@ -723,7 +806,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("migration_apply_failed", raised.exception.code)
         self.assertEqual(
-            [1, 2, 3, 4, 5],
+            [1, 2, 3, 4, 5, 6],
             await _applied_versions(self.persistence),
         )
         self.assertIsNone(
@@ -854,6 +937,59 @@ class PostgresMemoryTurnReplayProcessTest(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class PostgresMemoryFactAuditProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await persistence.setup()
+            await _reset_approval_memory_data(persistence)
+        finally:
+            await persistence.close()
+
+    async def test_correction_delete_and_audit_survive_process_restarts(
+        self,
+    ) -> None:
+        prepared = await _run_fact_audit_probe("prepare")
+        corrected = await _run_fact_audit_probe(
+            "correct",
+            fact_id=prepared["fact_id"],
+        )
+        deleted = await _run_fact_audit_probe(
+            "delete",
+            fact_id=prepared["fact_id"],
+        )
+        audited = await _run_fact_audit_probe(
+            "audit",
+            fact_id=prepared["fact_id"],
+        )
+
+        self.assertEqual(
+            4,
+            len(
+                {
+                    prepared["process_id"],
+                    corrected["process_id"],
+                    deleted["process_id"],
+                    audited["process_id"],
+                }
+            ),
+        )
+        self.assertEqual(0, prepared["version"])
+        self.assertEqual(1, corrected["version"])
+        self.assertEqual(2, deleted["version"])
+        self.assertEqual(
+            {
+                "phase": "audit",
+                "process_id": audited["process_id"],
+                "active_facts": 0,
+                "audit_actions": ["created", "corrected", "deleted"],
+                "audit_versions": [0, 1, 2],
+                "digests_valid": True,
+            },
+            audited,
+        )
+
+
 class PostgresApprovalTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.persistence = await PostgresPersistence.open(
@@ -971,6 +1107,119 @@ class PostgresMemoryTurnTransactionTest(unittest.IsolatedAsyncioTestCase):
             (command.user_message, command.assistant_message),
             self.persistence.memory_store.messages(command.session_id),
         )
+
+
+class PostgresMemoryFactTransactionTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            clock=lambda: STORE_NOW,
+        )
+        await self.persistence.setup()
+        await _reset_approval_memory_data(self.persistence)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_audit_insert_failure_rolls_back_correction(self) -> None:
+        fact = self.persistence.memory_store.remember(
+            owner_id="memory-fact-transaction-owner",
+            key="language",
+            value="English",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        command = CorrectMemoryFact(
+            fact_id=fact.id,
+            owner_id=fact.owner_id,
+            expected_version=fact.version,
+            value="Chinese",
+            approved=True,
+        )
+        await _install_memory_fact_audit_failure_trigger(self.persistence)
+        try:
+            with self.assertRaises(StoreUnavailableError):
+                self.persistence.memory_store.correct_fact(command)
+        finally:
+            await _remove_memory_fact_audit_failure_trigger(self.persistence)
+
+        self.assertEqual(
+            (fact,),
+            self.persistence.memory_store.facts(fact.owner_id),
+        )
+        self.assertEqual(
+            1,
+            len(self.persistence.memory_store.fact_audit(
+                fact.id,
+                owner_id=fact.owner_id,
+            )),
+        )
+
+        corrected = self.persistence.memory_store.correct_fact(command)
+        self.assertEqual(1, corrected.version)
+        self.assertEqual("Chinese", corrected.value)
+
+    async def test_audit_rows_reject_update_and_delete(self) -> None:
+        fact = self.persistence.memory_store.remember(
+            owner_id="memory-fact-audit-owner",
+            key="language",
+            value="Chinese",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+
+        for statement in (
+            """
+            UPDATE conversation_memory_fact_audit
+            SET action = 'deleted'
+            WHERE fact_id = %s
+            """,
+            """
+            DELETE FROM conversation_memory_fact_audit
+            WHERE fact_id = %s
+            """,
+        ):
+            with self.subTest(statement=statement.strip().split()[0]):
+                async with self.persistence.pool.connection() as connection:
+                    with self.assertRaises(PsycopgError):
+                        await connection.execute(statement, (fact.id,))
+
+        audit = self.persistence.memory_store.fact_audit(
+            fact.id,
+            owner_id=fact.owner_id,
+        )
+        self.assertEqual(1, len(audit))
+        self.assertEqual(MemoryFactAuditAction.CREATED, audit[0].action)
+
+    async def test_delete_clears_active_content_but_keeps_digest_audit(self) -> None:
+        fact = self.persistence.memory_store.remember(
+            owner_id="memory-fact-delete-owner",
+            key="private-key",
+            value="private value",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+
+        deleted = self.persistence.memory_store.delete_fact(
+            DeleteMemoryFact(
+                fact_id=fact.id,
+                owner_id=fact.owner_id,
+                expected_version=fact.version,
+            )
+        )
+        row = await _memory_fact_row(self.persistence, fact.id)
+
+        self.assertEqual(1, deleted.version)
+        self.assertEqual("", row["key"])
+        self.assertEqual("", row["value"])
+        self.assertEqual(1, row["version"])
+        self.assertIsNotNone(row["deleted_at"])
+        audit = self.persistence.memory_store.fact_audit(
+            fact.id,
+            owner_id=fact.owner_id,
+        )
+        self.assertEqual(2, len(audit))
+        self.assertTrue(all(len(item.value_digest) == 64 for item in audit))
 
 
 class PostgresToolExecutionProcessTest(unittest.IsolatedAsyncioTestCase):
@@ -1636,6 +1885,7 @@ async def _reset_approval_memory_data(
                 conversation_turn_publications,
                 conversation_messages,
                 memory_message_sequences,
+                conversation_memory_fact_audit,
                 conversation_memory_facts
             RESTART IDENTITY
             """
@@ -1648,6 +1898,7 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
             """
             DROP TABLE IF EXISTS agent_run_leases CASCADE;
             DROP TABLE IF EXISTS tool_executions CASCADE;
+            DROP TABLE IF EXISTS conversation_memory_fact_audit CASCADE;
             DROP TABLE IF EXISTS conversation_memory_facts CASCADE;
             DROP TABLE IF EXISTS conversation_turn_publications CASCADE;
             DROP TABLE IF EXISTS conversation_messages CASCADE;
@@ -1658,6 +1909,7 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
             DROP TABLE IF EXISTS agent_run_event_sequences CASCADE;
             DROP TABLE IF EXISTS agent_runs CASCADE;
             DROP TABLE IF EXISTS app_schema_migrations CASCADE;
+            DROP FUNCTION IF EXISTS reject_memory_fact_audit_mutation();
             """,
             prepare=False,
         )
@@ -1829,6 +2081,48 @@ async def _remove_memory_turn_failure_trigger(
         )
 
 
+async def _install_memory_fact_audit_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            CREATE OR REPLACE FUNCTION m11_reject_fault_memory_fact_audit()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.owner_id = 'memory-fact-transaction-owner'
+                   AND NEW.action = 'corrected' THEN
+                    RAISE EXCEPTION 'injected memory fact audit failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+
+            CREATE TRIGGER m11_reject_fault_memory_fact_audit_trigger
+            BEFORE INSERT ON conversation_memory_fact_audit
+            FOR EACH ROW
+            EXECUTE FUNCTION m11_reject_fault_memory_fact_audit();
+            """,
+            prepare=False,
+        )
+
+
+async def _remove_memory_fact_audit_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            DROP TRIGGER IF EXISTS m11_reject_fault_memory_fact_audit_trigger
+                ON conversation_memory_fact_audit;
+            DROP FUNCTION IF EXISTS m11_reject_fault_memory_fact_audit();
+            """,
+            prepare=False,
+        )
+
+
 async def _install_tool_settlement_failure_trigger(
     persistence: PostgresPersistence,
 ) -> None:
@@ -1911,6 +2205,25 @@ async def _conversation_turn_publication_count(
     if row is None:
         raise AssertionError("turn publication count query returned no row")
     return row["count"]
+
+
+async def _memory_fact_row(
+    persistence: PostgresPersistence,
+    fact_id: str,
+):
+    async with persistence.pool.connection() as connection:
+        result = await connection.execute(
+            """
+            SELECT key, value, version, deleted_at
+            FROM conversation_memory_facts
+            WHERE id = %s
+            """,
+            (fact_id,),
+        )
+        row = await result.fetchone()
+    if row is None:
+        raise AssertionError("memory fact row query returned no row")
+    return row
 
 
 def _published_turn(
@@ -2019,6 +2332,63 @@ def _run_state_probe_sync(
             + process.stderr.decode("utf-8", errors="replace")
         )
     return json.loads(process.stdout.decode("utf-8"))
+
+
+async def _run_fact_audit_probe(
+    phase: str,
+    *,
+    fact_id: object | None = None,
+) -> dict[str, object]:
+    return await asyncio.to_thread(
+        _run_fact_audit_probe_sync,
+        phase,
+        fact_id,
+    )
+
+
+def _run_fact_audit_probe_sync(
+    phase: str,
+    fact_id: object | None,
+) -> dict[str, object]:
+    command = [
+        sys.executable,
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "backend.app.stores.postgres_fact_audit_probe",
+        "--phase",
+        phase,
+    ]
+    if fact_id is not None:
+        command.extend(("--fact-id", str(fact_id)))
+    environment = os.environ.copy()
+    environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+    process = subprocess.run(
+        command,
+        cwd=os.getcwd(),
+        env=environment,
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise AssertionError(
+            f"fact audit probe failed with code {process.returncode}: "
+            f"{process.stderr.decode('utf-8', errors='replace')}"
+        )
+    if process.stderr:
+        raise AssertionError(
+            "fact audit probe wrote stderr: "
+            + process.stderr.decode("utf-8", errors="replace")
+        )
+    stdout = process.stdout.decode("utf-8")
+    for private_value in ("English", "Chinese", "preferred-language"):
+        if private_value in stdout:
+            raise AssertionError("fact audit probe exposed private data")
+    lines = [line for line in stdout.splitlines() if line]
+    if len(lines) != 1:
+        raise AssertionError("fact audit probe output is not bounded JSON")
+    return json.loads(lines[0])
 
 
 async def _run_turn_replay_probe(phase: str) -> dict[str, object]:

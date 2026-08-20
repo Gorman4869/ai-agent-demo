@@ -765,6 +765,15 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 两个 PID 不同的真实 PostgreSQL 探针证明：进程 A 只提交 completed Run、消息为 0；进程 B 以新 composition replay 两次后消息为 2、Runtime calls 为 0。完整 PostgreSQL 99 项、M1 隔离 10 项和完整离线门通过；全量后端 591 项通过、1 项既有 Windows symlink 条件跳过，其他门均通过。
 - Run terminal 与 Memory turn 仍跨 async/sync pool，不是共同事务；没有后续 replay 时不会后台自动补写，digest 账本也尚无生产归档/GC。M11-T5 保持 `in_progress`；下一纵切进入 approved long-term fact 的 version CAS correction/delete 与 append-only audit，不提前进入 M11-T6。
 
+#### M11-T5 第六个真实纵切边界
+
+- `ADR-0028` 固定冻结、repr-safe 的 `CorrectMemoryFact` / `DeleteMemoryFact` 和 version CAS：事实从 version 0 开始，纠正继续要求批准且只改变 value，删除按 owner + expected version 执行；不存在/越权与陈旧版本分别使用稳定、无内容的 `memory_fact_not_found` / `memory_fact_conflict`。
+- 内存实现以事实锁原子推进状态与审计；PostgreSQL migration 6 增加 version/deleted_at、tombstone 约束和 `(fact_id, version)` 唯一审计表。适配器用 `SELECT FOR UPDATE` 在同一 sync-pool 事务中更新事实并追加审计，删除清空 key/value，Context 读取只看 active facts。
+- 审计只保留 created/corrected/deleted、版本和版本化 value digest，不保留 key/value；迁移回填当时仍存在的旧事实。数据库 trigger 拒绝普通 audit UPDATE/DELETE，但 SHA-256 不是加密，DB owner 仍可禁用 trigger/TRUNCATE，不能描述为外部不可篡改账本。
+- 共享合同覆盖批准、owner、陈旧 CAS、并发唯一赢家、tombstone、审计脱敏与非法输入；真实 PostgreSQL 故障注入证明事实状态与审计同事务回滚。四个 PID 分别 create、correct、delete、audit，证明跨进程恢复且探针不输出事实内容。
+- Memory/Context 26 项、共享离线 156 项、真实 PostgreSQL 109 项、四进程 1 项、M1 隔离 10 项和完整门通过；全量后端 597 项通过、1 项既有 Windows symlink 条件跳过，其他门均通过。
+- 新 CAS 能力尚未暴露为公开 HTTP，兼容 delete 也不要求客户端 expected version；async result-unknown 只能通过当前 version/audit 仲裁而不能自动重试。M11-T5 保持 `in_progress`；下一纵切只接可信 owner 的异步 fact read/correct/delete/audit API 和跨 application lifespan 主 Run 证据，不修改前端、不进入 M11-T6。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。

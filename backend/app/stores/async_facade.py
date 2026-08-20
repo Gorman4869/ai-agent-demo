@@ -6,7 +6,11 @@ from typing import Any, Protocol
 
 from backend.app.domain import Message
 from backend.app.memory import (
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    DeleteMemoryFactResult,
     MemoryFact,
+    MemoryFactAuditRecord,
     MemoryScope,
     MemoryStore,
     PublishTurn,
@@ -100,6 +104,20 @@ class AsyncMemoryStore(Protocol):
     ) -> MemoryFact: ...
 
     async def facts(self, owner_id: str) -> tuple[MemoryFact, ...]: ...
+
+    async def correct_fact(self, command: CorrectMemoryFact) -> MemoryFact: ...
+
+    async def delete_fact(
+        self,
+        command: DeleteMemoryFact,
+    ) -> DeleteMemoryFactResult: ...
+
+    async def fact_audit(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[MemoryFactAuditRecord, ...]: ...
 
     async def forget(self, fact_id: str, *, owner_id: str) -> bool: ...
 
@@ -240,6 +258,23 @@ class AsyncLocalMemoryStore:
 
     async def facts(self, owner_id: str) -> tuple[MemoryFact, ...]:
         return self._store.facts(owner_id)
+
+    async def correct_fact(self, command: CorrectMemoryFact) -> MemoryFact:
+        return self._store.correct_fact(command)
+
+    async def delete_fact(
+        self,
+        command: DeleteMemoryFact,
+    ) -> DeleteMemoryFactResult:
+        return self._store.delete_fact(command)
+
+    async def fact_audit(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[MemoryFactAuditRecord, ...]:
+        return self._store.fact_audit(fact_id, owner_id=owner_id)
 
     async def forget(self, fact_id: str, *, owner_id: str) -> bool:
         return self._store.forget(fact_id, owner_id=owner_id)

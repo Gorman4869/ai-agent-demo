@@ -11,7 +11,11 @@ from typing import Any, ParamSpec, TypeVar
 
 from backend.app.domain import Message
 from backend.app.memory import (
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    DeleteMemoryFactResult,
     MemoryFact,
+    MemoryFactAuditRecord,
     MemoryScope,
     MemoryStore,
     PublishTurn,
@@ -322,6 +326,27 @@ class AsyncPostgresMemoryStore:
 
     async def facts(self, owner_id: str) -> tuple[MemoryFact, ...]:
         return await self._bridge.run(self._store.facts, owner_id)
+
+    async def correct_fact(self, command: CorrectMemoryFact) -> MemoryFact:
+        return await self._bridge.run(self._store.correct_fact, command)
+
+    async def delete_fact(
+        self,
+        command: DeleteMemoryFact,
+    ) -> DeleteMemoryFactResult:
+        return await self._bridge.run(self._store.delete_fact, command)
+
+    async def fact_audit(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[MemoryFactAuditRecord, ...]:
+        return await self._bridge.run(
+            self._store.fact_audit,
+            fact_id,
+            owner_id=owner_id,
+        )
 
     async def forget(self, fact_id: str, *, owner_id: str) -> bool:
         return await self._bridge.run(

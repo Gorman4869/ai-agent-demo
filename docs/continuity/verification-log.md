@@ -3198,3 +3198,76 @@
 
 - `V-20260820-003` 的最终离线 95 项、真实 PostgreSQL 定向 19 项、跨进程 probe 1 项、完整 PostgreSQL 99 项、全量后端 591 项、M1 隔离 10 项与完整构建门证据，和当前代码、migration、ADR、计划、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第五纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加 Run/Memory 共同事务、后台扫描、ledger GC、纠正/删除、版本审计、在线 Provider 或生产数据库证据。
+
+## V-20260820-005：M11-T5 长期事实 version CAS 与追加式审计第六纵切
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 10:41，Asia/Shanghai
+- 验证目标：HEAD `7954c23` 上的 M11-T5 第六纵切工作区；第五纵切实现提交 `7954c23`
+- 任务等级：A 类 persistence/migration/concurrency 边界；时间盒 2–4 小时
+- 模式：默认离线 E3 加本地真实 PostgreSQL E4；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用现有同步 Memory Store、async façade、有界 bridge、Context collector 与 PostgreSQL sync pool；没有新增、安装、升级或删除依赖，没有修改 HTTP、前端、RuntimeRequest、AgentRuntime 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` / `node --version` | 0 / 0 / 0 | 初始工作区干净；HEAD `7954c23` 为第五纵切实现提交；Node `v22.16.0` |
+| 按强制顺序读取 continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026/0027、最新 handoff、`V-20260820-003/004` 与后端规约 | 0 | 当前动作确认为 approved fact version CAS correction/delete 与 append-only audit；不进入 HTTP、前端或 M11-T6 |
+| handoff Memory/Context/bridge/Run/PostgreSQL 恢复集 | 0 | 核心 55 项、连续性 52/111、真实 PostgreSQL 99 项和跨进程 turn replay 1 项通过；integration PostgreSQL healthy |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| Memory Store 共享合同最终集 | 0 | 15 项通过；覆盖 approved correction、unapproved/stale conflict、并发唯一赢家、owner/tombstone/audit、非法命令和兼容 forget 审计 |
+| `python -m unittest backend.tests.test_memory_store_contract backend.tests.test_context_collector -v` | 0 | 最终 26 项通过；纠正后 prompt 只含新值，删除后不再注入 |
+| 扩大 Context/Memory/bridge/Runtime/Container/API/Coordinator 离线回归 | 0 | 156 项通过；只有既有 Starlette/httpx warning，没有失败或新增 skip |
+| migration 6 定向回归 | 0 | 5 项通过；versions 1–6、旧事实 created/version 0 backfill 与 Python digest 一致 |
+| 首轮真实 PostgreSQL 聚焦集合 | 0 | 25 项通过；随后加入 migration backfill 用例并由完整 PostgreSQL 集覆盖 |
+| `python -m unittest backend.tests.postgres_store_integration -v`（配置本地 DSN） | 0 | 完整真实 PostgreSQL integration 109 项通过；预期不可达数据库用例只输出有界 pool timeout |
+| 四进程 audit probe 单独启动（未配置 DSN） | 0 | 0 项执行、1 项跳过；新 PowerShell 未继承 `AI_AGENT_TEST_POSTGRES_DSN`，没有计入成功证据 |
+| 同一 `PostgresMemoryFactAuditProcessTest`（显式本地 trust/tmpfs DSN） | 0 | 1 项通过；四个不同 PID 依次 prepare/create、correct、delete、audit，最终动作 created/corrected/deleted、版本和 digest 有效，未输出 owner/key/value |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 0 | 经授权在沙箱外重新完整执行；后端 597 项通过、1 项既有 Windows symlink 条件跳过，受控 Code Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建和 Compose 配置全部通过 |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 当前 10 项通过 |
+| `docker compose -f deploy/compose.integration.yaml ps` | 0 | integration PostgreSQL healthy，仅绑定 `127.0.0.1:55433` |
+
+### 实现与风险证据
+
+- `CorrectMemoryFact` / `DeleteMemoryFact` 是冻结、repr-safe 的显式命令；事实从 version 0 开始。纠正只改 value 且继续要求 approved，删除 owner-scoped；陈旧 expected version 和不存在/越权分别映射稳定 `memory_fact_conflict` / `memory_fact_not_found`。
+- 删除保留 tombstone 的 owner/scope/id/version/deleted_at 但清空 key/value，active `facts()` 过滤 tombstone。内存以事实锁原子推进状态与 audit；Context 实证证明纠正/删除立即改变下一次 source collection。
+- migration 6 增加 version/deleted_at 与审计表，回填现存旧事实。PostgreSQL 通过 `SELECT FOR UPDATE` 在一个 sync-pool 事务中更新 fact 与插入 audit；audit 插入故障使 value/version/audit 全回滚，重试可成功，并发同 expected version 只有一个赢家。
+- audit 只暴露 created/corrected/deleted、version 和版本化 value digest；owner 在 repr 隐藏且无 key/value。普通 audit UPDATE/DELETE 被 trigger 拒绝，删除后的事实行不保留原始内容。
+- async local/PostgreSQL façades 镜像同一 Store 方法；兼容 remember/forget 继续为现有 HTTP 服务并写审计，HTTP 响应形状未改。
+
+### 聚焦复审与未验证范围
+
+- 复审核对 dataclass/Protocol、校验与 repr、owner/approval/CAS、内存锁、PostgreSQL row lock/transaction、migration backfill、tombstone、audit trigger/digest、bridge 与跨进程探针；未发现剩余阻断问题。架构变化由 `ADR-0028` 固定。
+- SHA-256 digest 不是加密或匿名化，低熵 value 可被猜测。trigger 只能约束普通应用写入，DB owner 可禁用或 TRUNCATE；它不是外部不可篡改账本。迁移前物理删除的旧历史无法重建。
+- async timeout、取消或连接中断仍可能 result-unknown；当前可读取权威 version/audit digest 仲裁，但 mutation 没有持久幂等键，禁止自动重试。
+- Store 能力尚未暴露为可信 owner 的 read/correct/delete/audit HTTP API；既有兼容 delete 不要求 expected version。本纵切没有修改前端、在线摘要、真实模型、Provider、Token/usage 或费用。
+- 本地 trust/tmpfs PostgreSQL 不是生产鉴权、加密、备份、WAL、防篡改、高可用或灾备证据。
+
+### 结论
+
+- M11-T5 第六纵切达到 approved long-term fact version CAS correction/delete、tombstone、追加式审计和真实 PostgreSQL 跨四进程恢复证据；任务保持 `in_progress`。
+- 下一原子动作只接可信 owner 的异步 fact read/correct/delete/audit API，并验证默认内存与 opt-in PostgreSQL application lifespan 中纠正/删除后的主 Run Context；保留兼容接口，不修改前端、不进入 M11-T6。
+
+## V-20260820-006：M11-T5 长期事实版本审计连续性闭环
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 10:41，Asia/Shanghai
+- 验证目标：HEAD `7954c23` 上经 `V-20260820-005` 验证的第六纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性、diff 与只读容器健康检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、113 个 Markdown 通过；M11-T5 in_progress、`V-20260820-005/006`、ADR-0028、新 handoff、plan、known issue、status、后端规约和恢复入口可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 四个新文件复核 | 0 | 13 个已跟踪修改与 4 个新文件，共 17 个任务文件；没有构建产物、缓存、诊断临时文件或任务外改动 |
+| `docker compose -f deploy/compose.integration.yaml ps` | 0 | integration PostgreSQL healthy，仍只绑定 localhost；容器继续保留供下一纵切恢复 |
+
+### 结论
+
+- `V-20260820-005` 的 Memory/Context 26 项、共享回归 156 项、真实 PostgreSQL 109 项、四进程 1 项、全量后端 597 项、M1 隔离 10 项与完整构建门证据，和当前代码、migration、ADR、计划、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第六纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加公开 fact API、外部防篡改、自动重试、在线 Provider、前端或生产数据库证据。

@@ -25,6 +25,8 @@ from backend.app.knowledge import (
 )
 from backend.app.memory import (
     ConversationMemory,
+    CorrectMemoryFact,
+    DeleteMemoryFact,
     MemoryFact,
     MemoryScope,
 )
@@ -113,6 +115,49 @@ class ContextSourceCollectorTest(unittest.TestCase):
             [("owner-private", "session-private", 2)],
             summarizer.calls,
         )
+
+    def test_corrected_fact_replaces_old_context_and_delete_removes_it(
+        self,
+    ) -> None:
+        memory = ConversationMemory()
+        original = memory.remember(
+            owner_id="owner-1",
+            key="preferred_language",
+            value="English",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        collector = _collector(memory=memory)
+        request = ContextCollectionInput(
+            owner_id="owner-1",
+            session_id="session-1",
+            query="no matching evidence",
+        )
+
+        corrected = memory.correct_fact(
+            CorrectMemoryFact(
+                fact_id=original.id,
+                owner_id=original.owner_id,
+                expected_version=original.version,
+                value="Chinese",
+                approved=True,
+            )
+        )
+        corrected_prompt = collector.collect(request).assemble().prompt_context
+
+        self.assertIn("Chinese", corrected_prompt)
+        self.assertNotIn("English", corrected_prompt)
+
+        memory.delete_fact(
+            DeleteMemoryFact(
+                fact_id=corrected.id,
+                owner_id=corrected.owner_id,
+                expected_version=corrected.version,
+            )
+        )
+        deleted_prompt = collector.collect(request).assemble().prompt_context
+
+        self.assertIsNone(deleted_prompt)
 
     def test_empty_sources_are_a_summary_aware_zero_cost_noop(self) -> None:
         collector = _collector()

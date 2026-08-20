@@ -11,11 +11,20 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from backend.app.domain import Message
 from backend.app.memory.store import (
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    DeleteMemoryFactResult,
     MemoryFact,
+    MemoryFactAuditAction,
+    MemoryFactAuditRecord,
+    MemoryFactConflictError,
+    MemoryFactNotFoundError,
     MemoryScope,
     MemoryTurnConflictError,
     PublishTurn,
     PublishTurnResult,
+    _fact_value_digest,
+    _require_identifier,
 )
 from backend.app.stores.base import StoreUnavailableError
 
@@ -237,27 +246,40 @@ class PostgresMemoryStore:
         )
         try:
             with self._pool.connection() as connection:
-                connection.execute(
-                    """
-                    INSERT INTO conversation_memory_facts (
-                        id,
-                        owner_id,
-                        key,
-                        value,
-                        scope,
-                        created_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        fact.id,
-                        fact.owner_id,
-                        fact.key,
-                        fact.value,
-                        fact.scope.value,
-                        _aware_utc(self._clock()),
-                    ),
-                )
-                return fact
+                with connection.transaction():
+                    created_at = _aware_utc(self._clock())
+                    connection.execute(
+                        """
+                        INSERT INTO conversation_memory_facts (
+                            id,
+                            owner_id,
+                            key,
+                            value,
+                            scope,
+                            version,
+                            created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            fact.id,
+                            fact.owner_id,
+                            fact.key,
+                            fact.value,
+                            fact.scope.value,
+                            fact.version,
+                            created_at,
+                        ),
+                    )
+                    _insert_fact_audit(
+                        connection,
+                        fact_id=fact.id,
+                        owner_id=fact.owner_id,
+                        version=fact.version,
+                        action=MemoryFactAuditAction.CREATED,
+                        value_digest=_fact_value_digest(fact.value),
+                        created_at=created_at,
+                    )
+                    return fact
         except (PsycopgError, PoolTimeout):
             raise StoreUnavailableError() from None
 
@@ -266,9 +288,9 @@ class PostgresMemoryStore:
             with self._pool.connection() as connection:
                 rows = connection.execute(
                     """
-                    SELECT id, owner_id, key, value, scope
+                    SELECT id, owner_id, key, value, scope, version
                     FROM conversation_memory_facts
-                    WHERE owner_id = %s
+                    WHERE owner_id = %s AND deleted_at IS NULL
                     ORDER BY ordinal
                     """,
                     (owner_id,),
@@ -277,20 +299,191 @@ class PostgresMemoryStore:
         except (PsycopgError, PoolTimeout):
             raise StoreUnavailableError() from None
 
+    def correct_fact(self, command: CorrectMemoryFact) -> MemoryFact:
+        if not isinstance(command, CorrectMemoryFact):
+            raise ValueError("correct memory fact command is invalid")
+        if not command.approved:
+            raise PermissionError("memory correction requires explicit approval")
+        try:
+            with self._pool.connection() as connection:
+                with connection.transaction():
+                    current = _select_owned_active_fact(
+                        connection,
+                        command.fact_id,
+                        owner_id=command.owner_id,
+                    )
+                    if current.version != command.expected_version:
+                        raise MemoryFactConflictError()
+                    corrected = MemoryFact(
+                        id=current.id,
+                        owner_id=current.owner_id,
+                        key=current.key,
+                        value=command.value,
+                        scope=current.scope,
+                        version=current.version + 1,
+                    )
+                    row = connection.execute(
+                        """
+                        UPDATE conversation_memory_facts
+                        SET value = %s, version = %s
+                        WHERE id = %s
+                          AND owner_id = %s
+                          AND version = %s
+                          AND deleted_at IS NULL
+                        RETURNING id
+                        """,
+                        (
+                            corrected.value,
+                            corrected.version,
+                            corrected.id,
+                            corrected.owner_id,
+                            current.version,
+                        ),
+                    ).fetchone()
+                    if row is None:
+                        raise StoreUnavailableError()
+                    _insert_fact_audit(
+                        connection,
+                        fact_id=corrected.id,
+                        owner_id=corrected.owner_id,
+                        version=corrected.version,
+                        action=MemoryFactAuditAction.CORRECTED,
+                        value_digest=command.value_digest,
+                        created_at=_aware_utc(self._clock()),
+                    )
+                    return corrected
+        except (
+            MemoryFactConflictError,
+            MemoryFactNotFoundError,
+            StoreUnavailableError,
+        ):
+            raise
+        except (PsycopgError, PoolTimeout):
+            raise StoreUnavailableError() from None
+
+    def delete_fact(
+        self,
+        command: DeleteMemoryFact,
+    ) -> DeleteMemoryFactResult:
+        if not isinstance(command, DeleteMemoryFact):
+            raise ValueError("delete memory fact command is invalid")
+        try:
+            with self._pool.connection() as connection:
+                with connection.transaction():
+                    current = _select_owned_active_fact(
+                        connection,
+                        command.fact_id,
+                        owner_id=command.owner_id,
+                    )
+                    if current.version != command.expected_version:
+                        raise MemoryFactConflictError()
+                    return self._delete_fact(
+                        connection,
+                        current,
+                        deleted_at=_aware_utc(self._clock()),
+                    )
+        except (
+            MemoryFactConflictError,
+            MemoryFactNotFoundError,
+            StoreUnavailableError,
+        ):
+            raise
+        except (PsycopgError, PoolTimeout):
+            raise StoreUnavailableError() from None
+
+    def fact_audit(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[MemoryFactAuditRecord, ...]:
+        _require_identifier(fact_id, "fact_id")
+        _require_identifier(owner_id, "owner_id")
+        try:
+            with self._pool.connection() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT fact_id, owner_id, version, action, value_digest
+                    FROM conversation_memory_fact_audit
+                    WHERE fact_id = %s AND owner_id = %s
+                    ORDER BY version
+                    """,
+                    (fact_id, owner_id),
+                ).fetchall()
+                return tuple(_row_to_fact_audit(row) for row in rows)
+        except (PsycopgError, PoolTimeout):
+            raise StoreUnavailableError() from None
+
     def forget(self, fact_id: str, *, owner_id: str) -> bool:
         try:
             with self._pool.connection() as connection:
-                row = connection.execute(
-                    """
-                    DELETE FROM conversation_memory_facts
-                    WHERE id = %s AND owner_id = %s
-                    RETURNING id
-                    """,
-                    (fact_id, owner_id),
-                ).fetchone()
-                return row is not None
+                with connection.transaction():
+                    row = connection.execute(
+                        """
+                        SELECT id, owner_id, key, value, scope, version
+                        FROM conversation_memory_facts
+                        WHERE id = %s
+                          AND owner_id = %s
+                          AND deleted_at IS NULL
+                        FOR UPDATE
+                        """,
+                        (fact_id, owner_id),
+                    ).fetchone()
+                    if row is None:
+                        return False
+                    self._delete_fact(
+                        connection,
+                        _row_to_fact(row),
+                        deleted_at=_aware_utc(self._clock()),
+                    )
+                    return True
         except (PsycopgError, PoolTimeout):
             raise StoreUnavailableError() from None
+
+    def _delete_fact(
+        self,
+        connection: Connection[DictRow],
+        current: MemoryFact,
+        *,
+        deleted_at: datetime,
+    ) -> DeleteMemoryFactResult:
+        deleted_version = current.version + 1
+        row = connection.execute(
+            """
+            UPDATE conversation_memory_facts
+            SET key = '',
+                value = '',
+                version = %s,
+                deleted_at = %s
+            WHERE id = %s
+              AND owner_id = %s
+              AND version = %s
+              AND deleted_at IS NULL
+            RETURNING id
+            """,
+            (
+                deleted_version,
+                deleted_at,
+                current.id,
+                current.owner_id,
+                current.version,
+            ),
+        ).fetchone()
+        if row is None:
+            raise StoreUnavailableError()
+        _insert_fact_audit(
+            connection,
+            fact_id=current.id,
+            owner_id=current.owner_id,
+            version=deleted_version,
+            action=MemoryFactAuditAction.DELETED,
+            value_digest=_fact_value_digest(current.value),
+            created_at=deleted_at,
+        )
+        return DeleteMemoryFactResult(
+            fact_id=current.id,
+            version=deleted_version,
+        )
 
 
 def _row_to_message(row: Mapping[str, Any]) -> Message:
@@ -309,6 +502,71 @@ def _row_to_fact(row: Mapping[str, Any]) -> MemoryFact:
         key=row["key"],
         value=row["value"],
         scope=MemoryScope(row["scope"]),
+        version=row["version"],
+    )
+
+
+def _row_to_fact_audit(row: Mapping[str, Any]) -> MemoryFactAuditRecord:
+    return MemoryFactAuditRecord(
+        fact_id=row["fact_id"],
+        owner_id=row["owner_id"],
+        version=row["version"],
+        action=MemoryFactAuditAction(row["action"]),
+        value_digest=row["value_digest"].strip(),
+    )
+
+
+def _select_owned_active_fact(
+    connection: Connection[DictRow],
+    fact_id: str,
+    *,
+    owner_id: str,
+) -> MemoryFact:
+    row = connection.execute(
+        """
+        SELECT id, owner_id, key, value, scope, version
+        FROM conversation_memory_facts
+        WHERE id = %s
+          AND owner_id = %s
+          AND deleted_at IS NULL
+        FOR UPDATE
+        """,
+        (fact_id, owner_id),
+    ).fetchone()
+    if row is None:
+        raise MemoryFactNotFoundError()
+    return _row_to_fact(row)
+
+
+def _insert_fact_audit(
+    connection: Connection[DictRow],
+    *,
+    fact_id: str,
+    owner_id: str,
+    version: int,
+    action: MemoryFactAuditAction,
+    value_digest: str,
+    created_at: datetime,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO conversation_memory_fact_audit (
+            fact_id,
+            owner_id,
+            version,
+            action,
+            value_digest,
+            created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            fact_id,
+            owner_id,
+            version,
+            action.value,
+            value_digest,
+            created_at,
+        ),
     )
 
 

@@ -6,6 +6,11 @@ import unittest
 from backend.app.domain import Message
 from backend.app.memory import (
     ConversationMemory,
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    MemoryFactAuditAction,
+    MemoryFactConflictError,
+    MemoryFactNotFoundError,
     MemoryScope,
     MemoryStore,
     MemoryTurnConflictError,
@@ -218,6 +223,238 @@ class MemoryStoreContract:
         self.assertFalse(
             self.memory_store.forget(fact.id, owner_id="owner-1")
         )
+        self.assertEqual((), self.memory_store.facts("owner-1"))
+        self.assertEqual(
+            (
+                MemoryFactAuditAction.CREATED,
+                MemoryFactAuditAction.DELETED,
+            ),
+            tuple(
+                record.action
+                for record in self.memory_store.fact_audit(
+                    fact.id,
+                    owner_id="owner-1",
+                )
+            ),
+        )
+
+    async def test_approved_correction_uses_version_cas_and_safe_audit(
+        self,
+    ) -> None:
+        fact = self.memory_store.remember(
+            owner_id="owner-1",
+            key="language",
+            value="English",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        command = CorrectMemoryFact(
+            fact_id=fact.id,
+            owner_id=fact.owner_id,
+            expected_version=fact.version,
+            value="Chinese",
+            approved=True,
+        )
+
+        corrected = self.memory_store.correct_fact(command)
+        audit = self.memory_store.fact_audit(
+            fact.id,
+            owner_id=fact.owner_id,
+        )
+
+        self.assertEqual(1, corrected.version)
+        self.assertEqual("Chinese", corrected.value)
+        self.assertEqual((corrected,), self.memory_store.facts("owner-1"))
+        self.assertEqual(
+            (MemoryFactAuditAction.CREATED, MemoryFactAuditAction.CORRECTED),
+            tuple(record.action for record in audit),
+        )
+        self.assertEqual((0, 1), tuple(record.version for record in audit))
+        self.assertTrue(all(len(record.value_digest) == 64 for record in audit))
+        rendered = repr((fact, command, corrected, audit))
+        self.assertNotIn("owner-1", rendered)
+        self.assertNotIn("English", rendered)
+        self.assertNotIn("Chinese", rendered)
+
+    async def test_correction_requires_approval_and_rejects_stale_version(
+        self,
+    ) -> None:
+        fact = self.memory_store.remember(
+            owner_id="owner-1",
+            key="language",
+            value="English",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        unapproved = CorrectMemoryFact(
+            fact_id=fact.id,
+            owner_id=fact.owner_id,
+            expected_version=0,
+            value="Chinese",
+            approved=False,
+        )
+
+        with self.assertRaises(PermissionError):
+            self.memory_store.correct_fact(unapproved)
+        corrected = self.memory_store.correct_fact(
+            CorrectMemoryFact(
+                fact_id=fact.id,
+                owner_id=fact.owner_id,
+                expected_version=0,
+                value="Chinese",
+                approved=True,
+            )
+        )
+        with self.assertRaises(MemoryFactConflictError) as raised:
+            self.memory_store.correct_fact(
+                CorrectMemoryFact(
+                    fact_id=fact.id,
+                    owner_id=fact.owner_id,
+                    expected_version=0,
+                    value="French",
+                    approved=True,
+                )
+            )
+
+        self.assertEqual("memory_fact_conflict", raised.exception.code)
+        with self.assertRaises(MemoryFactConflictError):
+            self.memory_store.delete_fact(
+                DeleteMemoryFact(
+                    fact_id=fact.id,
+                    owner_id=fact.owner_id,
+                    expected_version=0,
+                )
+        )
+        self.assertEqual((corrected,), self.memory_store.facts("owner-1"))
+        self.assertEqual(
+            2,
+            len(self.memory_store.fact_audit(
+                fact.id,
+                owner_id=fact.owner_id,
+            )),
+        )
+
+    async def test_concurrent_correction_has_one_winner_and_one_audit(
+        self,
+    ) -> None:
+        fact = self.memory_store.remember(
+            owner_id="owner-1",
+            key="language",
+            value="English",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+
+        async def correct(value: str):
+            try:
+                return await asyncio.to_thread(
+                    self.memory_store.correct_fact,
+                    CorrectMemoryFact(
+                        fact_id=fact.id,
+                        owner_id=fact.owner_id,
+                        expected_version=0,
+                        value=value,
+                        approved=True,
+                    ),
+                )
+            except MemoryFactConflictError as exc:
+                return exc
+
+        first, second = await asyncio.gather(
+            correct("Chinese"),
+            correct("French"),
+        )
+
+        winners = [
+            item
+            for item in (first, second)
+            if not isinstance(item, MemoryFactConflictError)
+        ]
+        conflicts = [
+            item
+            for item in (first, second)
+            if isinstance(item, MemoryFactConflictError)
+        ]
+        self.assertEqual(1, len(winners))
+        self.assertEqual(1, len(conflicts))
+        self.assertEqual((winners[0],), self.memory_store.facts("owner-1"))
+        self.assertEqual(
+            2,
+            len(self.memory_store.fact_audit(
+                fact.id,
+                owner_id=fact.owner_id,
+            )),
+        )
+
+    async def test_delete_uses_version_cas_removes_content_and_keeps_audit(
+        self,
+    ) -> None:
+        fact = self.memory_store.remember(
+            owner_id="owner-1",
+            key="language",
+            value="Chinese",
+            scope=MemoryScope.USER,
+            approved=True,
+        )
+        command = DeleteMemoryFact(
+            fact_id=fact.id,
+            owner_id=fact.owner_id,
+            expected_version=fact.version,
+        )
+
+        deleted = self.memory_store.delete_fact(command)
+
+        self.assertEqual(1, deleted.version)
+        self.assertEqual((), self.memory_store.facts("owner-1"))
+        self.assertEqual(
+            (),
+            self.memory_store.fact_audit(
+                fact.id,
+                owner_id="owner-2",
+            ),
+        )
+        audit = self.memory_store.fact_audit(fact.id, owner_id="owner-1")
+        self.assertEqual(
+            (MemoryFactAuditAction.CREATED, MemoryFactAuditAction.DELETED),
+            tuple(record.action for record in audit),
+        )
+        with self.assertRaises(MemoryFactNotFoundError) as raised:
+            self.memory_store.delete_fact(command)
+        self.assertEqual("memory_fact_not_found", raised.exception.code)
+        with self.assertRaises(MemoryFactNotFoundError):
+            self.memory_store.correct_fact(
+                CorrectMemoryFact(
+                    fact_id=fact.id,
+                    owner_id="owner-2",
+                    expected_version=0,
+                    value="private replacement",
+                    approved=True,
+                )
+            )
+
+    async def test_fact_commands_reject_invalid_values_before_mutation(
+        self,
+    ) -> None:
+        for constructor, kwargs in (
+            (CorrectMemoryFact, {"fact_id": " fact-1 "}),
+            (CorrectMemoryFact, {"expected_version": True}),
+            (CorrectMemoryFact, {"value": "   "}),
+            (DeleteMemoryFact, {"owner_id": ""}),
+            (DeleteMemoryFact, {"expected_version": -1}),
+        ):
+            values = {
+                "fact_id": "fact-1",
+                "owner_id": "owner-1",
+                "expected_version": 0,
+            }
+            if constructor is CorrectMemoryFact:
+                values.update({"value": "value", "approved": True})
+            values.update(kwargs)
+            with self.subTest(constructor=constructor, kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    constructor(**values)
+
+        self.assertEqual((), self.memory_store.facts("owner-1"))
 
 
 def _turn(

@@ -19,10 +19,79 @@ class MemoryScope(StrEnum):
 @dataclass(frozen=True)
 class MemoryFact:
     id: str
-    owner_id: str
-    key: str
-    value: str
+    owner_id: str = field(repr=False)
+    key: str = field(repr=False)
+    value: str = field(repr=False)
     scope: MemoryScope
+    version: int = 0
+
+
+class MemoryFactAuditAction(StrEnum):
+    CREATED = "created"
+    CORRECTED = "corrected"
+    DELETED = "deleted"
+
+
+@dataclass(frozen=True)
+class MemoryFactAuditRecord:
+    fact_id: str
+    owner_id: str = field(repr=False)
+    version: int
+    action: MemoryFactAuditAction
+    value_digest: str
+
+
+class MemoryFactConflictError(RuntimeError):
+    code = "memory_fact_conflict"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
+class MemoryFactNotFoundError(RuntimeError):
+    code = "memory_fact_not_found"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
+@dataclass(frozen=True)
+class CorrectMemoryFact:
+    fact_id: str
+    owner_id: str = field(repr=False)
+    expected_version: int
+    value: str = field(repr=False)
+    approved: bool = field(repr=False)
+
+    def __post_init__(self) -> None:
+        _require_identifier(self.fact_id, "fact_id")
+        _require_identifier(self.owner_id, "owner_id")
+        _require_fact_version(self.expected_version)
+        if not isinstance(self.approved, bool):
+            raise ValueError("approved must be a boolean")
+        object.__setattr__(self, "value", _normalize_fact_value(self.value))
+
+    @property
+    def value_digest(self) -> str:
+        return _fact_value_digest(self.value)
+
+
+@dataclass(frozen=True)
+class DeleteMemoryFact:
+    fact_id: str
+    owner_id: str = field(repr=False)
+    expected_version: int
+
+    def __post_init__(self) -> None:
+        _require_identifier(self.fact_id, "fact_id")
+        _require_identifier(self.owner_id, "owner_id")
+        _require_fact_version(self.expected_version)
+
+
+@dataclass(frozen=True)
+class DeleteMemoryFactResult:
+    fact_id: str
+    version: int
 
 
 class MemoryTurnConflictError(RuntimeError):
@@ -86,7 +155,28 @@ class MemoryStore(Protocol):
 
     def facts(self, owner_id: str) -> tuple[MemoryFact, ...]: ...
 
+    def correct_fact(self, command: CorrectMemoryFact) -> MemoryFact: ...
+
+    def delete_fact(
+        self,
+        command: DeleteMemoryFact,
+    ) -> DeleteMemoryFactResult: ...
+
+    def fact_audit(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[MemoryFactAuditRecord, ...]: ...
+
     def forget(self, fact_id: str, *, owner_id: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class _MemoryFactState:
+    owner_id: str
+    version: int
+    fact: MemoryFact | None
 
 
 class ConversationMemory:
@@ -99,7 +189,9 @@ class ConversationMemory:
         self._message_lock = Lock()
         self._messages: dict[str, list[Message]] = {}
         self._published_turns: dict[str, tuple[str, str]] = {}
-        self._facts: dict[str, MemoryFact] = {}
+        self._fact_lock = Lock()
+        self._facts: dict[str, _MemoryFactState] = {}
+        self._fact_audits: dict[str, list[MemoryFactAuditRecord]] = {}
 
     def append_message(self, session_id: str, message: Message) -> None:
         with self._message_lock:
@@ -152,18 +244,143 @@ class ConversationMemory:
             value=value.strip(),
             scope=checked_scope,
         )
-        self._facts[fact.id] = fact
+        with self._fact_lock:
+            self._facts[fact.id] = _MemoryFactState(
+                owner_id=fact.owner_id,
+                version=fact.version,
+                fact=fact,
+            )
+            self._fact_audits[fact.id] = [
+                _fact_audit_record(fact, MemoryFactAuditAction.CREATED)
+            ]
         return fact
 
     def facts(self, owner_id: str) -> tuple[MemoryFact, ...]:
-        return tuple(fact for fact in self._facts.values() if fact.owner_id == owner_id)
+        with self._fact_lock:
+            return tuple(
+                state.fact
+                for state in self._facts.values()
+                if state.owner_id == owner_id and state.fact is not None
+            )
+
+    def correct_fact(self, command: CorrectMemoryFact) -> MemoryFact:
+        if not isinstance(command, CorrectMemoryFact):
+            raise ValueError("correct memory fact command is invalid")
+        if not command.approved:
+            raise PermissionError("memory correction requires explicit approval")
+        with self._fact_lock:
+            state = self._owned_active_fact(
+                command.fact_id,
+                owner_id=command.owner_id,
+            )
+            if state.version != command.expected_version:
+                raise MemoryFactConflictError()
+            current = state.fact
+            if current is None:
+                raise MemoryFactNotFoundError()
+            corrected = MemoryFact(
+                id=current.id,
+                owner_id=current.owner_id,
+                key=current.key,
+                value=command.value,
+                scope=current.scope,
+                version=current.version + 1,
+            )
+            self._facts[current.id] = _MemoryFactState(
+                owner_id=current.owner_id,
+                version=corrected.version,
+                fact=corrected,
+            )
+            self._fact_audits[current.id].append(
+                _fact_audit_record(
+                    corrected,
+                    MemoryFactAuditAction.CORRECTED,
+                )
+            )
+            return corrected
+
+    def delete_fact(
+        self,
+        command: DeleteMemoryFact,
+    ) -> DeleteMemoryFactResult:
+        if not isinstance(command, DeleteMemoryFact):
+            raise ValueError("delete memory fact command is invalid")
+        with self._fact_lock:
+            state = self._owned_active_fact(
+                command.fact_id,
+                owner_id=command.owner_id,
+            )
+            if state.version != command.expected_version:
+                raise MemoryFactConflictError()
+            return self._delete_fact_locked(state)
+
+    def fact_audit(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> tuple[MemoryFactAuditRecord, ...]:
+        _require_identifier(fact_id, "fact_id")
+        _require_identifier(owner_id, "owner_id")
+        with self._fact_lock:
+            state = self._facts.get(fact_id)
+            if state is None or state.owner_id != owner_id:
+                return ()
+            return tuple(self._fact_audits[fact_id])
 
     def forget(self, fact_id: str, *, owner_id: str) -> bool:
-        fact = self._facts.get(fact_id)
-        if fact is None or fact.owner_id != owner_id:
-            return False
-        del self._facts[fact_id]
-        return True
+        with self._fact_lock:
+            state = self._facts.get(fact_id)
+            if (
+                state is None
+                or state.owner_id != owner_id
+                or state.fact is None
+            ):
+                return False
+            self._delete_fact_locked(state)
+            return True
+
+    def _owned_active_fact(
+        self,
+        fact_id: str,
+        *,
+        owner_id: str,
+    ) -> _MemoryFactState:
+        state = self._facts.get(fact_id)
+        if (
+            state is None
+            or state.owner_id != owner_id
+            or state.fact is None
+        ):
+            raise MemoryFactNotFoundError()
+        return state
+
+    def _delete_fact_locked(
+        self,
+        state: _MemoryFactState,
+    ) -> DeleteMemoryFactResult:
+        current = state.fact
+        if current is None:
+            raise MemoryFactNotFoundError()
+        deleted_version = current.version + 1
+        self._facts[current.id] = _MemoryFactState(
+            owner_id=current.owner_id,
+            version=deleted_version,
+            fact=None,
+        )
+        self._fact_audits[current.id].append(
+            MemoryFactAuditRecord(
+                fact_id=current.id,
+                owner_id=current.owner_id,
+                version=deleted_version,
+                action=MemoryFactAuditAction.DELETED,
+                value_digest=_fact_value_digest(current.value),
+            )
+        )
+        return DeleteMemoryFactResult(
+            fact_id=current.id,
+            version=deleted_version,
+        )
 
 
 def _require_identifier(value: object, label: str) -> None:
@@ -185,6 +402,36 @@ def _require_turn_message(message: object, *, role: str) -> None:
         or message.tool_call_id is not None
     ):
         raise ValueError(f"publish turn requires a plain {role} message")
+
+
+def _require_fact_version(value: object) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("expected_version must be a non-negative integer")
+
+
+def _normalize_fact_value(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("memory value must not be empty")
+    return value.strip()
+
+
+def _fact_value_digest(value: str) -> str:
+    encoded = value.encode("utf-8")
+    payload = f"memory-fact-value-v1:{len(encoded)}:".encode("ascii") + encoded
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _fact_audit_record(
+    fact: MemoryFact,
+    action: MemoryFactAuditAction,
+) -> MemoryFactAuditRecord:
+    return MemoryFactAuditRecord(
+        fact_id=fact.id,
+        owner_id=fact.owner_id,
+        version=fact.version,
+        action=action,
+        value_digest=_fact_value_digest(fact.value),
+    )
 
 
 def _message_payload(message: Message) -> dict[str, str | None]:
