@@ -3271,3 +3271,22 @@
 
 - `V-20260820-005` 的 Memory/Context 26 项、共享回归 156 项、真实 PostgreSQL 109 项、四进程 1 项、全量后端 597 项、M1 隔离 10 项与完整构建门证据，和当前代码、migration、ADR、计划、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第六纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加公开 fact API、外部防篡改、自动重试、在线 Provider、前端或生产数据库证据。
+
+## V-20260820-007：M11-T5 第六纵切实现提交后复验
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 10:41，Asia/Shanghai
+- 验证目标：实现提交 `9ae5e8a`（`feat: version memory fact mutations`）
+- 模式：提交后本地关键回归、真实 PostgreSQL 跨进程与连续性复验；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_memory_store_contract backend.tests.test_context_collector -q` | 0 | 实现提交上 26 项通过 |
+| 配置本地 DSN 后运行 `PostgresMemoryFactAuditProcessTest -q` | 0 | 实现提交上四进程恢复 1 项通过；只有既有 Starlette/httpx warning |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 实现提交上 52 个稳定任务、113 个 Markdown 通过 |
+| `git status --short` | 0 | 实现提交复验前工作区干净；随后只修改本条提交锚点、status 与 handoff |
+
+### 结论
+
+- 第六纵切实现由 `9ae5e8a` 固定；提交后关键 Store/Context、真实 PostgreSQL 四进程恢复与连续性均保持通过。
+- 后续文档提交只记录该实现锚点，不改变代码、migration、测试或 `in_progress` 任务结论。
