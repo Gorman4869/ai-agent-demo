@@ -774,6 +774,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - Memory/Context 26 项、共享离线 156 项、真实 PostgreSQL 109 项、四进程 1 项、M1 隔离 10 项和完整门通过；全量后端 597 项通过、1 项既有 Windows symlink 条件跳过，其他门均通过。
 - 新 CAS 能力尚未暴露为公开 HTTP，兼容 delete 也不要求客户端 expected version；async result-unknown 只能通过当前 version/audit 仲裁而不能自动重试。M11-T5 保持 `in_progress`；下一纵切只接可信 owner 的异步 fact read/correct/delete/audit API 和跨 application lifespan 主 Run 证据，不修改前端、不进入 M11-T6。
 
+#### M11-T5 第七个真实纵切边界
+
+- 保留既有 `POST /api/memories` 响应与无 version 的兼容 DELETE；新增 owner-scoped active fact list/detail、approved version CAS correction、audit，以及 DELETE 的可选 `expected_version`。owner 只来自认证 `Principal`，请求体不能改写身份。
+- 固定 401 未认证、403 未批准、404 不存在/已删除/跨 owner、409 陈旧 version 和 422 输入校验合同；错误不含 owner/key/value/current version。公开 audit 只返回 fact ID、version、created/corrected/deleted 与 64 位小写 digest，tombstone 后 owner 仍可审计。
+- HTTP 只调用 application-owned async Memory façade。默认内存 API 回归覆盖兼容形状、身份隔离、纠正/删除、陈旧冲突、审计脱敏和请求校验；真实 PostgreSQL 在三个独立 application lifespan 中完成 legacy create→versioned correct→主 Run→versioned delete→主 Run→restart audit。
+- 跨 lifespan 主 Run 使用默认 `ApplicationContainer.open()`、真实 durable Run/Coordinator 与 `AsyncContextAwareRuntime`：纠正后的下一 Run 只收到新值，删除后的再下一 Run 不再收到新旧值；新 composition 恢复 active list 为空且 audit 为 created/corrected/deleted。
+- API 27 项、相关离线 115 项、真实 PostgreSQL application lifespan 2 项和完整 integration 110 项通过；全量后端 599 项通过、1 项既有 Windows symlink 条件跳过，M1 隔离 10 项及其他构建门全部通过。M11-T5 达到 `verified`；Run/Memory 共同事务、后台扫描、外部防篡改、自动 mutation retry、生产数据库和在线模型不属于该结论，下一任务为 M11-T6。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。

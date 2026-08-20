@@ -5,8 +5,18 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -16,6 +26,9 @@ from backend.app.api.schemas import (
     EvidenceResponse,
     EvalReportResponse,
     HealthResponse,
+    MemoryCorrectionRequest,
+    MemoryFactAuditResponse,
+    MemoryFactResponse,
     MemoryRequest,
     MemoryResponse,
     ResearchRequest,
@@ -37,7 +50,16 @@ from backend.app.knowledge import (
     InMemoryKnowledgeBase,
     KnowledgeBase,
 )
-from backend.app.memory import MemoryScope, MemoryStore
+from backend.app.memory import (
+    CorrectMemoryFact,
+    DeleteMemoryFact,
+    MemoryFact,
+    MemoryFactAuditRecord,
+    MemoryFactConflictError,
+    MemoryFactNotFoundError,
+    MemoryScope,
+    MemoryStore,
+)
 from backend.app.observability import RunObservation
 from backend.app.security import (
     AuthenticationError,
@@ -458,17 +480,118 @@ def create_app(
             scope=fact.scope.value,
         )
 
+    @app.get("/api/memories", response_model=list[MemoryFactResponse])
+    async def list_memories(
+        principal: Principal = Depends(current_principal),
+    ) -> list[MemoryFactResponse]:
+        _require_authenticated(principal)
+        facts = await current_container().async_memory_store.facts(
+            principal.principal_id
+        )
+        return [_to_memory_fact_response(fact) for fact in facts]
+
+    @app.get(
+        "/api/memories/{fact_id}",
+        response_model=MemoryFactResponse,
+    )
+    async def get_memory(
+        fact_id: Annotated[
+            str,
+            Path(min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$"),
+        ],
+        principal: Principal = Depends(current_principal),
+    ) -> MemoryFactResponse:
+        _require_authenticated(principal)
+        fact = await _owned_memory_fact(
+            current_container(),
+            fact_id,
+            owner_id=principal.principal_id,
+        )
+        return _to_memory_fact_response(fact)
+
+    @app.patch(
+        "/api/memories/{fact_id}",
+        response_model=MemoryFactResponse,
+    )
+    async def correct_memory(
+        fact_id: Annotated[
+            str,
+            Path(min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$"),
+        ],
+        request: MemoryCorrectionRequest,
+        principal: Principal = Depends(current_principal),
+    ) -> MemoryFactResponse:
+        _require_authenticated(principal)
+        try:
+            fact = await current_container().async_memory_store.correct_fact(
+                CorrectMemoryFact(
+                    fact_id=fact_id,
+                    owner_id=principal.principal_id,
+                    expected_version=request.expected_version,
+                    value=request.value,
+                    approved=request.approved,
+                )
+            )
+        except PermissionError as error:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Memory correction requires explicit approval",
+            ) from error
+        except MemoryFactNotFoundError as error:
+            raise _memory_not_found() from error
+        except MemoryFactConflictError as error:
+            raise _memory_version_conflict() from error
+        return _to_memory_fact_response(fact)
+
+    @app.get(
+        "/api/memories/{fact_id}/audit",
+        response_model=list[MemoryFactAuditResponse],
+    )
+    async def get_memory_audit(
+        fact_id: Annotated[
+            str,
+            Path(min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$"),
+        ],
+        principal: Principal = Depends(current_principal),
+    ) -> list[MemoryFactAuditResponse]:
+        _require_authenticated(principal)
+        audit = await current_container().async_memory_store.fact_audit(
+            fact_id,
+            owner_id=principal.principal_id,
+        )
+        if not audit:
+            raise _memory_not_found()
+        return [_to_memory_audit_response(record) for record in audit]
+
     @app.delete("/api/memories/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def forget(
-        fact_id: str,
+        fact_id: Annotated[
+            str,
+            Path(min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$"),
+        ],
         principal: Principal = Depends(current_principal),
+        expected_version: int | None = Query(default=None, ge=0),
     ) -> None:
         _require_authenticated(principal)
+        if expected_version is not None:
+            try:
+                await current_container().async_memory_store.delete_fact(
+                    DeleteMemoryFact(
+                        fact_id=fact_id,
+                        owner_id=principal.principal_id,
+                        expected_version=expected_version,
+                    )
+                )
+            except MemoryFactNotFoundError as error:
+                raise _memory_not_found() from error
+            except MemoryFactConflictError as error:
+                raise _memory_version_conflict() from error
+            return
         if not await current_container().async_memory_store.forget(
             fact_id,
             owner_id=principal.principal_id,
         ):
-            raise HTTPException(status_code=404, detail="Memory not found")
+            raise _memory_not_found()
 
     def resolve_session_principal(
         session_id: str,
@@ -506,6 +629,55 @@ def _to_run_response(run: LegacyRunRecord) -> RunResponse:
         answer=run.answer,
         event_types=list(run.event_types),
         error=run.error,
+    )
+
+
+def _to_memory_fact_response(fact: MemoryFact) -> MemoryFactResponse:
+    return MemoryFactResponse(
+        id=fact.id,
+        owner_id=fact.owner_id,
+        key=fact.key,
+        value=fact.value,
+        scope=fact.scope.value,
+        version=fact.version,
+    )
+
+
+def _to_memory_audit_response(
+    record: MemoryFactAuditRecord,
+) -> MemoryFactAuditResponse:
+    return MemoryFactAuditResponse(
+        fact_id=record.fact_id,
+        version=record.version,
+        action=record.action.value,
+        value_digest=record.value_digest,
+    )
+
+
+async def _owned_memory_fact(
+    container: ApplicationContainer,
+    fact_id: str,
+    *,
+    owner_id: str,
+) -> MemoryFact:
+    facts = await container.async_memory_store.facts(owner_id)
+    for fact in facts:
+        if fact.id == fact_id:
+            return fact
+    raise _memory_not_found()
+
+
+def _memory_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Memory not found",
+    )
+
+
+def _memory_version_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Memory version conflict",
     )
 
 

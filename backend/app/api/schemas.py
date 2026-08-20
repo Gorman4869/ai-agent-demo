@@ -82,6 +82,34 @@ class MemoryResponse(BaseModel):
     scope: Literal["session", "user"]
 
 
+class MemoryFactResponse(MemoryResponse):
+    version: int = Field(ge=0)
+
+
+class MemoryCorrectionRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    value: str = Field(min_length=1, max_length=2_000)
+    approved: bool = False
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be blank")
+        return value
+
+
+class MemoryFactAuditResponse(BaseModel):
+    fact_id: str
+    version: int = Field(ge=0)
+    action: Literal["created", "corrected", "deleted"]
+    value_digest: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
 class RunErrorResponse(BaseModel):
     category: str
     event_type: str | None

@@ -3290,3 +3290,72 @@
 
 - 第六纵切实现由 `9ae5e8a` 固定；提交后关键 Store/Context、真实 PostgreSQL 四进程恢复与连续性均保持通过。
 - 后续文档提交只记录该实现锚点，不改变代码、migration、测试或 `in_progress` 任务结论。
+
+## V-20260820-008：M11-T5 versioned fact HTTP 与跨 lifespan 主 Run 第七纵切
+
+- 任务：`M11-T5 / verified`
+- 时间：2026-08-20 11:44，Asia/Shanghai
+- 验证目标：HEAD `f066a90` 上的 M11-T5 第七纵切工作区；第六纵切实现提交 `9ae5e8a`
+- 任务等级：A 类 public HTTP/persistence/lifecycle 边界；时间盒 2–4 小时
+- 模式：默认离线 E3 加本地真实 PostgreSQL E4；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用既有 FastAPI/Pydantic、Principal、async Memory façade、ApplicationContainer/Coordinator/Context 与 migration 6；没有新增、安装、升级或删除依赖，没有修改前端、Runtime/Store 协议或数据库 schema
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` / `node --version` | 0 / 0 / 0 | 初始工作区干净；HEAD `f066a90` 为第六纵切文档锚点，`9ae5e8a` 为实现提交；Node `v22.16.0` |
+| 按强制顺序读取 continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026/0027/0028、最新 handoff、`V-20260820-005/006/007` 与后端规约 | 0 | 当前动作确认为可信 owner 的 versioned fact HTTP 与跨 lifespan 主 Run；不修改前端、不进入 M11-T6 |
+| handoff Memory/Context 恢复集 | 0 | Memory/Context 26 项、连续性 52/113 与真实 PostgreSQL 四进程 audit 1 项通过；integration PostgreSQL healthy |
+| 恢复入口冲突登记 | 0 | Git、verification 与 handoff 已指向第六纵切，但 `status.md` 底部仍指第五纵切；先登记 `KI-026`，再修正恢复入口，没有静默选择或重做已验收工作 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_api -q` | 0 | 27 项通过；覆盖兼容 POST/DELETE、认证 owner、active list/detail、approved correction、stale conflict、version delete、tombstone audit、跨 owner 和 422 校验 |
+| 新增真实 PostgreSQL lifespan/main Run 用例 | 0 | 1 项通过；三个独立 application lifespan 完成 legacy create→correct→durable main Run→delete→durable main Run→restart list/audit |
+| `PostgresFastApiApplicationTest -q` | 0 | 2 项通过；既有 application lifespan 兼容纵切与新 versioned 主 Run 纵切同时通过 |
+| API/Application/Container/Memory/Context/async Store 相关离线回归 | 0 | 115 项通过；只有既有 Starlette/httpx warning，没有失败或新增 skip |
+| `python -m unittest backend.tests.postgres_store_integration -q`（配置本地 DSN） | 0 | 完整真实 PostgreSQL integration 110 项通过；预期不可达数据库负向用例只输出有界 connection timeout |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` | 结果未知 | 首次经授权执行的输出被界面截断且执行单元关闭，无法恢复退出结果；没有计入成功证据 |
+| 同一 `scripts/verify.ps1` 重新完整执行 | 0 | 后端 599 项通过、1 项既有 Windows symlink 条件跳过；受控 Code Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建和 Compose 配置全部通过 |
+| `python -S -X utf8 -B -m unittest backend.tests.test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 当前 10 项通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有 LF→CRLF 提示 |
+
+### 实现与风险证据
+
+- 新增 active fact list/detail、approved PATCH correction、audit 与 DELETE 可选 `expected_version`；既有 POST 响应键和无 version DELETE 的 204 行为保持。版本化路径只通过 application-owned async Memory façade访问 Store。
+- owner 仅取认证 `Principal.id`。测试刻意提交伪造 `owner_id`，事实仍归认证主体；跨 owner list 为空，detail/correction/delete/audit 都与不存在相同返回 404。未认证 401、未批准 403、陈旧版本 409、非法输入 422，错误不含 owner/key/value/current version。
+- audit HTTP 只输出 `fact_id/version/action/value_digest`；删除后的 owner 可读取 created/corrected/deleted 序列，其他 owner 仍为 404。active list/detail 在 tombstone 后不可见。
+- 真实 PostgreSQL 使用默认 `ApplicationContainer.open()` 和默认 built-in Runtime wrapper。第二 lifespan 中真实 durable Run/Coordinator 交给 `AsyncContextAwareRuntime`：纠正后 captured prompt 含新值且无旧值；version delete 后下一 Run 不含新旧值。第三 lifespan 恢复 active list 为空、audit 三动作完整，三个 Container 均正常关闭。
+
+### 聚焦复审与未验证范围
+
+- 复审核对兼容 API、schema、Principal owner、HTTP 状态、内容脱敏、async façade、admission/lifespan、真实 Run/Context 和 restart audit；未发现剩余阻断问题。公开 API 是 `ADR-0028` 已列明的后续纵切，无新架构决策，因此没有新增 ADR。
+- owner 内 active detail 通过现有 `facts(owner)` 后按 ID 过滤，当前为线性查找；这是避免扩宽 Store 协议的最小实现，不是大规模分页/索引性能证据。
+- 兼容无 version DELETE 仍允许旧客户端不做 CAS；version-aware 客户端应提交 `expected_version`。async timeout、取消或连接中断仍可能 result-unknown，命令无持久 mutation idempotency key，禁止自动重试。
+- SHA-256 digest 不加密事实，低熵 value 仍可猜测；trigger 不是外部防篡改。没有证明 Run/Memory 共同事务、后台扫描、生产鉴权/备份/WAL/灾备、在线模型质量、Provider Token/usage 或费用。
+
+### 结论
+
+- M11-T5 的消息写入/窗口、approved fact、读取/纠正/删除、版本冲突、审计，以及重启恢复、错误纠正、删除不再注入、跨用户隔离、模型推测不自动写入均已有自动化证据，任务达到 `verified`。
+- `KI-014` 关闭；`KI-005` 的 M11 上下文与记忆部分完成，但统一 durable Run 与跨域故障仍由 M12 承接，所以保持 `mitigated`。下一任务为 M11-T6，本轮不实现。
+
+## V-20260820-009：M11-T5 第七纵切连续性闭环
+
+- 任务：`M11-T5 / verified`
+- 时间：2026-08-20 11:44，Asia/Shanghai
+- 验证目标：HEAD `f066a90` 上经 `V-20260820-008` 验证的第七纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性、diff 与 Git 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、114 个 Markdown 通过；M11-T5 verified、`V-20260820-008/009`、ADR-0028、新 handoff、plan、known issue、status、后端规约和恢复入口可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 任务文件复核 | 0 | 10 个已跟踪修改与 1 个新 handoff；没有构建产物、缓存、诊断临时文件或任务外改动 |
+
+### 结论
+
+- `V-20260820-008` 的 API 27 项、相关离线 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL 110 项、全量后端 599 项、M1 隔离 10 项与完整构建门证据，和当前代码、计划、known issue、status、后端规约及 handoff 一致。
+- `KI-026` 关闭；M11-T5 达到 `verified`，下一恢复动作只进入 M11-T6 的独立计划，不重做 M11-T1–T5，也不扩大到前端或 M12/M13。

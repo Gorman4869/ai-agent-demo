@@ -216,6 +216,148 @@ class PostgresFastApiApplicationTest(unittest.TestCase):
                 second_container.lifecycle_state,
             )
 
+    def test_versioned_memory_api_changes_main_run_context_across_lifespans(
+        self,
+    ) -> None:
+        token = "postgres-versioned-memory-token"
+        owner_id = f"postgres-versioned-owner-{uuid4()}"
+        auth_config = json.dumps(
+            {
+                token: {
+                    "principal_id": owner_id,
+                    "roles": [],
+                }
+            }
+        )
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN,
+            }
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        original_value = f"incorrect-memory-{uuid4()}"
+        corrected_value = f"corrected-memory-{uuid4()}"
+        session_id = f"versioned-memory-session-{uuid4()}"
+        runtime = _ContextCapturingRuntime()
+
+        with (
+            patch.dict(
+                os.environ,
+                {"AI_AGENT_DEMO_AUTH_JSON": auth_config},
+                clear=False,
+            ),
+            patch(
+                "backend.app.container._create_built_in_runtimes",
+                return_value={"manual": runtime},
+            ),
+        ):
+            first_app = create_app(settings=settings)
+            with TestClient(first_app) as client:
+                created = client.post(
+                    "/api/memories",
+                    headers=headers,
+                    json={
+                        "key": "restart-context-proof",
+                        "value": original_value,
+                        "scope": "user",
+                        "approved": True,
+                    },
+                )
+                first_container = first_app.state.container
+                self.assertEqual(201, created.status_code)
+                fact_id = created.json()["id"]
+
+            self.assertEqual(
+                ApplicationLifecycleState.CLOSED,
+                first_container.lifecycle_state,
+            )
+
+            second_app = create_app(settings=settings)
+            with TestClient(second_app) as client:
+                second_container = second_app.state.container
+                fetched = client.get(
+                    f"/api/memories/{fact_id}",
+                    headers=headers,
+                )
+                corrected = client.patch(
+                    f"/api/memories/{fact_id}",
+                    headers=headers,
+                    json={
+                        "expected_version": 0,
+                        "value": corrected_value,
+                        "approved": True,
+                    },
+                )
+                self.assertEqual(200, fetched.status_code)
+                self.assertEqual(original_value, fetched.json()["value"])
+                self.assertEqual(0, fetched.json()["version"])
+                self.assertEqual(200, corrected.status_code)
+                self.assertEqual(1, corrected.json()["version"])
+
+                before_delete = _new_context_run(
+                    owner_id=owner_id,
+                    session_id=session_id,
+                    label="before-delete",
+                )
+                completed = client.portal.call(
+                    _create_and_execute_run,
+                    second_container,
+                    before_delete,
+                )
+                self.assertEqual(RunStatus.COMPLETED, completed.status)
+                self.assertIn(corrected_value, runtime.prompt_contexts[-1])
+                self.assertNotIn(original_value, runtime.prompt_contexts[-1])
+
+                deleted = client.delete(
+                    f"/api/memories/{fact_id}?expected_version=1",
+                    headers=headers,
+                )
+                self.assertEqual(204, deleted.status_code)
+
+                after_delete = _new_context_run(
+                    owner_id=owner_id,
+                    session_id=session_id,
+                    label="after-delete",
+                )
+                completed = client.portal.call(
+                    _create_and_execute_run,
+                    second_container,
+                    after_delete,
+                )
+                self.assertEqual(RunStatus.COMPLETED, completed.status)
+                self.assertNotIn(corrected_value, runtime.prompt_contexts[-1])
+                self.assertNotIn(original_value, runtime.prompt_contexts[-1])
+
+            self.assertEqual(
+                ApplicationLifecycleState.CLOSED,
+                second_container.lifecycle_state,
+            )
+
+            third_app = create_app(settings=settings)
+            with TestClient(third_app) as client:
+                third_container = third_app.state.container
+                self.assertEqual(
+                    [],
+                    client.get("/api/memories", headers=headers).json(),
+                )
+                audit = client.get(
+                    f"/api/memories/{fact_id}/audit",
+                    headers=headers,
+                )
+                self.assertEqual(200, audit.status_code)
+                self.assertEqual(
+                    ["created", "corrected", "deleted"],
+                    [record["action"] for record in audit.json()],
+                )
+                self.assertNotIn(original_value, audit.text)
+                self.assertNotIn(corrected_value, audit.text)
+
+            self.assertEqual(
+                ApplicationLifecycleState.CLOSED,
+                third_container.lifecycle_state,
+            )
+
 
 class PostgresApplicationContainerTest(unittest.IsolatedAsyncioTestCase):
     async def test_approval_is_granted_and_consumed_through_async_facade(
@@ -1765,6 +1907,49 @@ class PostgresUnavailableTest(unittest.IsolatedAsyncioTestCase):
             await PostgresPersistence.open(unavailable, timeout=0.2)
 
         self.assertEqual("store_unavailable", raised.exception.code)
+
+
+class _ContextCapturingRuntime:
+    def __init__(self) -> None:
+        self.prompt_contexts: list[str] = []
+
+    async def run(self, request, *, emit, control) -> RuntimeResult:
+        del emit, control
+        if not isinstance(request.prompt_context, str):
+            raise AssertionError("versioned memory context was not assembled")
+        self.prompt_contexts.append(request.prompt_context)
+        return RuntimeResult(
+            status=RunStatus.COMPLETED,
+            answer="context captured",
+        )
+
+
+def _new_context_run(
+    *,
+    owner_id: str,
+    session_id: str,
+    label: str,
+) -> RunRecord:
+    return RunRecord.create(
+        run_id=f"versioned-memory-run-{label}-{uuid4()}",
+        session_id=session_id,
+        owner_id=owner_id,
+        runtime="manual",
+        input_text=f"inspect memory context {label}",
+        idempotency_key=f"versioned-memory-key-{label}-{uuid4()}",
+        created_at=datetime.now(UTC),
+    )
+
+
+async def _create_and_execute_run(
+    container: ApplicationContainer,
+    run: RunRecord,
+) -> RunRecord:
+    await container.run_store.create(run)
+    return await container.run_coordinator.execute(
+        run.id,
+        owner_id=run.owner_id,
+    )
 
 
 class PostgresGatedRuntime:

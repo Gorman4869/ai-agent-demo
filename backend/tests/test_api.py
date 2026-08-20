@@ -16,7 +16,13 @@ from backend.app.main import (
     _wait_for_cancelled_run,
     create_app,
 )
-from backend.app.memory import MemoryFact, MemoryScope
+from backend.app.memory import (
+    DeleteMemoryFactResult,
+    MemoryFact,
+    MemoryFactAuditAction,
+    MemoryFactAuditRecord,
+    MemoryScope,
+)
 from backend.app.security import Principal, StaticTokenAuthenticator
 from backend.app.settings import Settings
 from backend.app.tools import InMemoryApprovalStore
@@ -297,6 +303,210 @@ class ApiTest(unittest.TestCase):
             ).status_code,
         )
 
+    def test_versioned_memory_api_is_owner_scoped_and_content_safe(self) -> None:
+        owner_headers = self._auth("user-1-token")
+        other_headers = self._auth("user-2-token")
+        original_value = "incorrect private preference"
+        corrected_value = "correct private preference"
+        created = self.client.post(
+            "/api/memories",
+            headers=owner_headers,
+            json={
+                "key": "private-preference",
+                "value": original_value,
+                "scope": "user",
+                "approved": True,
+            },
+        )
+        fact_id = created.json()["id"]
+
+        self.assertEqual(201, created.status_code)
+        self.assertEqual(
+            {"id", "owner_id", "key", "value", "scope"},
+            set(created.json()),
+        )
+        self.assertEqual(401, self.client.get("/api/memories").status_code)
+        self.assertEqual(
+            [0],
+            [
+                fact["version"]
+                for fact in self.client.get(
+                    "/api/memories",
+                    headers=owner_headers,
+                ).json()
+            ],
+        )
+        self.assertEqual(
+            [],
+            self.client.get("/api/memories", headers=other_headers).json(),
+        )
+        self.assertEqual(
+            404,
+            self.client.get(
+                f"/api/memories/{fact_id}",
+                headers=other_headers,
+            ).status_code,
+        )
+        crossed_correction = self.client.patch(
+            f"/api/memories/{fact_id}",
+            headers=other_headers,
+            json={
+                "expected_version": 0,
+                "value": "cross-owner attempt",
+                "approved": True,
+            },
+        )
+        crossed_delete = self.client.delete(
+            f"/api/memories/{fact_id}?expected_version=0",
+            headers=other_headers,
+        )
+        self.assertEqual(404, crossed_correction.status_code)
+        self.assertEqual(404, crossed_delete.status_code)
+        self.assertNotIn(original_value, crossed_correction.text)
+
+        unapproved = self.client.patch(
+            f"/api/memories/{fact_id}",
+            headers=owner_headers,
+            json={
+                "expected_version": 0,
+                "value": corrected_value,
+                "approved": False,
+            },
+        )
+        corrected = self.client.patch(
+            f"/api/memories/{fact_id}",
+            headers=owner_headers,
+            json={
+                "expected_version": 0,
+                "value": corrected_value,
+                "approved": True,
+                "owner_id": "user-2",
+            },
+        )
+        stale = self.client.patch(
+            f"/api/memories/{fact_id}",
+            headers=owner_headers,
+            json={
+                "expected_version": 0,
+                "value": "must not win",
+                "approved": True,
+            },
+        )
+
+        self.assertEqual(403, unapproved.status_code)
+        self.assertEqual(200, corrected.status_code)
+        self.assertEqual("user-1", corrected.json()["owner_id"])
+        self.assertEqual(corrected_value, corrected.json()["value"])
+        self.assertEqual(1, corrected.json()["version"])
+        self.assertEqual(409, stale.status_code)
+        for response in (unapproved, stale):
+            self.assertNotIn(original_value, response.text)
+            self.assertNotIn(corrected_value, response.text)
+
+        self.assertEqual(
+            404,
+            self.client.get(
+                f"/api/memories/{fact_id}/audit",
+                headers=other_headers,
+            ).status_code,
+        )
+        audit = self.client.get(
+            f"/api/memories/{fact_id}/audit",
+            headers=owner_headers,
+        )
+        self.assertEqual(200, audit.status_code)
+        self.assertEqual(
+            ["created", "corrected"],
+            [record["action"] for record in audit.json()],
+        )
+        self.assertTrue(
+            all(
+                set(record)
+                == {"fact_id", "version", "action", "value_digest"}
+                for record in audit.json()
+            )
+        )
+        self.assertNotIn(original_value, audit.text)
+        self.assertNotIn(corrected_value, audit.text)
+        self.assertNotIn("private-preference", audit.text)
+
+        stale_delete = self.client.delete(
+            f"/api/memories/{fact_id}?expected_version=0",
+            headers=owner_headers,
+        )
+        deleted = self.client.delete(
+            f"/api/memories/{fact_id}?expected_version=1",
+            headers=owner_headers,
+        )
+        self.assertEqual(409, stale_delete.status_code)
+        self.assertEqual(204, deleted.status_code)
+        self.assertEqual(
+            404,
+            self.client.get(
+                f"/api/memories/{fact_id}",
+                headers=owner_headers,
+            ).status_code,
+        )
+        self.assertEqual(
+            [],
+            self.client.get("/api/memories", headers=owner_headers).json(),
+        )
+        deleted_audit = self.client.get(
+            f"/api/memories/{fact_id}/audit",
+            headers=owner_headers,
+        )
+        self.assertEqual(
+            ["created", "corrected", "deleted"],
+            [record["action"] for record in deleted_audit.json()],
+        )
+        self.assertEqual(
+            404,
+            self.client.delete(
+                f"/api/memories/{fact_id}?expected_version=1",
+                headers=owner_headers,
+            ).status_code,
+        )
+
+    def test_versioned_memory_request_validation_fails_before_store(self) -> None:
+        created = self.client.post(
+            "/api/memories",
+            headers=self._auth("user-1-token"),
+            json={
+                "key": "language",
+                "value": "Chinese",
+                "scope": "user",
+                "approved": True,
+            },
+        )
+        fact_id = created.json()["id"]
+        headers = self._auth("user-1-token")
+
+        negative = self.client.patch(
+            f"/api/memories/{fact_id}",
+            headers=headers,
+            json={"expected_version": -1, "value": "English", "approved": True},
+        )
+        blank = self.client.patch(
+            f"/api/memories/{fact_id}",
+            headers=headers,
+            json={"expected_version": 0, "value": "  ", "approved": True},
+        )
+        invalid_delete = self.client.delete(
+            f"/api/memories/{fact_id}?expected_version=-1",
+            headers=headers,
+        )
+
+        self.assertEqual(422, negative.status_code)
+        self.assertEqual(422, blank.status_code)
+        self.assertEqual(422, invalid_delete.status_code)
+        self.assertEqual(
+            0,
+            self.client.get(
+                f"/api/memories/{fact_id}",
+                headers=headers,
+            ).json()["version"],
+        )
+
     def test_session_owner_cannot_be_replaced_by_another_token(self) -> None:
         session = self.client.post(
             "/api/sessions", headers=self._auth("user-1-token")
@@ -359,6 +569,36 @@ class ApiTest(unittest.TestCase):
             value="FastAPI",
             scope=MemoryScope.USER,
         )
+        async_memory.facts.return_value = (
+            MemoryFact(
+                id="fact-async",
+                owner_id="memory-owner",
+                key="framework",
+                value="FastAPI",
+                scope=MemoryScope.USER,
+            ),
+        )
+        async_memory.correct_fact.return_value = MemoryFact(
+            id="fact-async",
+            owner_id="memory-owner",
+            key="framework",
+            value="Starlette",
+            scope=MemoryScope.USER,
+            version=1,
+        )
+        async_memory.fact_audit.return_value = (
+            MemoryFactAuditRecord(
+                fact_id="fact-async",
+                owner_id="memory-owner",
+                version=0,
+                action=MemoryFactAuditAction.CREATED,
+                value_digest="a" * 64,
+            ),
+        )
+        async_memory.delete_fact.return_value = DeleteMemoryFactResult(
+            fact_id="fact-async",
+            version=2,
+        )
         async_memory.forget.return_value = True
         app = create_app(
             container=replace(container, async_memory_store=async_memory)
@@ -375,16 +615,54 @@ class ApiTest(unittest.TestCase):
                 "approved": True,
             },
         )
-        deleted = client.delete(
+        listed = client.get(
+            "/api/memories",
+            headers=self._auth("memory-token"),
+        )
+        corrected = client.patch(
             "/api/memories/fact-async",
+            headers=self._auth("memory-token"),
+            json={
+                "expected_version": 0,
+                "value": "Starlette",
+                "approved": True,
+                "owner_id": "untrusted-owner",
+            },
+        )
+        audit = client.get(
+            "/api/memories/fact-async/audit",
+            headers=self._auth("memory-token"),
+        )
+        versioned_deleted = client.delete(
+            "/api/memories/fact-async?expected_version=1",
+            headers=self._auth("memory-token"),
+        )
+        compatibility_deleted = client.delete(
+            "/api/memories/legacy-fact",
             headers=self._auth("memory-token"),
         )
 
         self.assertEqual(201, created.status_code)
-        self.assertEqual(204, deleted.status_code)
+        self.assertEqual(200, listed.status_code)
+        self.assertEqual(200, corrected.status_code)
+        self.assertEqual(200, audit.status_code)
+        self.assertEqual(204, versioned_deleted.status_code)
+        self.assertEqual(204, compatibility_deleted.status_code)
         async_memory.remember.assert_awaited_once()
-        async_memory.forget.assert_awaited_once_with(
+        async_memory.facts.assert_awaited_once_with("memory-owner")
+        correct_command = async_memory.correct_fact.await_args.args[0]
+        self.assertEqual("memory-owner", correct_command.owner_id)
+        self.assertEqual(0, correct_command.expected_version)
+        self.assertNotIn("memory-owner", repr(correct_command))
+        async_memory.fact_audit.assert_awaited_once_with(
             "fact-async",
+            owner_id="memory-owner",
+        )
+        delete_command = async_memory.delete_fact.await_args.args[0]
+        self.assertEqual("memory-owner", delete_command.owner_id)
+        self.assertEqual(1, delete_command.expected_version)
+        async_memory.forget.assert_awaited_once_with(
+            "legacy-fact",
             owner_id="memory-owner",
         )
 
