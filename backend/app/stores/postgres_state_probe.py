@@ -9,7 +9,7 @@ import sys
 from datetime import timedelta
 
 from backend.app.domain import Message
-from backend.app.memory import MemoryScope
+from backend.app.memory import MemoryScope, PublishTurn
 from backend.app.stores.postgres import PostgresPersistence
 from backend.app.tools import ApprovalResponse, tool_arguments_digest
 
@@ -20,6 +20,12 @@ _CALL_ID = "m11-state-process-call"
 _TOOL_NAME = "publish_report"
 _SESSION_ID = "m11-state-process-session"
 _ARGUMENTS = {"document_id": "fixture-document", "publish": True}
+_TURN = PublishTurn(
+    run_id=_RUN_ID,
+    session_id=_SESSION_ID,
+    user_message=Message(role="user", content="private fixture message"),
+    assistant_message=Message(role="assistant", content="private fixture answer"),
+)
 
 
 async def _run_probe(
@@ -41,10 +47,7 @@ async def _run_probe(
                 arguments=_ARGUMENTS,
                 expires_in=timedelta(hours=1),
             )
-            persistence.memory_store.append_message(
-                _SESSION_ID,
-                Message(role="user", content="private fixture message"),
-            )
+            turn = persistence.memory_store.publish_turn(_TURN)
             fact = persistence.memory_store.remember(
                 owner_id=_OWNER_ID,
                 key="preferred_language",
@@ -57,6 +60,7 @@ async def _run_probe(
                 "process_id": os.getpid(),
                 "approval_id": request.id,
                 "fact_id": fact.id,
+                "turn_created": turn.created,
             }
         else:
             if approval_id is None or fact_id is None:
@@ -88,9 +92,11 @@ async def _run_probe(
                 arguments=_ARGUMENTS,
             )
             messages = persistence.memory_store.messages(_SESSION_ID)
+            turn = persistence.memory_store.publish_turn(_TURN)
             facts = persistence.memory_store.facts(_OWNER_ID)
             if messages != (
                 Message(role="user", content="private fixture message"),
+                Message(role="assistant", content="private fixture answer"),
             ):
                 raise RuntimeError("state_probe_messages_invalid")
             if (
@@ -108,6 +114,7 @@ async def _run_probe(
                 "approval_consumed": first.approved,
                 "replay_reason": replay.reason,
                 "messages_recovered": len(messages),
+                "turn_created": turn.created,
                 "facts_recovered": len(facts),
                 "fact_deleted": persistence.memory_store.forget(
                     fact_id,

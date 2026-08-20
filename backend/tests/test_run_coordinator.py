@@ -12,6 +12,11 @@ from backend.app.agent import (
 )
 from backend.app.domain import Message
 from backend.app.domain.run import RunFailure, RunRecord, RunStatus, StoredRunEvent
+from backend.app.memory import (
+    MemoryTurnConflictError,
+    PublishTurn,
+    PublishTurnResult,
+)
 from backend.app.services.run_coordinator import (
     EventNotifier,
     PersistentEventEmitter,
@@ -182,6 +187,7 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_result, replay)
         self.assertEqual(1, runtime.calls)
         self.assertEqual(["user", "assistant"], _roles(memory.persisted))
+        self.assertEqual(2, len(memory.attempted_turns))
 
     async def test_approval_resume_publishes_original_turn_once(self) -> None:
         run = await self._create_run()
@@ -233,9 +239,11 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.input_text, memory.persisted[0].content)
         self.assertEqual("approved", memory.persisted[1].content)
 
-    async def test_memory_failure_keeps_completion_and_is_not_retried(self) -> None:
+    async def test_memory_failure_keeps_completion_and_replay_repairs_turn(
+        self,
+    ) -> None:
         run = await self._create_run()
-        memory = RecordingAsyncMemoryStore(fail_on_attempt=2)
+        memory = RecordingAsyncMemoryStore(fail_on_attempt=1)
         coordinator = self._coordinator(
             StaticRuntime(
                 RuntimeResult(status=RunStatus.COMPLETED, answer="private answer")
@@ -255,8 +263,8 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(RunStatus.COMPLETED, completed.status)
         self.assertEqual(completed, replay)
-        self.assertEqual(["user", "assistant"], _roles(memory.attempted))
-        self.assertEqual(["user"], _roles(memory.persisted))
+        self.assertEqual(2, len(memory.attempted_turns))
+        self.assertEqual(["user", "assistant"], _roles(memory.persisted))
         self.assertEqual(1, len(logs.output))
         rendered_logs = " ".join(logs.output)
         self.assertNotIn(run.input_text, rendered_logs)
@@ -1274,18 +1282,28 @@ class RecordingAsyncMemoryStore:
     ) -> None:
         self.order = order
         self.fail_on_attempt = fail_on_attempt
+        self.attempted_turns: list[PublishTurn] = []
         self.attempted: list[Message] = []
         self.persisted: list[Message] = []
+        self._published: dict[str, PublishTurn] = {}
 
-    async def append_message(self, session_id: str, message: Message) -> None:
-        if session_id != "session-1":
+    async def publish_turn(self, command: PublishTurn) -> PublishTurnResult:
+        if command.session_id != "session-1":
             raise AssertionError("message used an untrusted session")
-        self.attempted.append(message)
-        if self.order is not None:
-            self.order.append(f"memory:{message.role}")
-        if len(self.attempted) == self.fail_on_attempt:
+        self.attempted_turns.append(command)
+        self.attempted.extend((command.user_message, command.assistant_message))
+        if len(self.attempted_turns) == self.fail_on_attempt:
             raise StoreUnavailableError()
-        self.persisted.append(message)
+        existing = self._published.get(command.run_id)
+        if existing is not None:
+            if existing != command:
+                raise MemoryTurnConflictError()
+            return PublishTurnResult(created=False)
+        if self.order is not None:
+            self.order.extend(("memory:user", "memory:assistant"))
+        self._published[command.run_id] = command
+        self.persisted.extend((command.user_message, command.assistant_message))
+        return PublishTurnResult(created=True)
 
 
 class BlockingAsyncMemoryStore(RecordingAsyncMemoryStore):
@@ -1294,11 +1312,10 @@ class BlockingAsyncMemoryStore(RecordingAsyncMemoryStore):
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def append_message(self, session_id: str, message: Message) -> None:
-        if not self.attempted:
-            self.started.set()
-            await self.release.wait()
-        await super().append_message(session_id, message)
+    async def publish_turn(self, command: PublishTurn) -> PublishTurnResult:
+        self.started.set()
+        await self.release.wait()
+        return await super().publish_turn(command)
 
 
 class FailingNotifier:

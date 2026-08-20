@@ -26,7 +26,7 @@ from backend.app.domain.run import (
     ToolExecution,
     ToolExecutionStatus,
 )
-from backend.app.memory import MemoryScope
+from backend.app.memory import MemoryScope, PublishTurn
 from backend.app.postgres_execution import PostgresExecutionComposition
 from backend.app.services.run_recovery import (
     RunRecoveryService,
@@ -307,8 +307,16 @@ class PostgresAsyncApprovalMemoryTest(unittest.IsolatedAsyncioTestCase):
             tool_name=request.tool_name,
             arguments=arguments,
         )
-        message = Message(role="user", content="async fixture message")
-        await memory.append_message("async-facade-session", message)
+        turn = PublishTurn(
+            run_id="async-facade-run",
+            session_id="async-facade-session",
+            user_message=Message(role="user", content="async fixture message"),
+            assistant_message=Message(
+                role="assistant",
+                content="async fixture answer",
+            ),
+        )
+        publication = await memory.publish_turn(turn)
         fact = await memory.remember(
             owner_id=request.principal_id,
             key="language",
@@ -320,8 +328,9 @@ class PostgresAsyncApprovalMemoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(arguments, approved_arguments)
         self.assertTrue(first.approved)
         self.assertFalse(second.approved)
+        self.assertTrue(publication.created)
         self.assertEqual(
-            (message,),
+            (turn.user_message, turn.assistant_message),
             await memory.messages("async-facade-session"),
         )
         self.assertEqual((fact,), await memory.facts(request.principal_id))
@@ -642,10 +651,10 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         first = await apply_postgres_migrations(self.persistence.pool)
         second = await apply_postgres_migrations(self.persistence.pool)
 
-        self.assertEqual((1, 2, 3, 4), first)
+        self.assertEqual((1, 2, 3, 4, 5), first)
         self.assertEqual((), second)
         self.assertEqual(
-            [1, 2, 3, 4],
+            [1, 2, 3, 4, 5],
             await _applied_versions(self.persistence),
         )
 
@@ -698,7 +707,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         await apply_postgres_migrations(self.persistence.pool)
         migrations = load_sql_migrations()
         broken = SqlMigration.from_sql(
-            version=5,
+            version=len(migrations) + 1,
             name="broken_transaction",
             sql="""
             CREATE TABLE migration_should_rollback (id integer PRIMARY KEY);
@@ -714,7 +723,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("migration_apply_failed", raised.exception.code)
         self.assertEqual(
-            [1, 2, 3, 4],
+            [1, 2, 3, 4, 5],
             await _applied_versions(self.persistence),
         )
         self.assertIsNone(
@@ -780,10 +789,17 @@ class PostgresApprovalMemoryProcessTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotEqual(first["process_id"], second["process_id"])
         self.assertEqual(
-            {"phase", "process_id", "approval_id", "fact_id"},
+            {
+                "phase",
+                "process_id",
+                "approval_id",
+                "fact_id",
+                "turn_created",
+            },
             set(first),
         )
         self.assertEqual("write", first["phase"])
+        self.assertTrue(first["turn_created"])
         self.assertEqual(
             {
                 "phase": "resume",
@@ -791,11 +807,50 @@ class PostgresApprovalMemoryProcessTest(unittest.IsolatedAsyncioTestCase):
                 "arguments_recovered": True,
                 "approval_consumed": True,
                 "replay_reason": "approval_already_consumed",
-                "messages_recovered": 1,
+                "messages_recovered": 2,
+                "turn_created": False,
                 "facts_recovered": 1,
                 "fact_deleted": True,
             },
             second,
+        )
+
+
+class PostgresMemoryTurnReplayProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await persistence.setup()
+            await _reset_app_data(persistence)
+            await _reset_approval_memory_data(persistence)
+        finally:
+            await persistence.close()
+
+    async def test_terminal_run_replay_repairs_missing_turn_after_restart(
+        self,
+    ) -> None:
+        prepared = await _run_turn_replay_probe("prepare")
+        replayed = await _run_turn_replay_probe("replay")
+
+        self.assertNotEqual(prepared["process_id"], replayed["process_id"])
+        self.assertEqual(
+            {
+                "phase": "prepare",
+                "process_id": prepared["process_id"],
+                "run_status": "completed",
+                "messages": 0,
+            },
+            prepared,
+        )
+        self.assertEqual(
+            {
+                "phase": "replay",
+                "process_id": replayed["process_id"],
+                "run_status": "completed",
+                "messages": 2,
+                "runtime_calls": 0,
+            },
+            replayed,
         )
 
 
@@ -851,6 +906,71 @@ class PostgresApprovalTransactionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(decision.approved)
         self.assertEqual("exact_call_approval_missing", decision.reason)
+
+
+class PostgresMemoryTurnTransactionTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.persistence = await PostgresPersistence.open(
+            POSTGRES_DSN,
+            clock=lambda: STORE_NOW,
+        )
+        await self.persistence.setup()
+        await _reset_approval_memory_data(self.persistence)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_concurrent_same_turn_has_one_create_and_one_pair(self) -> None:
+        command = _published_turn("memory-turn-concurrent")
+
+        first, second = await asyncio.gather(
+            asyncio.to_thread(self.persistence.memory_store.publish_turn, command),
+            asyncio.to_thread(self.persistence.memory_store.publish_turn, command),
+        )
+
+        self.assertEqual([False, True], sorted((first.created, second.created)))
+        self.assertEqual(
+            (command.user_message, command.assistant_message),
+            self.persistence.memory_store.messages(command.session_id),
+        )
+        self.assertEqual(
+            1,
+            await _conversation_turn_publication_count(
+                self.persistence,
+                command.run_id,
+            ),
+        )
+
+    async def test_second_message_failure_rolls_back_pair_and_ledger(self) -> None:
+        command = _published_turn(
+            "memory-turn-rollback",
+            session_id="memory-turn-fault-session",
+        )
+        await _install_memory_turn_failure_trigger(self.persistence)
+        try:
+            with self.assertRaises(StoreUnavailableError):
+                self.persistence.memory_store.publish_turn(command)
+        finally:
+            await _remove_memory_turn_failure_trigger(self.persistence)
+
+        self.assertEqual(
+            (),
+            self.persistence.memory_store.messages(command.session_id),
+        )
+        self.assertEqual(
+            0,
+            await _conversation_turn_publication_count(
+                self.persistence,
+                command.run_id,
+            ),
+        )
+
+        retried = self.persistence.memory_store.publish_turn(command)
+        self.assertTrue(retried.created)
+        self.assertEqual(
+            (command.user_message, command.assistant_message),
+            self.persistence.memory_store.messages(command.session_id),
+        )
 
 
 class PostgresToolExecutionProcessTest(unittest.IsolatedAsyncioTestCase):
@@ -1513,6 +1633,7 @@ async def _reset_approval_memory_data(
             TRUNCATE
                 tool_approval_grants,
                 tool_approval_requests,
+                conversation_turn_publications,
                 conversation_messages,
                 memory_message_sequences,
                 conversation_memory_facts
@@ -1528,6 +1649,7 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
             DROP TABLE IF EXISTS agent_run_leases CASCADE;
             DROP TABLE IF EXISTS tool_executions CASCADE;
             DROP TABLE IF EXISTS conversation_memory_facts CASCADE;
+            DROP TABLE IF EXISTS conversation_turn_publications CASCADE;
             DROP TABLE IF EXISTS conversation_messages CASCADE;
             DROP TABLE IF EXISTS memory_message_sequences CASCADE;
             DROP TABLE IF EXISTS tool_approval_grants CASCADE;
@@ -1665,6 +1787,48 @@ async def _remove_approval_grant_failure_trigger(
         )
 
 
+async def _install_memory_turn_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            CREATE OR REPLACE FUNCTION m11_reject_fault_memory_turn()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.session_id = 'memory-turn-fault-session'
+                   AND NEW.role = 'assistant' THEN
+                    RAISE EXCEPTION 'injected assistant message failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+
+            CREATE TRIGGER m11_reject_fault_memory_turn_trigger
+            BEFORE INSERT ON conversation_messages
+            FOR EACH ROW
+            EXECUTE FUNCTION m11_reject_fault_memory_turn();
+            """,
+            prepare=False,
+        )
+
+
+async def _remove_memory_turn_failure_trigger(
+    persistence: PostgresPersistence,
+) -> None:
+    async with persistence.pool.connection() as connection:
+        await connection.execute(
+            """
+            DROP TRIGGER IF EXISTS m11_reject_fault_memory_turn_trigger
+                ON conversation_messages;
+            DROP FUNCTION IF EXISTS m11_reject_fault_memory_turn();
+            """,
+            prepare=False,
+        )
+
+
 async def _install_tool_settlement_failure_trigger(
     persistence: PostgresPersistence,
 ) -> None:
@@ -1728,6 +1892,38 @@ async def _relation_name(
         )
         row = await result.fetchone()
         return row["name"] if row is not None else None
+
+
+async def _conversation_turn_publication_count(
+    persistence: PostgresPersistence,
+    run_id: str,
+) -> int:
+    async with persistence.pool.connection() as connection:
+        result = await connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM conversation_turn_publications
+            WHERE run_id = %s
+            """,
+            (run_id,),
+        )
+        row = await result.fetchone()
+    if row is None:
+        raise AssertionError("turn publication count query returned no row")
+    return row["count"]
+
+
+def _published_turn(
+    run_id: str,
+    *,
+    session_id: str = "memory-turn-session",
+) -> PublishTurn:
+    return PublishTurn(
+        run_id=run_id,
+        session_id=session_id,
+        user_message=Message(role="user", content="private turn input"),
+        assistant_message=Message(role="assistant", content="private turn answer"),
+    )
 
 
 async def _run_checkpoint_probe(phase: str) -> dict[str, object]:
@@ -1823,6 +2019,52 @@ def _run_state_probe_sync(
             + process.stderr.decode("utf-8", errors="replace")
         )
     return json.loads(process.stdout.decode("utf-8"))
+
+
+async def _run_turn_replay_probe(phase: str) -> dict[str, object]:
+    return await asyncio.to_thread(_run_turn_replay_probe_sync, phase)
+
+
+def _run_turn_replay_probe_sync(phase: str) -> dict[str, object]:
+    environment = os.environ.copy()
+    environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "utf8",
+            "-B",
+            "-m",
+            "backend.app.stores.postgres_turn_replay_probe",
+            "--phase",
+            phase,
+        ],
+        cwd=os.getcwd(),
+        env=environment,
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise AssertionError(
+            f"turn replay probe failed with code {process.returncode}: "
+            f"{process.stderr.decode('utf-8', errors='replace')}"
+        )
+    if process.stderr:
+        raise AssertionError(
+            "turn replay probe wrote stderr: "
+            + process.stderr.decode("utf-8", errors="replace")
+        )
+    stdout = process.stdout.decode("utf-8")
+    for private_value in (
+        "private replay fixture input",
+        "private replay fixture answer",
+    ):
+        if private_value in stdout:
+            raise AssertionError("turn replay probe exposed private data")
+    lines = [line for line in stdout.splitlines() if line]
+    if len(lines) != 1:
+        raise AssertionError("turn replay probe output is not bounded JSON")
+    return json.loads(lines[0])
 
 
 async def _run_tool_execution_probe(

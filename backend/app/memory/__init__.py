@@ -1,3 +1,19 @@
-from .store import ConversationMemory, MemoryFact, MemoryScope, MemoryStore
+from .store import (
+    ConversationMemory,
+    MemoryFact,
+    MemoryScope,
+    MemoryStore,
+    MemoryTurnConflictError,
+    PublishTurn,
+    PublishTurnResult,
+)
 
-__all__ = ["ConversationMemory", "MemoryFact", "MemoryScope", "MemoryStore"]
+__all__ = [
+    "ConversationMemory",
+    "MemoryFact",
+    "MemoryScope",
+    "MemoryStore",
+    "MemoryTurnConflictError",
+    "PublishTurn",
+    "PublishTurnResult",
+]

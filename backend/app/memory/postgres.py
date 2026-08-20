@@ -10,7 +10,13 @@ from psycopg.rows import DictRow
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from backend.app.domain import Message
-from backend.app.memory.store import MemoryFact, MemoryScope
+from backend.app.memory.store import (
+    MemoryFact,
+    MemoryScope,
+    MemoryTurnConflictError,
+    PublishTurn,
+    PublishTurnResult,
+)
 from backend.app.stores.base import StoreUnavailableError
 
 
@@ -83,6 +89,109 @@ class PostgresMemoryStore:
                         (session_id, sequence - self._message_limit),
                     )
         except StoreUnavailableError:
+            raise
+        except (PsycopgError, PoolTimeout):
+            raise StoreUnavailableError() from None
+
+    def publish_turn(self, command: PublishTurn) -> PublishTurnResult:
+        if not isinstance(command, PublishTurn):
+            raise ValueError("publish turn command is invalid")
+        try:
+            with self._pool.connection() as connection:
+                with connection.transaction():
+                    publication = connection.execute(
+                        """
+                        INSERT INTO conversation_turn_publications (
+                            run_id,
+                            session_id,
+                            turn_digest,
+                            created_at
+                        ) VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (run_id) DO NOTHING
+                        RETURNING run_id
+                        """,
+                        (
+                            command.run_id,
+                            command.session_id,
+                            command.digest,
+                            _aware_utc(self._clock()),
+                        ),
+                    ).fetchone()
+                    if publication is None:
+                        existing = connection.execute(
+                            """
+                            SELECT session_id, turn_digest
+                            FROM conversation_turn_publications
+                            WHERE run_id = %s
+                            """,
+                            (command.run_id,),
+                        ).fetchone()
+                        if existing is None:
+                            raise StoreUnavailableError()
+                        if (
+                            existing["session_id"] != command.session_id
+                            or existing["turn_digest"].strip() != command.digest
+                        ):
+                            raise MemoryTurnConflictError()
+                        return PublishTurnResult(created=False)
+
+                    row = connection.execute(
+                        """
+                        INSERT INTO memory_message_sequences (
+                            session_id,
+                            next_sequence
+                        ) VALUES (%s, 3)
+                        ON CONFLICT (session_id) DO UPDATE
+                        SET next_sequence =
+                            memory_message_sequences.next_sequence + 2
+                        RETURNING next_sequence - 2 AS first_sequence
+                        """,
+                        (command.session_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise StoreUnavailableError()
+                    first_sequence = row["first_sequence"]
+                    connection.execute(
+                        """
+                        INSERT INTO conversation_messages (
+                            session_id,
+                            sequence,
+                            role,
+                            content,
+                            name,
+                            tool_call_id
+                        ) VALUES
+                            (%s, %s, %s, %s, %s, %s),
+                            (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            command.session_id,
+                            first_sequence,
+                            command.user_message.role,
+                            command.user_message.content,
+                            command.user_message.name,
+                            command.user_message.tool_call_id,
+                            command.session_id,
+                            first_sequence + 1,
+                            command.assistant_message.role,
+                            command.assistant_message.content,
+                            command.assistant_message.name,
+                            command.assistant_message.tool_call_id,
+                        ),
+                    )
+                    connection.execute(
+                        """
+                        DELETE FROM conversation_messages
+                        WHERE session_id = %s
+                          AND sequence <= %s
+                        """,
+                        (
+                            command.session_id,
+                            first_sequence + 1 - self._message_limit,
+                        ),
+                    )
+                    return PublishTurnResult(created=True)
+        except (MemoryTurnConflictError, StoreUnavailableError):
             raise
         except (PsycopgError, PoolTimeout):
             raise StoreUnavailableError() from None

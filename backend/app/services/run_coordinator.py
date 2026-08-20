@@ -24,6 +24,7 @@ from backend.app.agent import (
     RuntimeResult,
 )
 from backend.app.domain import Message
+from backend.app.memory import MemoryTurnConflictError, PublishTurn
 from backend.app.domain.run import (
     RunFailure,
     RunRecord,
@@ -577,6 +578,7 @@ class RunCoordinator:
         if current is None:
             raise RunNotFoundError()
         if current.status.is_terminal:
+            await self._publish_completed_turn(current)
             return current
         if lease_session.enabled and current.status in {
             RunStatus.RUNNING,
@@ -692,6 +694,7 @@ class RunCoordinator:
         if current is None:
             raise RunNotFoundError()
         if current.status.is_terminal:
+            await self._publish_completed_turn(current)
             return current
         if current.status is RunStatus.RUNNING:
             return await self._wait_for_terminal(
@@ -1211,13 +1214,19 @@ class RunCoordinator:
             answer = record.answer
             if answer is None:
                 raise ValueError("completed run is missing its answer")
-            await self._memory_store.append_message(
-                record.session_id,
-                Message(role="user", content=record.input_text),
-            )
-            await self._memory_store.append_message(
-                record.session_id,
-                Message(role="assistant", content=answer),
+            await self._memory_store.publish_turn(
+                PublishTurn(
+                    run_id=record.id,
+                    session_id=record.session_id,
+                    user_message=Message(
+                        role="user",
+                        content=record.input_text,
+                    ),
+                    assistant_message=Message(
+                        role="assistant",
+                        content=answer,
+                    ),
+                )
             )
         except asyncio.CancelledError:
             LOGGER.warning(
@@ -1227,7 +1236,7 @@ class RunCoordinator:
                     "error_code": "memory_write_cancelled",
                 },
             )
-        except StoreError as exc:
+        except (MemoryTurnConflictError, StoreError) as exc:
             LOGGER.warning(
                 "run memory publication failed",
                 extra={

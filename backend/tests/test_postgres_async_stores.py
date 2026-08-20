@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.app.domain import Message
+from backend.app.memory import PublishTurn, PublishTurnResult
 from backend.app.stores.postgres import PostgresPersistence
 from backend.app.stores.postgres_async import (
     AsyncPostgresApprovalStore,
@@ -23,6 +24,7 @@ class _BlockingMemoryStore:
         self.release = threading.Event()
         self.message_calls = 0
         self.append_calls = 0
+        self.turn_calls = 0
 
     def messages(self, session_id: str) -> tuple[Message, ...]:
         del session_id
@@ -36,6 +38,13 @@ class _BlockingMemoryStore:
         self.append_calls += 1
         self.entered.set()
         self.release.wait()
+
+    def publish_turn(self, command: PublishTurn) -> PublishTurnResult:
+        del command
+        self.turn_calls += 1
+        self.entered.set()
+        self.release.wait()
+        return PublishTurnResult(created=True)
 
 
 class _RecordingApprovalStore:
@@ -154,9 +163,16 @@ class PostgresSyncStoreBridgeTest(unittest.IsolatedAsyncioTestCase):
         bridge = self._bridge(timeout_ms=40)
         facade = AsyncPostgresMemoryStore(memory, bridge)
         task = asyncio.create_task(
-            facade.append_message(
-                "session-1",
-                Message(role="user", content="fixture"),
+            facade.publish_turn(
+                PublishTurn(
+                    run_id="run-1",
+                    session_id="session-1",
+                    user_message=Message(role="user", content="fixture"),
+                    assistant_message=Message(
+                        role="assistant",
+                        content="answer",
+                    ),
+                )
             )
         )
         try:
@@ -165,11 +181,11 @@ class PostgresSyncStoreBridgeTest(unittest.IsolatedAsyncioTestCase):
                 await task
 
             self.assertTrue(raised.exception.result_unknown)
-            self.assertEqual(1, memory.append_calls)
+            self.assertEqual(1, memory.turn_calls)
         finally:
             memory.release.set()
             await bridge.close()
-        self.assertEqual(1, memory.append_calls)
+        self.assertEqual(1, memory.turn_calls)
 
     async def test_caller_cancellation_keeps_running_worker_owned_until_close(
         self,

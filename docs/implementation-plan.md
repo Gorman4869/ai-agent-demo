@@ -757,6 +757,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 8 个风险测试或等价覆盖，并扩展默认内存与 PostgreSQL composition 纵切；相关共享回归 245 项、M1 隔离 10 项与完整离线门通过。完整门后端 586 项通过、1 项既有 Windows symlink 条件跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置均通过。
 - 当前两次 `append()` 只证明唯一写入者与 at-most-once 发布，不是跨 Run/Memory 的原子事务或 exactly-once：终态提交后崩溃可能缺消息，第二次 append 失败可能只留下 user。M11-T5 保持 `in_progress`；下一纵切先提供 Run-bound atomic/idempotent turn Store command 与真实 PostgreSQL 重启/replay 证据，再进入纠正/删除、版本冲突和审计。
 
+#### M11-T5 第五个真实纵切边界
+
+- `ADR-0027` 固定冻结、repr-safe 的 `PublishTurn` 与 `PublishTurnResult`；命令以 Run ID 作为幂等键，以版本化 SHA-256 digest 绑定隐藏 session 和 plain user/assistant。相同 binding replay 返回 `created=false`，同 Run 改 session/内容返回稳定 `memory_turn_conflict`。
+- 内存参考实现用消息锁原子更新窗口与只含 session/digest 的账本；`0005_conversation_turn_publications.sql` 和 PostgreSQL Memory adapter 在一个 sync-pool 事务内写账本、分配两个 sequence、插入两条消息并裁剪。assistant 故障触发器证明消息、sequence 与账本一起回滚，并发同命令只有一个赢家。
+- `AsyncLocalMemoryStore`/`AsyncPostgresMemoryStore` 暴露同一命令。Coordinator 新完成路径保持 terminal→turn→notify；execute/resume 读到既有 completed Run 时不调用 Runtime，只重放 turn，因此可修复 terminal 后崩溃缺口且不会重复消息。
+- 两个 PID 不同的真实 PostgreSQL 探针证明：进程 A 只提交 completed Run、消息为 0；进程 B 以新 composition replay 两次后消息为 2、Runtime calls 为 0。完整 PostgreSQL 99 项、M1 隔离 10 项和完整离线门通过；全量后端 591 项通过、1 项既有 Windows symlink 条件跳过，其他门均通过。
+- Run terminal 与 Memory turn 仍跨 async/sync pool，不是共同事务；没有后续 replay 时不会后台自动补写，digest 账本也尚无生产归档/GC。M11-T5 保持 `in_progress`；下一纵切进入 approved long-term fact 的 version CAS correction/delete 与 append-only audit，不提前进入 M11-T6。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。

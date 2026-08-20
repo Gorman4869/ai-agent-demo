@@ -10,7 +10,13 @@ from functools import partial
 from typing import Any, ParamSpec, TypeVar
 
 from backend.app.domain import Message
-from backend.app.memory import MemoryFact, MemoryScope, MemoryStore
+from backend.app.memory import (
+    MemoryFact,
+    MemoryScope,
+    MemoryStore,
+    PublishTurn,
+    PublishTurnResult,
+)
 from backend.app.stores.base import StoreError
 from backend.app.tools import (
     ApprovalDecision,
@@ -289,6 +295,9 @@ class AsyncPostgresMemoryStore:
             session_id,
             message,
         )
+
+    async def publish_turn(self, command: PublishTurn) -> PublishTurnResult:
+        return await self._bridge.run(self._store.publish_turn, command)
 
     async def messages(self, session_id: str) -> tuple[Message, ...]:
         return await self._bridge.run(self._store.messages, session_id)

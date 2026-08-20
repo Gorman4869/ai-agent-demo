@@ -5,7 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from backend.app.domain import Message
-from backend.app.memory import MemoryFact, MemoryScope, MemoryStore
+from backend.app.memory import (
+    MemoryFact,
+    MemoryScope,
+    MemoryStore,
+    PublishTurn,
+    PublishTurnResult,
+)
 from backend.app.tools import (
     ApprovalDecision,
     ApprovalResponse,
@@ -78,6 +84,8 @@ class AsyncApprovalStore(Protocol):
 
 class AsyncMemoryStore(Protocol):
     async def append_message(self, session_id: str, message: Message) -> None: ...
+
+    async def publish_turn(self, command: PublishTurn) -> PublishTurnResult: ...
 
     async def messages(self, session_id: str) -> tuple[Message, ...]: ...
 
@@ -206,6 +214,9 @@ class AsyncLocalMemoryStore:
 
     async def append_message(self, session_id: str, message: Message) -> None:
         self._store.append_message(session_id, message)
+
+    async def publish_turn(self, command: PublishTurn) -> PublishTurnResult:
+        return self._store.publish_turn(command)
 
     async def messages(self, session_id: str) -> tuple[Message, ...]:
         return self._store.messages(session_id)

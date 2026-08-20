@@ -3126,3 +3126,75 @@
 
 - `V-20260820-001` 的关键风险覆盖、共享回归 245 项、最终关键 76 项、M1 隔离 10 项与完整离线门证据，和当前实现、计划、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第四纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加 atomic/exactly-once、真实 PostgreSQL/重启、纠正/删除、版本审计或在线 Provider 证据。
+
+## V-20260820-003：M11-T5 原子回合发布第五纵切
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 10:08，Asia/Shanghai
+- 验证目标：HEAD `8fe9ef8` 上的 M11-T5 第五纵切工作区；第四纵切实现提交 `8fe9ef8`
+- 任务等级：A 类 persistence/migration/concurrency 边界；时间盒 2–4 小时
+- 模式：默认离线 E3 加本地真实 PostgreSQL E4；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用现有 Run/Event terminal、Memory Store/async façade、PostgreSQL sync pool 与 application composition；没有新增、安装、升级或删除依赖，没有修改 HTTP、前端或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -5 --oneline` / `node --version` | 0 / 0 / 0 | 初始工作区干净；HEAD `8fe9ef8` 为第四纵切实现提交；Node `v22.16.0` |
+| 按强制顺序读取 continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026、最新 handoff、`V-20260820-001/002` 与后端规约 | 0 | 当前动作确认为 Run-bound atomic/idempotent turn command 与真实 PostgreSQL restart/replay；不进入纠正/删除或 M11-T6 |
+| handoff RunCoordinator/Container/PostgreSQL composition 恢复集 | 0 | 76 项通过；只有既有 Starlette/httpx 警告 |
+| 修改前连续性 | 0 | 52 个稳定任务、109 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮新 Store/Coordinator/bridge 离线集合 | 0 | 54 项通过；覆盖命令校验、幂等 replay、changed-binding conflict、并发唯一赢家、失败后 terminal replay 修复和单命令 bridge timeout |
+| `python -m compileall` 修改模块 | 1 | 沙箱拒绝写既有 `__pycache__`；不是语法或实现失败。同一模块随后由 unittest 导入并执行，未把该环境失败记录成通过 |
+| `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 0 | 经授权启动仓库本地 integration PostgreSQL；使用缓存镜像、不下载，容器 healthy，仅绑定 `127.0.0.1:55433` 且数据在 tmpfs |
+| 首轮真实 PostgreSQL 定向集合 | 1 | 18 项中 17 项通过；旧损坏 migration fixture 硬编码 version 5，与新真实 `0005` 冲突。改为依据实际 migration 数量生成下一版本后重跑 |
+| 最终离线关键集合 | 0 | 95 项通过；聚焦复审后内存账本只保留 session/digest，并以锁保护消息窗口与账本，避免保存完整命令内容和线程竞态 |
+| 最终真实 PostgreSQL 定向集合 | 0 | 19 项通过；共享 Memory Store 合同、async façade、并发同 Run、assistant 插入故障全事务回滚与 retry 均通过 |
+| `python -m unittest backend.tests.postgres_store_integration.PostgresMemoryTurnReplayProcessTest -v` | 0 | 1 项通过；进程 A 只提交 completed Run 且消息为 0，进程 B 新 composition 重放两次后消息为 2、Runtime calls 为 0 |
+| `python -m unittest backend.tests.postgres_store_integration -v` | 0 | 完整真实 PostgreSQL integration 99 项通过；预期的不可用数据库用例只输出有界 pool timeout 日志 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1` | 0 | 经授权在沙箱外完整执行；后端 591 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue 生产构建、MCP TypeScript 构建和 Compose 配置全部通过 |
+| M1 `python -S` 隔离 / `git diff --check` | 0 / 0 | M1 10 项通过；无 whitespace 错误，只有既有 LF→CRLF 提示 |
+
+### 实现与风险证据
+
+- `PublishTurn`/`PublishTurnResult` 为冻结、repr-safe 的显式 Store command/result；Run ID 是幂等键，版本化 canonical SHA-256 digest 绑定隐藏 session 与 plain user/assistant。同 binding replay 返回 `created=false`，同 Run 改 binding 返回无内容 `memory_turn_conflict`。
+- 内存参考实现以单一消息锁原子更新有界消息窗口和只含 session/digest 的账本。PostgreSQL migration 5 新增 `conversation_turn_publications`，adapter 在一个 sync-pool 事务中插入账本、分配两个连续 sequence、插入两条消息并裁剪窗口。
+- 共享合同在内存和 PostgreSQL 上都覆盖 replay、conflict、并发、窗口与无效输入。真实 trigger 让 assistant 插入失败时，ledger、sequence 和 user message 均不可见；移除 trigger 后同一命令可成功 retry。
+- Coordinator 新完成路径保持 durable terminal→turn→live notify；`execute()`/`resume_approval()` 读到既有 completed Run 时不调用 Runtime，只重放同一 command。跨两个 PID 的真实 probe 证明 terminal-after-crash 缺口可收敛且已发布回合不重复。
+
+### 聚焦复审与未验证范围
+
+- 复审核对 repr/日志脱敏、命令校验、digest 稳定性、进程内线程竞态、PostgreSQL transaction/sequence/window、并发冲突、bridge result-unknown、terminal replay、quiesce 与 migration 版本；内存实现已在复审中收紧为只存 digest 的有界内容账本。
+- Run/Event terminal 使用 async pool，Memory turn 使用 sync pool；两者仍不是同一事务。当前结论是 turn 内部原子幂等加显式 replay 收敛，不是跨 Store 或外部副作用 exactly-once。
+- 若 completed Run 不再收到后续 execute/resume，当前没有后台 scanner 自动补写；publication ledger 没有生产归档/GC，删除它会破坏未来 replay 的幂等约束。
+- 没有实现 approved long-term fact 的纠正/删除、version CAS、append-only audit、在线摘要、真实模型、Provider、Token/usage 或费用；没有配置 remote 或执行 push。本地 trust/tmpfs PostgreSQL 不是生产鉴权、持久卷、备份、TLS、高可用或灾备证据。
+
+### 结论
+
+- M11-T5 第五纵切达到 Run-bound 原子幂等 completed-turn 发布与真实 PostgreSQL 跨进程 replay 修复证据；任务保持 `in_progress`。
+- 下一原子动作只实现 approved long-term fact 的 version CAS correction/delete 与 append-only audit，并先取得 Store/migration/真实 PostgreSQL 证据；不提前进入 M11-T6、HTTP 或前端。
+
+## V-20260820-004：M11-T5 原子回合发布连续性闭环
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 10:13，Asia/Shanghai
+- 验证目标：HEAD `8fe9ef8` 上经 `V-20260820-003` 验证的第五纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性、关键回归和只读容器健康检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、111 个 Markdown 通过；M11-T5 in_progress、`V-20260820-003/004`、ADR-0027、新 handoff、plan、known issue、status、后端规约和恢复入口可解析 |
+| Store/async bridge/RunCoordinator 提交前关键集合 | 0 | 55 项通过；预期故障日志来自既有负向测试，没有失败或 skip |
+| `docker compose -f deploy/compose.integration.yaml ps` | 0 | 沙箱内只读首次因 Docker pipe 权限返回 1；按既有授权在沙箱外重查，integration PostgreSQL 为 healthy，仍只绑定 localhost |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 两个新代码文件与两份新 continuity 文件复核 | 0 | 16 个已跟踪修改与 4 个新文件，共 20 个任务文件；没有构建产物、缓存、诊断临时文件或任务外改动 |
+
+### 结论
+
+- `V-20260820-003` 的最终离线 95 项、真实 PostgreSQL 定向 19 项、跨进程 probe 1 项、完整 PostgreSQL 99 项、全量后端 591 项、M1 隔离 10 项与完整构建门证据，和当前代码、migration、ADR、计划、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第五纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加 Run/Memory 共同事务、后台扫描、ledger GC、纠正/删除、版本审计、在线 Provider 或生产数据库证据。
