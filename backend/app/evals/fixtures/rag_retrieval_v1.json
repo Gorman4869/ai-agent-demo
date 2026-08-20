@@ -1,0 +1,383 @@
+{
+  "schema": "rag-retrieval-dataset-v1",
+  "version": "m11-rag-v1",
+  "evaluation": {
+    "top_k": 3,
+    "thresholds": {
+      "pgvector": {
+        "recall_at_k": 0.9,
+        "mean_reciprocal_rank": 0.8,
+        "grounding_accuracy": 0.9
+      },
+      "sparse": {
+        "recall_at_k": 0.9,
+        "mean_reciprocal_rank": 0.8,
+        "grounding_accuracy": 0.9
+      }
+    }
+  },
+  "documents": [
+    {
+      "id": "agent-loop",
+      "title": "Agent Loop 执行闭环",
+      "source": "course/agent-loop.md",
+      "content": "Agent Loop 由模型决策、工具执行、状态记录与循环控制组成。程序必须校验模型提出的工具参数，并用最大步数阻止无限循环；工具结果返回模型后，模型才能继续决策或给出最终回答。"
+    },
+    {
+      "id": "tool-security",
+      "title": "工具安全边界",
+      "source": "course/tool-security.md",
+      "content": "工具身份、角色和审批都来自服务端可信上下文，不能由模型参数提供。授权检查必须早于参数校验和 handler 执行；高风险或有副作用的工具需要精确、单次审批，拒绝时 handler 不得运行。"
+    },
+    {
+      "id": "mcp-protocol",
+      "title": "MCP Client 生命周期",
+      "source": "course/mcp-protocol.md",
+      "content": "MCP 使用统一协议连接 Agent 客户端与工具或资源服务器。客户端先 initialize，再发现工具并按服务器侧策略映射；STDIO 进程、会话和请求必须由同一生命周期管理，关闭时要等待资源清理。"
+    },
+    {
+      "id": "rag-grounding",
+      "title": "RAG 检索与引用",
+      "source": "course/rag-grounding.md",
+      "content": "RAG 先检索相关证据，再基于证据生成回答。检索结果必须带文档标识、来源和片段引用；外部证据属于不可信数据，不能覆盖系统策略。Recall@K、MRR 与依据正确率用于分析召回和引用质量。"
+    },
+    {
+      "id": "durable-memory",
+      "title": "持久记忆纠错",
+      "source": "course/durable-memory.md",
+      "content": "长期事实只有经过批准才能写入持久记忆。纠正和删除使用 owner 与 expected version 的 CAS；删除形成 tombstone 并清空原值，后续 Context 不再注入。审计只保存动作、版本和摘要。"
+    },
+    {
+      "id": "langgraph-checkpoint",
+      "title": "LangGraph Checkpoint 恢复",
+      "source": "course/langgraph-checkpoint.md",
+      "content": "LangGraph checkpoint 保存最小、版本化的工作流状态。恢复前必须校验 owner、thread 与 schema version；副作用之前先保存安全边界，未知结果不能自动重放，终态 checkpoint 直接返回已有结果。"
+    },
+    {
+      "id": "approval-resume",
+      "title": "审批暂停与恢复",
+      "source": "course/approval-resume.md",
+      "content": "审批请求绑定 Run、主体、工具调用、工具名和参数摘要。Runtime 以 waiting_approval 暂停，服务端只接受 approve 或 reject；批准 grant 只能消费一次，篡改、过期或重复 resume 都不能再次执行工具。"
+    },
+    {
+      "id": "embedding-batching",
+      "title": "Embedding 批处理",
+      "source": "course/embedding-batching.md",
+      "content": "Embedding Model 按固定 batch size 拆分输入并保持结果顺序。metadata 包含 provider、model、revision 和 dimensions；维度漂移、部分返回或非有限值必须失败。缓存键只保存版本化摘要，不保存原文。"
+    },
+    {
+      "id": "pgvector-storage",
+      "title": "pgvector 知识存储",
+      "source": "course/pgvector-storage.md",
+      "content": "pgvector 把文档切片和固定维度向量写入 PostgreSQL。检索使用 cosine distance 与 HNSW vector_cosine_ops 索引；文档 replace 在一个事务内更新所有切片，写入失败必须回滚旧内容。"
+    },
+    {
+      "id": "context-budget",
+      "title": "Context 来源与预算",
+      "source": "course/context-budget.md",
+      "content": "ContextAssembler 组合 system、memory、recent、summary、skill 和 rag 六种来源。来源信任由服务端固定，system 不可静默丢弃；预算只选择完整片段，并用报告解释纳入或丢弃原因。字节启发式不是 Provider Token 或费用。"
+    }
+  ],
+  "cases": [
+    {
+      "id": "agent-loop-01",
+      "query": "Agent Loop 包含哪些执行环节？",
+      "relevant_document_ids": ["agent-loop"],
+      "required_evidence_terms": ["模型决策", "工具执行", "循环控制"]
+    },
+    {
+      "id": "agent-loop-02",
+      "query": "为什么 Agent 要限制最大步数？",
+      "relevant_document_ids": ["agent-loop"],
+      "required_evidence_terms": ["最大步数", "无限循环"]
+    },
+    {
+      "id": "agent-loop-03",
+      "query": "模型调用工具之后怎样继续决策？",
+      "relevant_document_ids": ["agent-loop"],
+      "required_evidence_terms": ["工具结果返回模型", "继续决策"]
+    },
+    {
+      "id": "agent-loop-04",
+      "query": "谁负责校验模型给出的工具参数？",
+      "relevant_document_ids": ["agent-loop"],
+      "required_evidence_terms": ["程序必须校验", "工具参数"]
+    },
+    {
+      "id": "agent-loop-05",
+      "query": "Agent 什么时候给出最终回答？",
+      "relevant_document_ids": ["agent-loop"],
+      "required_evidence_terms": ["模型", "最终回答"]
+    },
+    {
+      "id": "tool-security-01",
+      "query": "工具执行时身份和角色从哪里来？",
+      "relevant_document_ids": ["tool-security"],
+      "required_evidence_terms": ["服务端可信上下文", "不能由模型参数提供"]
+    },
+    {
+      "id": "tool-security-02",
+      "query": "授权检查和参数校验的顺序是什么？",
+      "relevant_document_ids": ["tool-security"],
+      "required_evidence_terms": ["授权检查必须早于参数校验"]
+    },
+    {
+      "id": "tool-security-03",
+      "query": "高风险副作用工具需要什么审批？",
+      "relevant_document_ids": ["tool-security"],
+      "required_evidence_terms": ["高风险", "精确、单次审批"]
+    },
+    {
+      "id": "tool-security-04",
+      "query": "工具请求被拒绝后 handler 能运行吗？",
+      "relevant_document_ids": ["tool-security"],
+      "required_evidence_terms": ["拒绝时 handler 不得运行"]
+    },
+    {
+      "id": "tool-security-05",
+      "query": "模型参数能否声明自己已经审批？",
+      "relevant_document_ids": ["tool-security"],
+      "required_evidence_terms": ["审批", "不能由模型参数提供"]
+    },
+    {
+      "id": "mcp-01",
+      "query": "MCP 连接了哪些参与方？",
+      "relevant_document_ids": ["mcp-protocol"],
+      "required_evidence_terms": ["Agent 客户端", "工具或资源服务器"]
+    },
+    {
+      "id": "mcp-02",
+      "query": "MCP Client 为什么要先 initialize？",
+      "relevant_document_ids": ["mcp-protocol"],
+      "required_evidence_terms": ["先 initialize", "发现工具"]
+    },
+    {
+      "id": "mcp-03",
+      "query": "远端工具发现后如何映射安全策略？",
+      "relevant_document_ids": ["mcp-protocol"],
+      "required_evidence_terms": ["服务器侧策略映射"]
+    },
+    {
+      "id": "mcp-04",
+      "query": "STDIO 会话由谁管理生命周期？",
+      "relevant_document_ids": ["mcp-protocol"],
+      "required_evidence_terms": ["同一生命周期管理"]
+    },
+    {
+      "id": "mcp-05",
+      "query": "关闭 MCP 连接时要处理什么？",
+      "relevant_document_ids": ["mcp-protocol"],
+      "required_evidence_terms": ["等待资源清理"]
+    },
+    {
+      "id": "rag-01",
+      "query": "RAG 回答问题前先做什么？",
+      "relevant_document_ids": ["rag-grounding"],
+      "required_evidence_terms": ["先检索相关证据"]
+    },
+    {
+      "id": "rag-02",
+      "query": "检索结果需要提供哪些引用信息？",
+      "relevant_document_ids": ["rag-grounding"],
+      "required_evidence_terms": ["文档标识", "来源", "片段引用"]
+    },
+    {
+      "id": "rag-03",
+      "query": "外部 RAG 证据能覆盖系统策略吗？",
+      "relevant_document_ids": ["rag-grounding"],
+      "required_evidence_terms": ["不可信数据", "不能覆盖系统策略"]
+    },
+    {
+      "id": "rag-04",
+      "query": "Recall@K 和 MRR 用来分析什么？",
+      "relevant_document_ids": ["rag-grounding"],
+      "required_evidence_terms": ["Recall@K", "MRR", "召回"]
+    },
+    {
+      "id": "rag-05",
+      "query": "怎样衡量回答引用的依据质量？",
+      "relevant_document_ids": ["rag-grounding"],
+      "required_evidence_terms": ["依据正确率", "引用质量"]
+    },
+    {
+      "id": "memory-01",
+      "query": "长期事实写入持久记忆需要什么条件？",
+      "relevant_document_ids": ["durable-memory"],
+      "required_evidence_terms": ["经过批准", "持久记忆"]
+    },
+    {
+      "id": "memory-02",
+      "query": "纠正记忆为什么要提交 expected version？",
+      "relevant_document_ids": ["durable-memory"],
+      "required_evidence_terms": ["expected version", "CAS"]
+    },
+    {
+      "id": "memory-03",
+      "query": "删除长期事实后数据库保留什么状态？",
+      "relevant_document_ids": ["durable-memory"],
+      "required_evidence_terms": ["tombstone", "清空原值"]
+    },
+    {
+      "id": "memory-04",
+      "query": "事实删除后还会进入下一次 Context 吗？",
+      "relevant_document_ids": ["durable-memory"],
+      "required_evidence_terms": ["后续 Context 不再注入"]
+    },
+    {
+      "id": "memory-05",
+      "query": "记忆审计允许保存哪些字段？",
+      "relevant_document_ids": ["durable-memory"],
+      "required_evidence_terms": ["动作、版本和摘要"]
+    },
+    {
+      "id": "checkpoint-01",
+      "query": "LangGraph checkpoint 应保存什么状态？",
+      "relevant_document_ids": ["langgraph-checkpoint"],
+      "required_evidence_terms": ["最小、版本化的工作流状态"]
+    },
+    {
+      "id": "checkpoint-02",
+      "query": "恢复工作流前需要校验哪些绑定？",
+      "relevant_document_ids": ["langgraph-checkpoint"],
+      "required_evidence_terms": ["owner", "thread", "schema version"]
+    },
+    {
+      "id": "checkpoint-03",
+      "query": "为什么要在副作用之前保存 checkpoint？",
+      "relevant_document_ids": ["langgraph-checkpoint"],
+      "required_evidence_terms": ["副作用之前", "安全边界"]
+    },
+    {
+      "id": "checkpoint-04",
+      "query": "副作用结果未知时能自动重放吗？",
+      "relevant_document_ids": ["langgraph-checkpoint"],
+      "required_evidence_terms": ["未知结果不能自动重放"]
+    },
+    {
+      "id": "checkpoint-05",
+      "query": "终态 checkpoint 恢复时如何处理？",
+      "relevant_document_ids": ["langgraph-checkpoint"],
+      "required_evidence_terms": ["直接返回已有结果"]
+    },
+    {
+      "id": "approval-01",
+      "query": "审批请求必须绑定哪些安全信息？",
+      "relevant_document_ids": ["approval-resume"],
+      "required_evidence_terms": ["Run", "主体", "工具调用", "参数摘要"]
+    },
+    {
+      "id": "approval-02",
+      "query": "Runtime 等待审批时进入什么状态？",
+      "relevant_document_ids": ["approval-resume"],
+      "required_evidence_terms": ["waiting_approval"]
+    },
+    {
+      "id": "approval-03",
+      "query": "服务端接受哪些审批决定？",
+      "relevant_document_ids": ["approval-resume"],
+      "required_evidence_terms": ["approve", "reject"]
+    },
+    {
+      "id": "approval-04",
+      "query": "批准 grant 可以消费几次？",
+      "relevant_document_ids": ["approval-resume"],
+      "required_evidence_terms": ["只能消费一次"]
+    },
+    {
+      "id": "approval-05",
+      "query": "重复 resume 会再次执行工具吗？",
+      "relevant_document_ids": ["approval-resume"],
+      "required_evidence_terms": ["重复 resume", "不能再次执行工具"]
+    },
+    {
+      "id": "embedding-01",
+      "query": "Embedding 批处理如何拆分输入？",
+      "relevant_document_ids": ["embedding-batching"],
+      "required_evidence_terms": ["固定 batch size", "保持结果顺序"]
+    },
+    {
+      "id": "embedding-02",
+      "query": "向量 metadata 包含哪些字段？",
+      "relevant_document_ids": ["embedding-batching"],
+      "required_evidence_terms": ["provider", "model", "revision", "dimensions"]
+    },
+    {
+      "id": "embedding-03",
+      "query": "Embedding 维度漂移时应该怎样处理？",
+      "relevant_document_ids": ["embedding-batching"],
+      "required_evidence_terms": ["维度漂移", "必须失败"]
+    },
+    {
+      "id": "embedding-04",
+      "query": "Provider 只返回部分向量可以接受吗？",
+      "relevant_document_ids": ["embedding-batching"],
+      "required_evidence_terms": ["部分返回", "必须失败"]
+    },
+    {
+      "id": "embedding-05",
+      "query": "Embedding 缓存键可以保存原文吗？",
+      "relevant_document_ids": ["embedding-batching"],
+      "required_evidence_terms": ["版本化摘要", "不保存原文"]
+    },
+    {
+      "id": "pgvector-01",
+      "query": "pgvector 把知识数据存到哪里？",
+      "relevant_document_ids": ["pgvector-storage"],
+      "required_evidence_terms": ["文档切片", "PostgreSQL"]
+    },
+    {
+      "id": "pgvector-02",
+      "query": "向量检索使用什么距离算法？",
+      "relevant_document_ids": ["pgvector-storage"],
+      "required_evidence_terms": ["cosine distance"]
+    },
+    {
+      "id": "pgvector-03",
+      "query": "pgvector 建立了什么 ANN 索引？",
+      "relevant_document_ids": ["pgvector-storage"],
+      "required_evidence_terms": ["HNSW", "vector_cosine_ops"]
+    },
+    {
+      "id": "pgvector-04",
+      "query": "替换文档切片时事务边界是什么？",
+      "relevant_document_ids": ["pgvector-storage"],
+      "required_evidence_terms": ["一个事务内更新所有切片"]
+    },
+    {
+      "id": "pgvector-05",
+      "query": "向量写入失败后旧文档会怎样？",
+      "relevant_document_ids": ["pgvector-storage"],
+      "required_evidence_terms": ["回滚旧内容"]
+    },
+    {
+      "id": "context-01",
+      "query": "ContextAssembler 支持哪六种来源？",
+      "relevant_document_ids": ["context-budget"],
+      "required_evidence_terms": ["system", "memory", "recent", "summary", "skill", "rag"]
+    },
+    {
+      "id": "context-02",
+      "query": "上下文来源的 trust 由谁决定？",
+      "relevant_document_ids": ["context-budget"],
+      "required_evidence_terms": ["来源信任由服务端固定"]
+    },
+    {
+      "id": "context-03",
+      "query": "预算不足时 system 片段能被丢弃吗？",
+      "relevant_document_ids": ["context-budget"],
+      "required_evidence_terms": ["system 不可静默丢弃"]
+    },
+    {
+      "id": "context-04",
+      "query": "Context 预算如何裁剪片段？",
+      "relevant_document_ids": ["context-budget"],
+      "required_evidence_terms": ["只选择完整片段", "纳入或丢弃原因"]
+    },
+    {
+      "id": "context-05",
+      "query": "字节估算能当成 Provider Token 和费用吗？",
+      "relevant_document_ids": ["context-budget"],
+      "required_evidence_terms": ["不是 Provider Token 或费用"]
+    }
+  ]
+}

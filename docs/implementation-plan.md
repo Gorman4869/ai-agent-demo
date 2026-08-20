@@ -790,6 +790,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 验收：阈值写入评测配置；未达标不能通过增加无关文本掩盖失败。
 - 关闭目标：KI-006。
 
+#### M11-T6 第一个离线纵切边界
+
+- 新增严格 `rag-retrieval-dataset-v1` 固定 fixture：10 篇课程文档、50 条唯一查询、相关文档 ID 与依据词标注，版本 `m11-rag-v1` 和跨格式/换行稳定的 canonical-JSON SHA-256 内容摘要进入报告。`top_k=3`，sparse/pgvector 的 Recall@K、MRR、依据正确率阈值同时冻结为 0.9/0.8/0.9。
+- 新增通用 `RagRetrievalEvaluator`：按相关文档宏平均 Recall@K、首个相关结果计算 MRR，只允许相关文档的已检索 excerpt 满足全部依据词。无结果、漏召回、未排名、依据缺失和未配置文档使用稳定失败码；查询、依据词、excerpt 与未配置 ID 不进入报告。
+- 默认 sparse runner 只索引 fixture 文档并调用真实 `InMemoryKnowledgeBase.search()`；CLI 低于任一阈值时退出 1。最终 50 条结果 Recall@3=1.0、MRR=1.0、依据正确率=1.0；本地延迟只作同进程参考，Provider usage unavailable、费用 unknown。
+- 新增 12 个关键测试方法；覆盖版本/数量/canonical 摘要、固定阈值、指标与首相关排名、空召回、无关文本不能掩盖依据缺失、未知文档脱敏、非法标注/schema/数量和默认 50 条基线。扩大 Knowledge/Embedding/pgvector/Context/eval 相关回归 78 项与 M1 隔离 10 项通过。
+- 本纵切达到 sparse 指标合同的离线 E3，但 M11-T6 保持 `in_progress`：尚未用同一数据集和阈值执行真实 pgvector，也没有形成两种 retriever 的固定对照与实际失败分析。下一纵切不得静默修改 `m11-rag-v1` 数据或阈值来让 pgvector 通过；需要修正 fixture 时必须升版本并保留旧摘要证据。
+
 ### M11-T7：显式在线 Embedding 冒烟
 
 - 依赖：M11-T3、M11-T6。

@@ -3378,3 +3378,74 @@
 
 - 第七纵切实现由 `4ec5444` 固定；提交后关键 API、真实 PostgreSQL application lifespan 与连续性均保持通过。
 - 后续文档提交只记录该实现锚点，不改变代码、测试、`verified` 结论或 M11-T6 尚未开始的范围。
+
+## V-20260820-011：M11-T6 固定 RAG 数据集与 sparse 指标第一纵切
+
+- 任务：`M11-T6 / in_progress`
+- 时间：2026-08-20 13:53，Asia/Shanghai
+- 验证目标：HEAD `f441615` 上的 M11-T6 第一纵切工作区；M11-T5 实现提交 `4ec5444`
+- 任务等级：A 类固定评测契约与后续真实 pgvector 对照边界；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务或产生费用，费用 0
+- 依赖事实：复用标准库 JSON/hash/time、现有 `KnowledgeBase`/`InMemoryKnowledgeBase` 与 eval 模块风格；没有新增、安装、升级或删除依赖，没有修改 FastAPI、Store、Container、数据库 schema、前端或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -5 --oneline` / `node --version` | 0 / 0 / 0 | 初始工作区干净；HEAD `f441615` 为 M11-T5 文档锚点，`4ec5444` 为实现提交；Node `v22.16.0` |
+| 按强制顺序读取 continuity README/status/playbook、M11-T2–T6、ADR-0023/0024/0025、最新 handoff、`V-20260820-008/009/010` 与完整后端规约 | 0 | 当前动作确认为至少 50 条版本化 RAG 固定评测；不重做 M11-T1–T5，不读取 Key、不进入 M11-T7/前端 |
+| handoff API 与 PostgreSQL application lifespan 恢复集 | 0 | API 27 项、真实 PostgreSQL lifespan 2 项和连续性 52/114 通过；只有既有 Starlette/httpx warning |
+| `docker compose -f deploy/compose.integration.yaml ps` | 0 | 沙箱外只读检查确认 integration pgvector/PostgreSQL healthy，只绑定 `127.0.0.1:55433` |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 首轮 `python -m unittest backend.tests.test_rag_retrieval_eval -v` | 0 | 初版 10 项通过；覆盖固定 50 条、sparse 阈值、指标、空召回、无关依据、数据/schema/数量和报告脱敏 |
+| 首轮 `python -m backend.app.evals.rag_retrieval` | 0 | 50 条 sparse 通过，三项指标均为 1.0；因 `evals.__init__` 提前导出可执行模块出现 `runpy` warning，随后移除无必要导出 |
+| 聚焦复审后新专项最终集 | 0 | 12 项通过；增加未配置文档 ID 安全占位、稳定失败码和 canonical JSON 摘要跨格式/换行一致性，最终 CLI 不再有 `runpy` warning |
+| `python -m backend.app.evals.rag_retrieval`（最终） | 0 | dataset `m11-rag-v1`，canonical 内容摘要 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`；50 条、Recall@3=1.0、MRR=1.0、依据正确率=1.0，高于 0.9/0.8/0.9；本地延迟按运行写入报告但不设固定阈值，usage unavailable、费用 `null` |
+| 新专项 + RAG/offline eval/collector 聚焦集 | 0 | 33 项通过，没有失败或 skip |
+| Knowledge/Embedding/pgvector/Context/eval 扩大回归 | 0 | 78 项通过，没有失败或 skip |
+| `python -S ... test_manual_agent_loop -q` | 0 | 禁用 `site-packages` 后 M1 当前 10 项通过 |
+| `git diff --check` | 0 | 无 whitespace 错误 |
+
+### 实现与风险证据
+
+- `rag-retrieval-dataset-v1` 严格要求固定 keys、版本、canonical-JSON SHA-256 内容摘要、1–128 篇有界文档、唯一 case/document ID、现存相关文档和确实出现在相关内容中的依据词。摘要不受 JSON 空白或 Git checkout 换行影响；默认 loader 低于 50 条直接稳定失败。
+- `m11-rag-v1` 含 10 篇课程文档和 50 条查询，`top_k=3`；sparse/pgvector 的 Recall@K、MRR、依据正确率阈值在同一 fixture 中冻结为 0.9/0.8/0.9。下一纵切不能静默改数据或阈值来让 pgvector 通过。
+- evaluator 真实调用 `KnowledgeBase.search()`。Recall@K 对相关文档宏平均，MRR 取首相关排名；依据正确只允许已检索相关文档 excerpt 满足全部标注词，无关 excerpt 即使含相同词也不能补齐。
+- 报告只含 dataset/retriever 标签、case ID、配置内文档 ID、指标、阈值、本地延迟 scope 和稳定失败码。query/evidence term/excerpt/title/source 与未配置返回 ID 不输出；后者统一为 `unconfigured-document`。
+- CLI 低于任一固定阈值退出 1。当前 sparse 真实使用 `InMemoryKnowledgeBase.search()`，不是只比较 fixture 标签；报告明确 grounding 不是模型回答质量，Provider usage unavailable、费用 unknown。
+
+### 聚焦复审与未验证范围
+
+- 复审核对严格 loader、边界数量、版本/摘要、阈值、macro Recall、首相关 MRR、依据只取 relevant excerpt、失败码、repr/report 脱敏和 CLI exit；修复提前导出 warning、重复依据词和未配置文档 ID 回显后未发现剩余阻断问题。
+- 本纵切是任务内可逆 eval 模块和 fixture，没有改变共享应用/数据库架构；ADR-0023/0024/0025 已固定存储、Embedding 与 Context 边界，因此没有新增 ADR。
+- 50 条查询针对 10 篇小型课程文档，sparse 1.0 只证明该固定离线集，不证明开放域语义质量、生产容量、真实 tokenizer、模型回答正确、在线 Provider 或账单。
+- 尚未用相同 dataset digest/top_k/thresholds 执行真实 pgvector，没有 sparse/pgvector 固定对照或 pgvector 实际失败分析；M11-T6 保持 `in_progress`，`KI-006` 保持 mitigated。
+- 新 fixture 目录的首次沙箱内 `New-Item` 因权限拒绝，按授权在项目内创建成功；一次并行复跑在 Python 启动前遇到执行器 `apply deny-read ACLs`，相同测试立即重跑通过。两次环境失败都没有记为测试失败或成功证据。
+- 本纵切不改依赖、公共 API、共享 Store/Runtime/Container 或构建配置，也不是 M11 里程碑验收；78 项定向回归与 M1 覆盖修改面，因此按 playbook 未重复运行全量 `scripts/verify.ps1`、Vue、MCP 或 Compose 构建门。
+
+### 结论
+
+- M11-T6 第一纵切达到版本化 50 条 fixture、通用指标/阈值/失败分析和真实 sparse 基线的离线 E3；任务更新为 `in_progress`。
+- 下一原子动作只复用 `m11-rag-v1` 摘要、top_k、标注和阈值执行真实 pgvector，形成两种 retriever 对照；不修改前端、不进入 M11-T7，不读取 Key 或调用在线模型。
+
+## V-20260820-012：M11-T6 第一纵切连续性闭环
+
+- 任务：`M11-T6 / in_progress`
+- 时间：2026-08-20 13:53，Asia/Shanghai
+- 验证目标：HEAD `f441615` 上经 `V-20260820-011` 验证的第一纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性、diff 与 Git 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、115 个 Markdown 通过；M11-T6 in_progress、`V-20260820-011/012`、新 handoff、plan、known issue、status、后端规约和恢复入口可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有文档 LF→CRLF 提示 |
+| `git status --short` / `git diff --stat` / 任务文件复核 | 0 | 5 个已跟踪修改与 4 个新文件，共 9 个任务文件；没有构建产物、缓存、诊断临时文件或任务外改动 |
+
+### 结论
+
+- `V-20260820-011` 的 12 项专项、78 项相关回归、M1 10 项、50 条 sparse 指标和边界说明，与当前 fixture、evaluator、tests、plan、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第一纵切文档连续性；不把 M11-T6 提升为 verified，不增加真实 pgvector、在线 Provider、生产延迟/容量、模型回答质量、Token 或费用证据。
