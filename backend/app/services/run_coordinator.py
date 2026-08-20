@@ -23,6 +23,7 @@ from backend.app.agent import (
     RuntimeRequest,
     RuntimeResult,
 )
+from backend.app.domain import Message
 from backend.app.domain.run import (
     RunFailure,
     RunRecord,
@@ -32,6 +33,7 @@ from backend.app.domain.run import (
 )
 from backend.app.stores import (
     AppendEventResult,
+    AsyncMemoryStore,
     ConcurrentWriteError,
     EventStore,
     InvalidRunTransitionError,
@@ -293,6 +295,7 @@ class RunCoordinator:
         run_store: RunStore,
         event_store: EventStore,
         runtimes: Mapping[RuntimeName | str, AgentRuntime],
+        memory_store: AsyncMemoryStore | None = None,
         notifier: EventNotifier | None = None,
         run_timeout_ms: int = 30_000,
         notify_timeout_ms: int | None = None,
@@ -309,6 +312,7 @@ class RunCoordinator:
         self._run_store = run_store
         self._event_store = event_store
         self._runtimes = dict(runtimes)
+        self._memory_store = memory_store
         self._notifier = notifier or NullEventNotifier()
         self._run_timeout_ms = run_timeout_ms
         self._notify_timeout_ms = (
@@ -1180,11 +1184,68 @@ class RunCoordinator:
             if winner is not None and winner.status.is_terminal:
                 return winner
             raise
+        if committed.created and result.status is RunStatus.COMPLETED:
+            await self._publish_completed_turn(committed.record)
         await emitter.notify_committed(
             committed.event,
             created=committed.created,
         )
         return committed.record
+
+    async def _publish_completed_turn(self, record: RunRecord) -> None:
+        if self._memory_store is None:
+            return
+        publication = asyncio.create_task(
+            self._append_completed_turn(record),
+            name=f"run-memory-publication-{record.id}",
+        )
+        try:
+            await asyncio.shield(publication)
+        except asyncio.CancelledError:
+            await publication
+
+    async def _append_completed_turn(self, record: RunRecord) -> None:
+        if self._memory_store is None:
+            return
+        try:
+            answer = record.answer
+            if answer is None:
+                raise ValueError("completed run is missing its answer")
+            await self._memory_store.append_message(
+                record.session_id,
+                Message(role="user", content=record.input_text),
+            )
+            await self._memory_store.append_message(
+                record.session_id,
+                Message(role="assistant", content=answer),
+            )
+        except asyncio.CancelledError:
+            LOGGER.warning(
+                "run memory publication cancelled",
+                extra={
+                    "run_id": record.id,
+                    "error_code": "memory_write_cancelled",
+                },
+            )
+        except StoreError as exc:
+            LOGGER.warning(
+                "run memory publication failed",
+                extra={
+                    "run_id": record.id,
+                    "error_code": exc.code,
+                    "result_unknown": bool(
+                        getattr(exc, "result_unknown", False)
+                    ),
+                },
+            )
+        except Exception:
+            LOGGER.error(
+                "run memory publication failed",
+                extra={
+                    "run_id": record.id,
+                    "error_code": "memory_write_failed",
+                },
+            )
 
     def _emitter(self, run_id: str, *, owner_id: str) -> PersistentEventEmitter:
         return PersistentEventEmitter(

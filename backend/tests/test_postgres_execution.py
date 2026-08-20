@@ -38,6 +38,7 @@ class _FakePersistence:
         self.event_store = object()
         self.run_lease_store = object()
         self.tool_execution_store = object()
+        self.async_memory_store = object()
 
     async def setup(self) -> None:
         self.events.append("persistence.setup")

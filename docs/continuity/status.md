@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-08-19，Asia/Shanghai
+- 更新时间：2026-08-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`ad7eafb`
+- 最近已确认实现提交：`b87b6c8`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -45,7 +45,8 @@
 - M11-T4 第五纵切验证基线提交：`c7971d6`；实现提交：`a96ea6d`
 - M11-T5 第一纵切验证基线提交：`a96ea6d`；实现提交：`2b248a5`
 - M11-T5 第二纵切验证基线提交：`f06b510`；实现提交：`ad7eafb`
-- M11-T5 第三纵切验证基线提交：`ad7eafb`；实现提交待本轮 Git 固定
+- M11-T5 第三纵切验证基线提交：`ad7eafb`；实现提交：`b87b6c8`
+- M11-T5 第四纵切验证基线提交：`b87b6c8`；实现提交待本轮 Git 固定
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -58,9 +59,9 @@
 | 目标 | 让持久记忆进入主 Run，覆盖消息写入、短期窗口、经批准长期事实、纠正/删除、版本冲突和审计 |
 | 设计依据 | 实施计划 M11-T5、已 verified 的 M11-T1/M11-T4、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025` 与 `ADR-0026` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 第三纵切让 PostgreSQL execution composition 在 persistence setup 后通过同步 runtime factory 构造内建 Runtime，并把 composition owned async_memory_store 注入单一 AsyncContextAwareRuntime；默认内存 create() 保持同步 ContextAwareRuntime，显式 caller Runtime mapping 保持对象身份，RuntimeRequest、Store、HTTP 与数据库协议未改 |
-| 前置证据 | `V-20260810-001/002`、`V-20260819-001/002/003`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、M11-T5 第一/第二纵切实现提交 `2b248a5`/`ad7eafb` |
-| 下一动作 | 开始 M11-T5 第四个离线纵切：只固定主 Run 的 user/assistant 消息写入边界、顺序、失败语义与幂等责任，并通过现有 AsyncMemoryStore 接口落盘；不提前实现纠正/删除、版本冲突/审计、真实数据库重启验收或 M11-T6 |
+| 当前修改 | 第四纵切让 RunCoordinator 在 completed terminal CAS 的 created 赢家上，从可信 RunRecord 发布 user→assistant 消息；默认内存与 PostgreSQL composition 共用其 async Memory Store，下一 Run 可读取上一回合。终态先落盘，消息后发布；失败不回滚、不重试，quiesce 等待 owned publication |
+| 前置证据 | `V-20260810-001/002`、`V-20260819-001/002/003/004`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、M11-T5 前三纵切实现提交 `2b248a5`/`ad7eafb`/`b87b6c8` |
+| 下一动作 | 开始 M11-T5 第五个纵切：先把两次 append 升级为 Run-bound atomic/idempotent turn Store command，并补内存/PostgreSQL 共同合同、版本化 migration 与真实 PostgreSQL 重启/replay；不提前实现纠正/删除、版本审计或 M11-T6 |
 
 ## 里程碑状态
 
@@ -71,19 +72,22 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T4 已 `verified`；M11-T5 已把 async Memory source 与 async Runtime preparation 接入默认 PostgreSQL built-in composition 的确定性离线主链。消息写入、纠正/删除、真实数据库重启证据、固定 RAG 评测与在线冒烟仍由 M11-T5–T7 承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T4 已 `verified`；M11-T5 已把 async Memory source、async Runtime preparation 和 completed turn 发布接入默认主链。原子/幂等 turn、纠正/删除、真实数据库重启证据、固定 RAG 评测与在线冒烟仍由 M11-T5–T7 承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- Docker Engine、M11-T1 PostgreSQL 17.10 容器和 M11-T2 `pgvector/pgvector:0.8.1-pg17` integration 容器在本轮结束前健康运行；这不是持续可用或生产部署证据，后续会话仍须先检查实际状态。
+- 本轮只验证 Docker Compose 配置，没有重新检查 Docker Engine、PostgreSQL 或 pgvector 容器健康；真实数据库纵切前必须重新检查实际状态。
 - 真实模型在线冒烟测试尚未获得单次执行授权；不阻塞离线实现与测试。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
 ## 未验证范围
 
+- M11-T5 第四纵切见 `V-20260820-001`：RunCoordinator/Container/PostgreSQL composition 关键回归最终 76 项、共享相关回归 245 项、M1 隔离 10 项和完整离线门通过；全量后端 586 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线和第三纵切实现提交均为 `b87b6c8`，本轮实现提交在结束时固定。
+- 当前唯一发布者、created winner、user→assistant 顺序、approval resume、failure/pause/replay 不写、Store 失败脱敏、terminal commit 失败不写、quiesce 等待与下一 Run recent context 均有自动化证据；模型回答没有写入长期 fact。
+- 当前 durable Run terminal 与 Memory turn 不共享事务，两次 `AsyncMemoryStore.append()` 也不是原子/持久幂等命令。terminal 后进程崩溃可能完全缺消息，第二次 append 失败可能只留下 user；自动 replay 不会补写。这一刀没有运行真实 PostgreSQL/重启，也没有实现纠正/删除、版本冲突/审计或 exactly-once。
 - M11-T5 第三纵切见 `V-20260819-003`：PostgreSQL composition/Container 专项 39 项、共享相关回归 283 项及完整离线门通过；全量后端 578 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线和第二纵切实现提交均为 `ad7eafb`，本轮实现提交在结束时固定。
 - 默认 PostgreSQL built-in Runtime 现通过 composition owned `async_memory_store`、进程内 Knowledge/Skill/system source 和单一 AsyncContextAwareRuntime 执行；受控纵切证明 async Memory→collector→Assembler→delegate，且同步 compatibility Memory 未被调用。显式 Runtime mappings 不包装，默认内存 create() 行为不变。
 - 第三纵切没有运行真实 PostgreSQL、数据库重启或 pgvector Context，也没有实现消息写入、纠正/删除、版本冲突/审计、在线摘要或 Provider。完整门首次受 Node 14 与 MCP SDK `node >=18` 不兼容影响出现 3 个启动超时；用户切换 Node 22 后隔离测试和最终全量门通过。沙箱内 Vue tsbuildinfo 写入仍因 EPERM 失败，同一门在获批的沙箱外环境完整通过。
@@ -203,4 +207,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-19-m11-t5-postgres-context-container.md`，再核对 `V-20260819-003/004`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、验证基线与第二纵切实现提交 `ad7eafb`、实施计划 M11-T5 和实际 async collector/Runtime/Container/composition 代码。按 handoff 重跑 PostgreSQL composition/Container 39 项和连续性；若一致，不要重做 M11-T1–T4 或前三个纵切，下一步只固定主 Run 消息写入边界，不提前实现纠正/删除、版本冲突/审计或 M11-T6。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T6/M12/M13。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-20-m11-t5-run-message-publication.md`，再核对 `V-20260820-001/002`、`ADR-0014`、`ADR-0021`、`ADR-0022`、`ADR-0025`、`ADR-0026`、验证基线与第三纵切实现提交 `b87b6c8`、实施计划 M11-T5 和实际 RunCoordinator/AsyncMemoryStore/Container composition 代码。按 handoff 重跑关键 76 项和连续性；若一致，不要重做 M11-T1–T4 或前四个纵切，下一步只固定 Run-bound atomic/idempotent turn Store command 与真实 PostgreSQL restart/replay，不提前实现纠正/删除、版本审计或 M11-T6。没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用、配置远程 Git 或扩大到 M11-T6/M12/M13。

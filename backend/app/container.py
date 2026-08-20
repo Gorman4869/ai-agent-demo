@@ -171,10 +171,12 @@ class ApplicationContainer:
             context_memory_store=resolved_memory,
             context_knowledge_base=resolved_knowledge_base,
         )
+        resolved_async_memory_store = AsyncLocalMemoryStore(resolved_memory)
         run_coordinator = RunCoordinator(
             run_store=resolved_run_store,
             event_store=resolved_event_store,
             runtimes=resolved_runtimes,
+            memory_store=resolved_async_memory_store,
             run_timeout_ms=resolved_settings.budget.run_timeout_ms,
         )
         resolved_mcp_clients = _resolve_mcp_clients(
@@ -211,7 +213,7 @@ class ApplicationContainer:
             embedding_model=resolved_embedding_model,
             memory=resolved_memory,
             approval_store=resolved_approval_store,
-            async_memory_store=AsyncLocalMemoryStore(resolved_memory),
+            async_memory_store=resolved_async_memory_store,
             async_approval_store=AsyncLocalApprovalStore(
                 resolved_approval_store
             ),

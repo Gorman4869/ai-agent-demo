@@ -427,6 +427,7 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
                 run_store=run_store,
                 event_store=event_store,
                 runtimes=resolved_runtimes,
+                memory_store=persistence.async_memory_store,
                 run_timeout_ms=kwargs["run_timeout_ms"],
             )
             return composition
@@ -501,6 +502,19 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             ["system", "skill", "memory", "recent", "rag"],
             [fragment["source"] for fragment in fragments],
+        )
+        self.assertEqual(
+            [
+                "postgres async recent",
+                run.input_text,
+                completed.answer,
+            ],
+            [
+                message.content
+                for message in await container.async_memory_store.messages(
+                    run.session_id
+                )
+            ],
         )
         sync_memory.messages.assert_not_called()
         sync_memory.facts.assert_not_called()
@@ -627,6 +641,79 @@ class ApplicationContainerStorePairTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             ["run.started", "run.completed"],
             [event.type for event in events],
+        )
+        self.assertEqual(
+            [
+                Message(role="user", content=run.input_text),
+                Message(role="assistant", content=completed.answer),
+            ],
+            list(container.memory.messages(run.session_id)),
+        )
+
+    async def test_completed_turn_is_recent_context_for_the_next_run(self) -> None:
+        container = ApplicationContainer.create(
+            settings=Settings.from_environment({})
+        )
+        first = RunRecord.create(
+            run_id="memory-first-run",
+            session_id="memory-session",
+            owner_id="memory-owner",
+            runtime="manual",
+            input_text="first private question",
+            idempotency_key="memory-first-key",
+            created_at=datetime(2026, 7, 16, 4, 0, tzinfo=UTC),
+        )
+        second = RunRecord.create(
+            run_id="memory-second-run",
+            session_id=first.session_id,
+            owner_id=first.owner_id,
+            runtime="manual",
+            input_text="second private question",
+            idempotency_key="memory-second-key",
+            created_at=datetime(2026, 7, 16, 4, 1, tzinfo=UTC),
+        )
+        await container.run_store.create(first)
+        await container.run_store.create(second)
+
+        first_completed = await container.run_coordinator.execute(
+            first.id,
+            owner_id=first.owner_id,
+        )
+        prompt_contexts: list[str | None] = []
+
+        def capture_loop(message: str, **kwargs):
+            prompt_contexts.append(kwargs.get("prompt_context"))
+            return create_original_learning_agent_loop(message, **kwargs)
+
+        with patch(
+            "backend.app.container.create_learning_agent_loop",
+            side_effect=capture_loop,
+        ):
+            second_completed = await container.run_coordinator.execute(
+                second.id,
+                owner_id=second.owner_id,
+            )
+
+        self.assertEqual(RunStatus.COMPLETED, first_completed.status)
+        self.assertEqual(RunStatus.COMPLETED, second_completed.status)
+        rendered = json.dumps(
+            _context_payload(prompt_contexts[0]),
+            ensure_ascii=False,
+        )
+        self.assertIn(first.input_text, rendered)
+        self.assertIn(first_completed.answer, rendered)
+        self.assertNotIn(second.input_text, rendered)
+        self.assertEqual(
+            [
+                first.input_text,
+                first_completed.answer,
+                second.input_text,
+                second_completed.answer,
+            ],
+            [
+                message.content
+                for message in container.memory.messages(first.session_id)
+            ],
         )
 
     async def test_default_container_collects_all_context_sources_for_runtime(

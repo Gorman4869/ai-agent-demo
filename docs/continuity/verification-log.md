@@ -3060,3 +3060,69 @@
 
 - `V-20260819-003` 的最终专项 39 项、共享回归 283 项与完整离线门证据，与当前实现、计划、known issue、status、后端规约及 handoff 一致。
 - 本记录只关闭第三纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加真实 PostgreSQL/重启、消息写入、纠正/删除、版本审计或在线 Provider 证据。
+
+## V-20260820-001：M11-T5 主 Run 消息发布第四纵切
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 09:33，Asia/Shanghai
+- 验证目标：HEAD `b87b6c8` 上的 M11-T5 第四离线纵切工作区；第三纵切实现提交 `b87b6c8`
+- 任务等级：A 类 persistence/side-effect/concurrency 边界；时间盒 2–4 小时
+- 模式：默认离线 E3；没有读取 Key、调用在线模型、访问远程服务、运行真实 PostgreSQL 或产生费用，费用 0
+- 依赖事实：复用现有 `RunCoordinator`、TerminalCommit、`AsyncMemoryStore`、默认 Container 与 PostgreSQL composition；没有新增、安装、升级或删除依赖，没有修改 RuntimeRequest、AgentRuntime、Store Protocol、HTTP、数据库 schema 或跨前后端接口
+
+### 恢复基线
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` / `git log -6 --oneline` / `node --version` | 0 / 0 / 0 | 初始工作区干净；HEAD `b87b6c8` 为第三纵切实现提交；Node `v22.16.0` |
+| 按强制顺序读取 continuity README/status/playbook、M11-T5、ADR-0014/0021/0022/0025/0026、最新 handoff、`V-20260819-003/004` 与后端规约 | 0 | 当前动作确认为 completed Run 消息发布；不重做前三纵切，也不进入纠正/删除或 M11-T6 |
+| handoff PostgreSQL composition/Container 恢复集 | 0 | 39 项通过；只有既有 Starlette/httpx 警告 |
+| 修改前连续性 | 0 | 52 个稳定任务、108 个 Markdown 通过 |
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 新增测试的分组/隔离运行 | 0 | RunCoordinator 最终 36 项、Container 最终 24 项；覆盖发布顺序、非完成不写、replay 并发、approval resume、Store/terminal failure、quiesce 和 next-Run context |
+| 扩大 Context/Coordinator/Container/PostgreSQL composition 相关回归 | 0 | 245 项通过；只有既有安全日志与 Starlette/httpx 警告，没有失败或新增 skip |
+| 最终 `python -m unittest backend.tests.test_run_coordinator backend.tests.test_container backend.tests.test_postgres_execution -v` | 0 | 76 项通过，固定最终 Coordinator/Container/composition 修改面 |
+| M1 `python -S` 隔离 | 0 | 10 项通过，学习者手写 Loop 未受影响 |
+| 经授权在沙箱外运行 `scripts/verify.ps1` | 0 | 后端 586 项通过、1 项既有 Windows symlink 能力跳过；Code Agent、Python 依赖、Vue 生产构建、MCP TypeScript 构建与 Docker Compose 配置全部通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有 LF→CRLF 提示 |
+
+### 实现与风险证据
+
+- `RunCoordinator` 在 terminal commit `created=true` 且状态为 completed 时，从可信 RunRecord 发布 user 输入和 assistant answer；发布位于 durable terminal 之后、live notify 之前。failed/cancelled、approval pause、terminal replay 均不写。
+- 默认内存 Container 让 Context collector 与 Coordinator 共享一个 AsyncLocal Memory façade；PostgreSQL composition 把 owned `async_memory_store` 注入 Coordinator。真实离线纵切证明 Run 1 的 completed turn 进入 Run 2 recent context，Run 2 当前输入不会被提前重复注入。
+- approval resume 发布原 Run 输入与最终回答一次；并发 execute/replay 由 TerminalCommit `created` 仲裁唯一发布者。模型回答只写 conversation message，不调用长期 fact `remember()`。
+- Store 失败发生在 durable terminal 之后，因此不回滚或伪装 Run 失败，也不自动重试；日志只含稳定 code、run ID 与 result_unknown。Coordinator 以 owned task 等待 publication，使 quiesce 不在写入中途关闭 persistence。
+
+### 聚焦复审与未验证范围
+
+- 复审核对可信 session/input、terminal-first、created winner、user→assistant、pause/resume、失败/取消、replay、取消/关闭、日志脱敏和 Container Store 共享；未发现剩余阻断问题。该内部、可逆 seam 与既有 ADR 一致，无需新增 ADR。
+- 两次 `AsyncMemoryStore.append()` 不构成 atomic/idempotent turn。terminal 后进程崩溃可能没有消息，第二次 append 失败可能留下 user-only；replay 按设计不会补写。因此当前是 at-most-once publisher election，不是跨 Store exactly-once。
+- 没有运行真实 PostgreSQL、数据库/进程重启、连接结果未知或跨进程并发；没有实现纠正/删除、版本冲突/审计、在线摘要、Provider、Token/usage 或费用证据。
+- 完整门第一次结果句柄在会话压缩后不可读取，没有把未知结果计为通过；随后用同一脚本重新完整执行并取得退出码 0 与完整汇总。
+
+### 结论
+
+- M11-T5 第四纵切达到默认主链 completed turn 发布与下一 Run 读取的确定性离线 E3，任务保持 `in_progress`。
+- 下一原子动作先增加 Run-bound atomic/idempotent turn Store command、内存/PostgreSQL 共同合同、版本化 migration 和真实 PostgreSQL restart/replay；不提前实现纠正/删除、版本审计或 M11-T6。
+
+## V-20260820-002：M11-T5 主 Run 消息发布连续性闭环
+
+- 任务：`M11-T5 / in_progress`
+- 时间：2026-08-20 09:33，Asia/Shanghai
+- 验证目标：HEAD `b87b6c8` 上经 `V-20260820-001` 验证的第四纵切工作区及连续性文档
+- 模式：纯本地内容、链接、连续性和 diff 检查；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-continuity.ps1` | 0 | 52 个稳定任务、109 个 Markdown 通过；M11-T5 in_progress、`V-20260820-001/002`、新 handoff、plan、known issue、后端规约和恢复入口可解析 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有既有工作区 LF 将由 Git 转换为 CRLF 的提示 |
+| `git status --short` / `git diff --stat` / 新 handoff 复核 | 0 | 11 个已跟踪修改与 1 个新 handoff，合计 12 个任务文件；没有构建产物、诊断临时文件或任务外改动 |
+
+### 结论
+
+- `V-20260820-001` 的关键风险覆盖、共享回归 245 项、最终关键 76 项、M1 隔离 10 项与完整离线门证据，和当前实现、计划、known issue、status、后端规约及 handoff 一致。
+- 本记录只关闭第四纵切的文档连续性，不把 M11-T5 提升为 `verified`，也不增加 atomic/exactly-once、真实 PostgreSQL/重启、纠正/删除、版本审计或在线 Provider 证据。

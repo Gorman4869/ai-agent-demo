@@ -749,6 +749,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 5 个 composition factory 关键测试并扩展 2 个 Container 纵切：setup/工厂/Coordinator 顺序、失败清理、非法返回、互斥输入、Runtime 暴露、真实 async Memory 五来源装配、同步 Memory 禁用和显式 Runtime 身份保持。专项 39 项、共享相关回归 283 项与完整离线门通过；全量后端 578 项通过、1 项既有 Windows symlink 条件跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置均通过。
 - 本纵切达到默认 PostgreSQL composition 的确定性离线 E3，但没有运行真实 PostgreSQL、数据库重启或 pgvector Context。M11-T5 保持 `in_progress`；下一纵切只固定主 Run 的 user/assistant 消息写入边界、顺序、失败语义和幂等责任，不提前实现纠正/删除、版本冲突/审计或 M11-T6。
 
+#### M11-T5 第四个离线纵切边界
+
+- `RunCoordinator` 成为主 Run 消息的唯一发布者：只允许 `completed` terminal commit 的 `created=true` 仲裁赢家，从可信 `RunRecord.session_id/input_text` 与最终 answer 按 user→assistant 顺序写入现有 `AsyncMemoryStore`。failed、cancelled、approval pause 和 terminal replay 不写消息。
+- 顺序固定为 durable terminal commit→user→assistant→live terminal notify→lease release。审批 resume 完成时写入原始输入和最终回答一次；新 Run 可从同一 Store 读取该回合作为 recent context，模型回答不会自动提升为长期 fact。
+- terminal 之后的 Memory 失败不回滚或改写已完成 Run，也不自动重试；日志只保留稳定错误码、Run ID 和 result-unknown 标志。Coordinator 将写入作为 owned terminal publication 跟踪，quiesce 不会在写入中途关闭 persistence。
+- 新增 8 个风险测试或等价覆盖，并扩展默认内存与 PostgreSQL composition 纵切；相关共享回归 245 项、M1 隔离 10 项与完整离线门通过。完整门后端 586 项通过、1 项既有 Windows symlink 条件跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置均通过。
+- 当前两次 `append()` 只证明唯一写入者与 at-most-once 发布，不是跨 Run/Memory 的原子事务或 exactly-once：终态提交后崩溃可能缺消息，第二次 append 失败可能只留下 user。M11-T5 保持 `in_progress`；下一纵切先提供 Run-bound atomic/idempotent turn Store command 与真实 PostgreSQL 重启/replay 证据，再进入纠正/删除、版本冲突和审计。
+
 ### M11-T6：RAG 固定评测集与指标
 
 - 依赖：M11-T2 至 M11-T5。

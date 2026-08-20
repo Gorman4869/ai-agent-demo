@@ -103,6 +103,7 @@ class PostgresExecutionComposition:
                 run_store=persistence.run_store,
                 event_store=persistence.event_store,
                 runtimes=resolved_runtimes,
+                memory_store=persistence.async_memory_store,
                 notifier=notifier,
                 run_timeout_ms=run_timeout_ms,
                 notify_timeout_ms=notify_timeout_ms,

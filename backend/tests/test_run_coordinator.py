@@ -10,6 +10,7 @@ from backend.app.agent import (
     RuntimeEvent,
     RuntimeResult,
 )
+from backend.app.domain import Message
 from backend.app.domain.run import RunFailure, RunRecord, RunStatus, StoredRunEvent
 from backend.app.services.run_coordinator import (
     EventNotifier,
@@ -75,6 +76,243 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             ],
             notifier.observations,
         )
+
+    async def test_completed_run_publishes_turn_after_terminal_before_notify(
+        self,
+    ) -> None:
+        order: list[str] = []
+        run_store = InMemoryRunStore()
+        event_store = OrderingTerminalEventStore(run_store, order=order)
+        run = _new_run()
+        await run_store.create(run)
+        memory = RecordingAsyncMemoryStore(order=order)
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={
+                "manual": StaticRuntime(
+                    RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+                )
+            },
+            memory_store=memory,
+            notifier=OrderingNotifier(order),
+            run_timeout_ms=1_000,
+        )
+
+        completed = await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(
+            (
+                Message(role="user", content=run.input_text),
+                Message(role="assistant", content="done"),
+            ),
+            tuple(memory.persisted),
+        )
+        self.assertEqual(
+            [
+                "run.terminal",
+                "memory:user",
+                "memory:assistant",
+                "notify:run.completed",
+            ],
+            order[-4:],
+        )
+
+    async def test_failed_and_paused_runs_publish_no_messages(self) -> None:
+        failed_memory = RecordingAsyncMemoryStore()
+        failed_run = await self._create_run()
+        failed = await self._coordinator(
+            StaticRuntime(
+                RuntimeResult(
+                    status=RunStatus.FAILED,
+                    failure=RunFailure(
+                        code="fixture_failed",
+                        category="fixture",
+                        public_message="Fixture failed",
+                    ),
+                )
+            ),
+            memory_store=failed_memory,
+        ).execute(failed_run.id, owner_id=failed_run.owner_id)
+
+        self.assertEqual(RunStatus.FAILED, failed.status)
+        self.assertEqual([], failed_memory.attempted)
+
+        pause_store = InMemoryRunStore()
+        pause_events = InMemoryEventStore(pause_store)
+        pause_run = _new_run(run_id="pause-run", idempotency_key="pause-key")
+        await pause_store.create(pause_run)
+        pause_memory = RecordingAsyncMemoryStore()
+        pause = RuntimeApprovalPause(
+            approval_id="approval-1",
+            tool_call_id="call-1",
+            tool_name="publish_report",
+            arguments_digest="a" * 64,
+        )
+        waiting = await RunCoordinator(
+            run_store=pause_store,
+            event_store=pause_events,
+            runtimes={"manual": PauseThenCompleteRuntime(pause)},
+            memory_store=pause_memory,
+            run_timeout_ms=1_000,
+        ).execute(pause_run.id, owner_id=pause_run.owner_id)
+
+        self.assertEqual(RunStatus.WAITING_APPROVAL, waiting.status)
+        self.assertEqual([], pause_memory.attempted)
+
+    async def test_replay_and_concurrent_execute_publish_one_turn(self) -> None:
+        run = await self._create_run()
+        runtime = GatedRuntime()
+        memory = RecordingAsyncMemoryStore()
+        coordinator = self._coordinator(runtime, memory_store=memory)
+        first = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=1)
+        second = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        runtime.release.set()
+
+        first_result, second_result = await asyncio.gather(first, second)
+        replay = await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        self.assertEqual(first_result, second_result)
+        self.assertEqual(first_result, replay)
+        self.assertEqual(1, runtime.calls)
+        self.assertEqual(["user", "assistant"], _roles(memory.persisted))
+
+    async def test_approval_resume_publishes_original_turn_once(self) -> None:
+        run = await self._create_run()
+        approval_store = InMemoryApprovalStore()
+        request = approval_store.request(
+            run_id=run.id,
+            principal_id=run.owner_id,
+            tool_call_id="call-1",
+            tool_name="publish_report",
+            arguments={"report_id": "report-1"},
+        )
+        pause = RuntimeApprovalPause(
+            approval_id=request.id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments_digest=request.arguments_digest,
+        )
+        memory = RecordingAsyncMemoryStore()
+        coordinator = self._coordinator(
+            PauseThenCompleteRuntime(pause),
+            memory_store=memory,
+        )
+        context = ToolExecutionContext(
+            principal_id=run.owner_id,
+            approval_store=approval_store,
+        )
+
+        waiting = await coordinator.execute(
+            run.id,
+            owner_id=run.owner_id,
+            execution_context=context,
+        )
+        self.assertEqual(RunStatus.WAITING_APPROVAL, waiting.status)
+        self.assertEqual([], memory.persisted)
+
+        completed = await coordinator.resume_approval(
+            run.id,
+            owner_id=run.owner_id,
+            approval_id=request.id,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments_digest=request.arguments_digest,
+            decision=ApprovalResponse.APPROVE,
+            execution_context=context,
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(["user", "assistant"], _roles(memory.persisted))
+        self.assertEqual(run.input_text, memory.persisted[0].content)
+        self.assertEqual("approved", memory.persisted[1].content)
+
+    async def test_memory_failure_keeps_completion_and_is_not_retried(self) -> None:
+        run = await self._create_run()
+        memory = RecordingAsyncMemoryStore(fail_on_attempt=2)
+        coordinator = self._coordinator(
+            StaticRuntime(
+                RuntimeResult(status=RunStatus.COMPLETED, answer="private answer")
+            ),
+            memory_store=memory,
+        )
+
+        with self.assertLogs(
+            "backend.app.services.run_coordinator",
+            level="WARNING",
+        ) as logs:
+            completed = await coordinator.execute(
+                run.id,
+                owner_id=run.owner_id,
+            )
+        replay = await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(completed, replay)
+        self.assertEqual(["user", "assistant"], _roles(memory.attempted))
+        self.assertEqual(["user"], _roles(memory.persisted))
+        self.assertEqual(1, len(logs.output))
+        rendered_logs = " ".join(logs.output)
+        self.assertNotIn(run.input_text, rendered_logs)
+        self.assertNotIn("private answer", rendered_logs)
+        self.assertNotIn(run.session_id, rendered_logs)
+        self.assertNotIn(run.owner_id, rendered_logs)
+
+    async def test_quiesce_waits_for_owned_terminal_memory_publication(self) -> None:
+        run = await self._create_run()
+        memory = BlockingAsyncMemoryStore()
+        coordinator = self._coordinator(
+            StaticRuntime(
+                RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+            ),
+            memory_store=memory,
+        )
+        execution = asyncio.create_task(
+            coordinator.execute(run.id, owner_id=run.owner_id)
+        )
+        await asyncio.wait_for(memory.started.wait(), timeout=1)
+
+        quiescing = asyncio.create_task(coordinator.quiesce(timeout_ms=1))
+        await asyncio.sleep(0.02)
+
+        self.assertFalse(quiescing.done())
+        memory.release.set()
+        completed = await asyncio.wait_for(execution, timeout=1)
+        await asyncio.wait_for(quiescing, timeout=1)
+
+        self.assertEqual(RunStatus.COMPLETED, completed.status)
+        self.assertEqual(["user", "assistant"], _roles(memory.persisted))
+
+    async def test_terminal_commit_failure_publishes_no_messages(self) -> None:
+        run_store = InMemoryRunStore()
+        event_store = FailingTerminalEventStore(run_store)
+        run = _new_run()
+        await run_store.create(run)
+        memory = RecordingAsyncMemoryStore()
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={
+                "manual": StaticRuntime(
+                    RuntimeResult(status=RunStatus.COMPLETED, answer="done")
+                )
+            },
+            memory_store=memory,
+            run_timeout_ms=1_000,
+        )
+
+        with self.assertRaises(StoreUnavailableError):
+            await coordinator.execute(run.id, owner_id=run.owner_id)
+
+        stored = await run_store.get(run.id, owner_id=run.owner_id)
+        self.assertEqual(RunStatus.RUNNING, stored.status)
+        self.assertEqual([], memory.attempted)
 
     async def test_runtime_request_identity_comes_from_owned_run_record(
         self,
@@ -505,6 +743,7 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self,
         runtime,
         *,
+        memory_store=None,
         notifier: EventNotifier | None = None,
         run_timeout_ms: int = 1_000,
     ) -> RunCoordinator:
@@ -512,6 +751,7 @@ class RunCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             run_store=self.run_store,
             event_store=self.event_store,
             runtimes={"manual": runtime},
+            memory_store=memory_store,
             notifier=notifier,
             run_timeout_ms=run_timeout_ms,
         )
@@ -1017,6 +1257,50 @@ class RecordingNotifier:
         self.events.append(event)
 
 
+class OrderingNotifier:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+
+    async def notify(self, event: StoredRunEvent) -> None:
+        self.order.append(f"notify:{event.type}")
+
+
+class RecordingAsyncMemoryStore:
+    def __init__(
+        self,
+        *,
+        order: list[str] | None = None,
+        fail_on_attempt: int | None = None,
+    ) -> None:
+        self.order = order
+        self.fail_on_attempt = fail_on_attempt
+        self.attempted: list[Message] = []
+        self.persisted: list[Message] = []
+
+    async def append_message(self, session_id: str, message: Message) -> None:
+        if session_id != "session-1":
+            raise AssertionError("message used an untrusted session")
+        self.attempted.append(message)
+        if self.order is not None:
+            self.order.append(f"memory:{message.role}")
+        if len(self.attempted) == self.fail_on_attempt:
+            raise StoreUnavailableError()
+        self.persisted.append(message)
+
+
+class BlockingAsyncMemoryStore(RecordingAsyncMemoryStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def append_message(self, session_id: str, message: Message) -> None:
+        if not self.attempted:
+            self.started.set()
+            await self.release.wait()
+        await super().append_message(session_id, message)
+
+
 class FailingNotifier:
     async def notify(self, event: StoredRunEvent) -> None:
         del event
@@ -1061,6 +1345,23 @@ class FailingProgressEventStore(InMemoryEventStore):
         raise StoreUnavailableError()
 
 
+class FailingTerminalEventStore(InMemoryEventStore):
+    async def commit_terminal(self, command):
+        del command
+        raise StoreUnavailableError()
+
+
+class OrderingTerminalEventStore(InMemoryEventStore):
+    def __init__(self, run_store, *, order: list[str]) -> None:
+        super().__init__(run_store)
+        self.order = order
+
+    async def commit_terminal(self, command):
+        result = await super().commit_terminal(command)
+        self.order.append("run.terminal")
+        return result
+
+
 class BarrierTerminalEventStore(InMemoryEventStore):
     def __init__(self, run_store) -> None:
         super().__init__(run_store)
@@ -1101,20 +1402,32 @@ class BarrierStartEventStore(InMemoryEventStore):
         return await super().commit_start(command)
 
 
-def _new_run(*, runtime: str = "manual") -> RunRecord:
+def _new_run(
+    *,
+    runtime: str = "manual",
+    run_id: str = "run-1",
+    session_id: str = "session-1",
+    owner_id: str = "owner-1",
+    input_text: str = "hello",
+    idempotency_key: str = "idempotency-key",
+) -> RunRecord:
     return RunRecord.create(
-        run_id="run-1",
-        session_id="session-1",
-        owner_id="owner-1",
+        run_id=run_id,
+        session_id=session_id,
+        owner_id=owner_id,
         runtime=runtime,
-        input_text="hello",
-        idempotency_key="idempotency-key",
+        input_text=input_text,
+        idempotency_key=idempotency_key,
         created_at=NOW,
     )
 
 
 def _types(events: tuple[StoredRunEvent, ...]) -> list[str]:
     return [event.type for event in events]
+
+
+def _roles(messages: list[Message]) -> list[str]:
+    return [message.role for message in messages]
 
 
 if __name__ == "__main__":
