@@ -814,6 +814,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 验收：真实向量写入 pgvector 并完成查询；记录维度、批次、耗时、Token/费用和模型名；敏感输入不进入日志。
 - 依赖边界：无授权时不阻塞 M12 的离线与数据库结构任务，但 M11 不能标记 `accepted`。
 
+#### M11-T7 首次外部冒烟尝试（blocked）
+
+- 用户已于 2026-08-27 提供 API Key 的本机环境变量并明确授权一次测试。预检只记录 `configured=true`，不读取或输出 Key。
+- 选择 `text-embedding-3-small`、显式三维输出、batch size 1、retry 0 和两段非敏感合成文本；先写入本机 pgvector 测试库、再以相同文本查询、最后删除临时文档。
+- 首两次在 SDK 创建 HTTP 客户端前被本机 SOCKS `ALL_PROXY` 与缺失 `socksio` 阻断，没有发出 Provider 请求。最终仅在子进程移除该 SOCKS 变量并保留 HTTP/HTTPS proxy 后到达 Provider，返回稳定 `embedding_provider_quota_or_rate_limited`。
+- 本次没有完成向量写入或查询，没有得到 Provider usage、Token 或费用；只读确认临时 document count 为 0。不得把配置识别、SDK 创建失败或此错误码当作 M11-T7 E4 成功。
+- M11-T7 保持 `blocked`，解除条件是可用的项目配额/限流窗口，并需要用户再次明确授权新的在线尝试；不安装 SOCKS 依赖、不改变全局代理或默认离线路径。
+
 ### M11-T8：M11 跟练与验收
 
 - 依赖：M11-T1 至 M11-T6；在线状态引用 M11-T7。

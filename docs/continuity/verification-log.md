@@ -3516,3 +3516,29 @@
 ### 结论
 
 - 实现提交后的固定 sparse/pgvector 对照、内容安全报告、真实数据库集成和连续性均保持通过。M11-T6 继续为 `verified`；在线 Provider、生产容量/延迟和模型答案质量不在本次结论内。
+
+## V-20260827-003：M11-T7 首次授权在线 Embedding 冒烟（blocked）
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-27，Asia/Shanghai
+- 模式：用户明确授权的一次 OpenAI E4 尝试；仅使用非敏感合成文本、本机 localhost pgvector 测试库与 `text-embedding-3-small`，没有输出 Key
+- 验证目标：真实 Embedding 以三维向量写入 pgvector、再查询并删除临时文档；记录模型、维度、批次、耗时、usage 与费用
+
+| 动作 | 结果 | 证据 |
+| --- | --- | --- |
+| Key 安全预检 | 通过 | 当前进程 `openai_api_key_configured=true`；在线 Embedding 默认仍关闭，预检没有联网或读取 Key 内容 |
+| 本机 pgvector 容器 | 通过 | integration PostgreSQL healthy，仅绑定 `127.0.0.1:55433` |
+| 第一次与第二次 SDK 创建 | 未发出 Provider 请求 | `ALL_PROXY/all_proxy` 为 SOCKS5，但虚拟环境未安装 `socksio`；失败在 HTTP 客户端初始化前，无写入、usage 或费用 |
+| 最终最小在线尝试 | blocked | 仅在子进程删除 SOCKS proxy 变量、保留 HTTP/HTTPS proxy 后到达 Provider；禁用 retry，Provider 映射为 `embedding_provider_quota_or_rate_limited` |
+| 临时文档清理检查 | 通过 | `knowledge_documents` 中 `m11-t7-online-embedding-smoke` 数量为 0；失败发生在向量生成前，未完成写入/查询 |
+
+### 配置与成本边界
+
+- 本次进程内配置为 provider `openai`、model `text-embedding-3-small`、revision `m11-t7-2026-08-27`、dimensions `3`、batch size `1`、retry `0`、20 秒请求 timeout。只计划提交一篇短文档和一次相同文本查询，最多两次 Provider 请求。
+- Provider 没有返回 usage，因此实际 input tokens、成本和账单状态均为 unknown；`quota_or_rate_limited` 不能单独证明是余额耗尽还是短期限流。不得把本次失败描述为成功的 E4 或费用为零。
+- OpenAI Embeddings API 支持 `text-embedding-3` 模型的 `dimensions` 参数，且该参数最小值为 1；本项目仍只验证其固定三维 pgvector schema，不外推语义质量或生产配置。
+
+### 结论
+
+- M11-T7 未达到真实向量写入与查询验收，状态为 `blocked`。解除条件是用户确认 Provider 配额/限流已恢复，并再次明确授权新的在线尝试。
+- 没有修改代码、依赖、默认离线配置、全局代理、数据库 schema 或前端；不安装 `socksio`，不自动重试。

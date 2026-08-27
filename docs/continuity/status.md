@@ -59,14 +59,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M11-T6` |
-| 状态 | `verified` |
-| 目标 | 用不少于 50 条版本化查询固定 sparse/pgvector 的 Recall@K、MRR、回答依据正确率、阈值、延迟边界和失败分析 |
-| 设计依据 | 实施计划 M11-T6、已 verified 的 M11-T2–T5、`ADR-0023`、`ADR-0024` 与 `ADR-0025` |
+| 任务 ID | `M11-T7` |
+| 状态 | `blocked` |
+| 目标 | 在单次授权下以真实 OpenAI Embedding 写入 pgvector 并查询，记录模型、维度、批次、耗时、usage 与费用边界 |
+| 设计依据 | 实施计划 M11-T7、已 verified 的 M11-T3/M11-T6、`ADR-0023` 与 `ADR-0024` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 第二纵切以同一 `m11-rag-v1` canonical 摘要、50 条、top_k=3 与冻结阈值，使用真实 pgvector cosine/HNSW 和显式 eval-only 三维课程主题 Embedding 形成对照；sparse 为 1.0/1.0/1.0，pgvector 为 0.98/0.946667/0.98，并保留 1 条漏召回失败分析 |
-| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T2/T3/T5 实现提交 `7ebaa16`/`02664b8`/`4ec5444`、M11-T6 第一纵切实现提交 `07ec390` |
-| 下一动作 | M11-T6 已 verified。仅在用户提供 API Key、开启在线开关并作单次明确授权时，开始独立的 M11-T7 在线 Embedding 冒烟；不得把 eval-only 词表描述为通用或生产模型，不进入前端 |
+| 当前修改 | API Key 已被当前进程识别；两次在 SDK 创建前受本机 SOCKS proxy 缺少 `socksio` 阻断，随后仅在子进程绕过 SOCKS 后触达 Provider，并得到 `embedding_provider_quota_or_rate_limited`。未完成写入/查询，临时文档数为 0 |
+| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003`、`ADR-0023`、`ADR-0024`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
+| 下一动作 | 等待用户恢复 OpenAI 项目可用额度或限流窗口；之后必须再次明确授权一次新的 M11-T7 在线尝试。不得安装 SOCKS 依赖、改全局代理、自动重试或进入 M12 |
 
 ## 里程碑状态
 
@@ -77,7 +77,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T6 已 `verified`；M11-T6 已完成固定 50 条 sparse/真实 pgvector 对照并关闭 KI-006。在线 Embedding 冒烟继续由 M11-T7 独立授权承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T6 已 `verified`；M11-T7 已获一次授权但被 Provider `quota_or_rate_limited` 阻断，尚无真实向量写入/查询 E4 证据 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -92,6 +92,7 @@
 
 - M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
 - pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
+- M11-T7 首次外部尝试见 `V-20260827-003`：Key 仅以安全布尔值确认存在；最终 Provider 返回 `embedding_provider_quota_or_rate_limited`，未发生成功向量写入、查询、usage 或费用记录。该错误码不能区分项目配额耗尽与短期限流，须由用户在平台恢复后重新授权；初始 SOCKS client 初始化失败也不是 Provider 兼容证据。
 - M11-T5 第七纵切见 `V-20260820-008/009/010`：API 27 项、相关离线回归 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL integration 110 项、M1 隔离 10 项和完整门通过；全量后端 599 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线为 `f066a90`，实现提交为 `4ec5444`。
 - 新 HTTP owner 只来自认证 Principal；兼容 create/no-version delete 保持。active list/detail、approved correction、version delete 与 audit 已固定 401/403/404/409/422；错误无事实内容，audit 只含 ID/version/action/digest。纠正后下一主 Run 只读新值，删除后再下一 Run 不读新旧值，第三个 application lifespan 恢复空 active set 和完整动作序列。
 - M11-T5 `verified` 不表示 Run/Event 与 Memory 同事务、后台扫描、mutation 自动重试、外部不可篡改审计、生产数据库、在线模型质量、Provider Token/usage 或费用已完成。SHA-256 对低熵事实仍可猜测，兼容 no-version delete 仍可绕过客户端 CAS；这些边界已显式保留给 M12/M13 或调用方迁移。
@@ -223,4 +224,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-27-m11-t6-pgvector-rag-eval.md`，再核对 `V-20260820-011/012/013`、`V-20260827-001`、`ADR-0023/0024/0025`、验证基线 `f0e4899`、实施计划 M11-T6 和实际 dataset/evaluator/tests。按 handoff 重跑 sparse/pgvector 专项和连续性；不得重做 M11-T1–T5、不得修改 `m11-rag-v1` 来粉饰结果，也不得把 eval-only 词表描述为通用模型。M11-T7 必须等待 API Key、在线开关和用户单次明确授权；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-27-m11-t7-online-embedding-blocked.md`，再核对 `V-20260827-003`、`ADR-0023/0024`、实施计划 M11-T7 和现有在线 Embedding Adapter。不要重做 M11-T1–T6、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理来绕开此次阻断。只有用户恢复 Provider 可用额度/限流窗口并再次明确授权后，才可用两段非敏感文本做一次新的在线尝试；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。
