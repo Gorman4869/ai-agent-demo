@@ -56,3 +56,11 @@
 - 失败现象与根因：无。已知直接调用 `list_concepts()` 不能证明 `@mcp.tool()` 注册有效，原因是它绕过了 MCP Client 的发现与协议调用链。
 - 下次先检查什么：先确认 Git 工作区状态，再阅读当前课程文件；第 4 周已完成运行时选型、State/条件边与 Harness 对比，从“Agents SDK 与 LangGraph 如何分别适配到统一 `AgentRuntime` 契约”继续。
 - 能迁移到哪个工作场景：为前端业务助手设计稳定的工具契约、只读知识资源、标准提示模板，并将权限校验保留在 Server。
+
+## 2026-08-27：第 3 阶段 RAG 检索与引用阶段性复盘
+
+- 本次可运行产物：在 `backend/tests/test_rag.py` 新增两篇相近资料的误召回用例；保留原有引用测试，断言 `mcp` 排在 `tool-security` 前、两者分数均为正且第一条更高。另在 `backend/tests/test_runtime_contract.py` 新增 `prompt_context` 不进入 `RuntimeRequest.__repr__()` 的脱敏测试。
+- 实际测试证据：学习者已运行 `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_rag -v`，7 项通过；并运行 `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_runtime_contract -v`，16 项通过。本轮提交前再次合并运行两组测试，共 23 项通过。
+- 我能解释：检索分数只表示候选文本的相似度，不等于证据足以回答问题；共享 “Agent / 工具” 等词会带来低正分误召回。Top-1 是相对排名，审核节点还须以最高检索分数和最低相关性阈值做绝对判断；只有至少一条证据达到阈值才允许回答。
+- 当前边界：本阶段只学习离线 RAG 检索、引用与审核拒答；尚未进入记忆、数据库、pgvector 或生产级 MCP Client 生命周期。
+- 下一步：先取得 `mcp` 与 `tool-security` 的实际分数，确定能区分两者的阈值；再由学习者以失败测试驱动审核节点拒绝低分误召回。

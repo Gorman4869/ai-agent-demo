@@ -137,6 +137,20 @@ class RuntimeContractTest(unittest.TestCase):
 
         self.assertIsNone(request.context_identity)
 
+    def test_runtime_request_hide_context_secret(self) -> None:
+        secret = "context-secret-value"
+        request = RuntimeRequest(
+            run_id="context-secret-run",
+            input_text="hello",
+            prompt_context=f"context: {secret}",
+            context_identity=RuntimeContextIdentity(
+                owner_id="owner-a",
+                session_id="session-a",
+            ),
+        )
+
+        self.assertNotIn(secret, repr(request))
+
 
 class ManualRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_direct_answer_matches_legacy_loop_and_filters_lifecycle(self) -> None:

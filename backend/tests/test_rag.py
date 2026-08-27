@@ -83,3 +83,27 @@ class RagTest(unittest.TestCase):
         self.assertTrue(knowledge.delete("delete"))
         self.assertFalse(knowledge.delete("delete"))
         self.assertEqual((), knowledge.search("abcdefghij"))
+
+    def test_similar_documents_expose_lower_score_false_retrieval(self) -> None:
+        knowledge = InMemoryKnowledgeBase(chunk_size=80, overlap=10)
+        knowledge.add(
+            Document(
+                id="mcp",
+                title="MCP 基础",
+                source="docs/mcp.md",
+                content="MCP 通过协议连接 Agent 与工具资源",
+            )
+        )
+        knowledge.add(
+            Document(
+                id="tool-security",
+                title="工具安全",
+                source="docs/rag.md",
+                content="Agent 调用工具前必须校验权限",
+            )
+        )
+        results = knowledge.search("Agent 如何连接工具", limit=3)
+        self.assertEqual(2, len(results))
+        self.assertEqual(["mcp","tool-security"], [results[0].citation.document_id, results[1].citation.document_id])
+        self.assertGreater(results[0].score, results[1].score)
+        self.assertGreater(results[1].score,0)
