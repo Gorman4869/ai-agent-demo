@@ -6,6 +6,7 @@ import unicodedata
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -21,6 +22,9 @@ from backend.app.domain.run import ModelProviderName, RuntimeName
 
 
 _MCP_SERVER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+_DASHSCOPE_BASE_URL_PATTERN = re.compile(
+    r"[a-z0-9-]+\.cn-beijing\.maas\.aliyuncs\.com"
+)
 
 
 class SettingsError(ValueError):
@@ -66,7 +70,7 @@ class EmbeddingSettings(BaseModel):
         hide_input_in_errors=True,
     )
 
-    provider: Literal["offline", "openai"] = "offline"
+    provider: Literal["offline", "openai", "dashscope"] = "offline"
     model: str | None = None
     revision: str | None = None
     dimensions: int = Field(default=3, ge=1, le=32_768)
@@ -214,6 +218,12 @@ class Settings(BaseModel):
         exclude=True,
     )
     openai_model: str | None = None
+    dashscope_api_key: SecretStr | None = Field(
+        default=None,
+        repr=False,
+        exclude=True,
+    )
+    dashscope_base_url: str | None = Field(default=None, repr=False)
     budget: RunBudgetSettings = Field(default_factory=RunBudgetSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     mcp: McpClientSettings = Field(default_factory=McpClientSettings)
@@ -253,6 +263,33 @@ class Settings(BaseModel):
             raise ValueError("OPENAI_MODEL has an invalid format")
         return normalized
 
+    @field_validator("dashscope_api_key", mode="before")
+    @classmethod
+    def normalize_dashscope_api_key(cls, value: object) -> object:
+        return _normalize_optional_secret_value(value, "DASHSCOPE_API_KEY")
+
+    @field_validator("dashscope_base_url", mode="before")
+    @classmethod
+    def normalize_dashscope_base_url(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            return None
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme != "https"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port is not None
+            or parsed.query
+            or parsed.fragment
+            or _DASHSCOPE_BASE_URL_PATTERN.fullmatch(parsed.hostname or "") is None
+            or parsed.path != "/compatible-mode/v1"
+        ):
+            raise ValueError("AI_AGENT_DASHSCOPE_BASE_URL has an invalid format")
+        return normalized
+
     @model_validator(mode="after")
     def validate_provider_gate(self) -> Settings:
         if self.trace_include_sensitive:
@@ -284,10 +321,33 @@ class Settings(BaseModel):
                 raise ValueError(
                     "openai embedding requires AI_AGENT_EMBEDDING_REVISION"
                 )
+        if self.embedding.provider == "dashscope":
+            if not self.online_enabled:
+                raise ValueError(
+                    "dashscope embedding requires the explicit online switch"
+                )
+            if self.dashscope_api_key is None:
+                raise ValueError(
+                    "dashscope embedding requires DASHSCOPE_API_KEY"
+                )
+            if self.dashscope_base_url is None:
+                raise ValueError(
+                    "dashscope embedding requires AI_AGENT_DASHSCOPE_BASE_URL"
+                )
+            if self.embedding.model != "text-embedding-v4":
+                raise ValueError(
+                    "dashscope embedding requires text-embedding-v4"
+                )
+            if self.embedding.revision is None:
+                raise ValueError(
+                    "dashscope embedding requires AI_AGENT_EMBEDDING_REVISION"
+                )
+            if self.embedding.dimensions != 64:
+                raise ValueError("dashscope embedding requires 64 dimensions")
         if (
             self.online_enabled
             and self.model_provider != "openai"
-            and self.embedding.provider != "openai"
+            and self.embedding.provider not in {"openai", "dashscope"}
         ):
             raise ValueError("online switch requires an online provider")
         return self
@@ -298,7 +358,7 @@ class Settings(BaseModel):
 
     @property
     def online_embedding_enabled(self) -> bool:
-        return self.embedding.provider == "openai" and self.online_enabled
+        return self.embedding.provider in {"openai", "dashscope"} and self.online_enabled
 
     def safe_summary(self) -> dict[str, object]:
         """Return fields suitable for logs without exposing provider secrets."""
@@ -309,6 +369,8 @@ class Settings(BaseModel):
             "trace_include_sensitive": self.trace_include_sensitive,
             "openai_api_key_configured": self.openai_api_key is not None,
             "openai_model_configured": self.openai_model is not None,
+            "dashscope_api_key_configured": self.dashscope_api_key is not None,
+            "dashscope_base_url_configured": self.dashscope_base_url is not None,
             "budget": self.budget.model_dump(mode="json"),
             "embedding": self.embedding.safe_summary(),
             "mcp": self.mcp.model_dump(mode="json"),
@@ -341,6 +403,14 @@ class Settings(BaseModel):
                 ),
                 openai_api_key=_read_optional_secret(values, "OPENAI_API_KEY"),
                 openai_model=_read_optional_text(values, "OPENAI_MODEL"),
+                dashscope_api_key=_read_optional_secret(
+                    values,
+                    "DASHSCOPE_API_KEY",
+                ),
+                dashscope_base_url=_read_optional_text(
+                    values,
+                    "AI_AGENT_DASHSCOPE_BASE_URL",
+                ),
                 budget=RunBudgetSettings(
                     max_steps=_read_int(values, "AI_AGENT_MAX_STEPS", 8),
                     max_model_calls=_read_int(
@@ -529,6 +599,25 @@ def _read_optional_secret(
 ) -> SecretStr | None:
     value = _read_optional_text(environment, name)
     return SecretStr(value) if value is not None else None
+
+
+def _normalize_optional_secret_value(value: object, name: str) -> object:
+    if value is None:
+        return None
+    if isinstance(value, SecretStr):
+        raw_value = value.get_secret_value()
+    elif isinstance(value, str):
+        raw_value = value
+    else:
+        return value
+    normalized = raw_value.strip()
+    if not normalized:
+        return None
+    if len(normalized) > 512 or any(
+        _is_control_or_whitespace(character) for character in normalized
+    ):
+        raise ValueError(f"{name} has an invalid format")
+    return SecretStr(normalized)
 
 
 def _normalize_optional_provider_label(

@@ -1,6 +1,6 @@
 # 当前实施状态
 
-- 更新时间：2026-08-20，Asia/Shanghai
+- 更新时间：2026-08-27，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
 - 最近已确认实现提交：`0b4e1d9`
@@ -61,12 +61,12 @@
 | --- | --- |
 | 任务 ID | `M11-T7` |
 | 状态 | `blocked` |
-| 目标 | 在单次授权下以真实 OpenAI Embedding 写入 pgvector 并查询，记录模型、维度、批次、耗时、usage 与费用边界 |
-| 设计依据 | 实施计划 M11-T7、已 verified 的 M11-T3/M11-T6、`ADR-0023` 与 `ADR-0024` |
+| 目标 | 在单次授权下以真实 DashScope `text-embedding-v4` 写入隔离的 64 维 pgvector 表并查询，记录模型、维度、批次、耗时、usage 与费用边界 |
+| 设计依据 | 实施计划 M11-T7、已 verified 的 M11-T3/M11-T6、`ADR-0023`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | API Key 已被当前进程识别；两次在 SDK 创建前受本机 SOCKS proxy 缺少 `socksio` 阻断，随后仅在子进程绕过 SOCKS 后触达 Provider，并得到 `embedding_provider_quota_or_rate_limited`。未完成写入/查询，临时文档数为 0 |
-| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003`、`ADR-0023`、`ADR-0024`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
-| 下一动作 | 等待用户恢复 OpenAI 项目可用额度或限流窗口；之后必须再次明确授权一次新的 M11-T7 在线尝试。不得安装 SOCKS 依赖、改全局代理、自动重试或进入 M12 |
+| 当前修改 | OpenAI 首次尝试仍保留为失败历史；已新增 DashScope 离线 Provider、受限 Workspace endpoint gate、独立 `vector(64)` pgvector migration 与 online CLI。无 Key、无网络、无费用的定向 74 项和本机 pgvector 6 项通过；真实 DashScope 未执行 |
+| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003/004`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
+| 下一动作 | 用户仅在本机配置 `DASHSCOPE_API_KEY` 与百炼 Workspace endpoint 后，明确授权一次 DashScope 在线冒烟。不得把 Key 发到聊天、安装依赖、改全局代理、自动重试或进入 M12 |
 
 ## 里程碑状态
 

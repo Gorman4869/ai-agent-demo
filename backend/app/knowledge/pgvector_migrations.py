@@ -43,16 +43,20 @@ def apply_pgvector_migrations(
     cursor: PgVectorMigrationCursor,
     *,
     migrations: tuple[SqlMigration, ...] | None = None,
+    migration_lock: str = _MIGRATION_LOCK,
+    migration_table: str = "knowledge_schema_migrations",
 ) -> tuple[int, ...]:
     planned = migrations if migrations is not None else load_pgvector_migrations()
+    if not migration_lock or not migration_table.isidentifier():
+        raise ValueError("migration metadata must be server-owned")
     try:
         cursor.execute(
             "SELECT pg_advisory_xact_lock(hashtext(%s))",
-            (_MIGRATION_LOCK,),
+            (migration_lock,),
         )
         cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS knowledge_schema_migrations (
+            f"""
+            CREATE TABLE IF NOT EXISTS {migration_table} (
                 version integer PRIMARY KEY CHECK (version > 0),
                 name text NOT NULL,
                 checksum char(64) NOT NULL,
@@ -61,9 +65,9 @@ def apply_pgvector_migrations(
             """
         )
         cursor.execute(
-            """
+            f"""
             SELECT version, name, checksum
-            FROM knowledge_schema_migrations
+            FROM {migration_table}
             ORDER BY version
             """
         )
@@ -92,8 +96,8 @@ def apply_pgvector_migrations(
                 continue
             cursor.execute(migration.sql, prepare=False)
             cursor.execute(
-                """
-                INSERT INTO knowledge_schema_migrations (
+                f"""
+                INSERT INTO {migration_table} (
                     version,
                     name,
                     checksum

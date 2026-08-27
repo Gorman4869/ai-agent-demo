@@ -7,6 +7,7 @@ from typing import Sequence
 import psycopg
 
 from backend.app.knowledge import (
+    DashScopePgVectorKnowledgeBase,
     Document,
     EmbeddingMetadata,
     PGVECTOR_DIMENSIONS,
@@ -60,6 +61,27 @@ class _TwoDimensionalEmbedding:
     def embed(self, text: str) -> Sequence[float]:
         del text
         return (1.0, 0.0)
+
+    def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[Sequence[float], ...]:
+        return tuple(self.embed(text) for text in texts)
+
+
+class _DashScopeFixtureEmbedding:
+    metadata = EmbeddingMetadata(
+        provider="dashscope",
+        model="text-embedding-v4",
+        revision="m11-t7-dashscope-v1",
+        dimensions=64,
+    )
+
+    def embed(self, text: str) -> Sequence[float]:
+        lowered = text.lower()
+        if "dashscope" in lowered or "百炼" in text:
+            return (0.0, 1.0) + (0.0,) * 62
+        return (1.0,) + (0.0,) * 63
 
     def embed_batch(
         self,
@@ -227,6 +249,50 @@ class PgVectorIntegrationTest(unittest.TestCase):
             report.thresholds.grounding_accuracy,
         )
 
+    def test_dashscope_smoke_schema_is_isolated_from_the_three_dimensional_eval_schema(
+        self,
+    ) -> None:
+        self.knowledge.initialize_schema()
+        dashscope = DashScopePgVectorKnowledgeBase(
+            create_psycopg_connection_factory(PGVECTOR_DSN),
+            _DashScopeFixtureEmbedding(),
+            chunk_size=80,
+            overlap=10,
+        )
+        self.assertEqual((1,), dashscope.initialize_schema())
+        dashscope.add(
+            Document(
+                id="dashscope-smoke",
+                title="DashScope Embedding",
+                source="course/dashscope.md",
+                content="百炼 DashScope 使用 text-embedding-v4 生成语义向量。",
+            )
+        )
+
+        results = dashscope.search("DashScope 如何生成向量？", limit=1)
+
+        self.assertEqual("dashscope-smoke", results[0].citation.document_id)
+        with psycopg.connect(PGVECTOR_DSN) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT format_type(attribute.atttypid, attribute.atttypmod)
+                    FROM pg_attribute AS attribute
+                    WHERE attribute.attrelid = 'dashscope_knowledge_chunks'::regclass
+                      AND attribute.attname = 'embedding'
+                    """
+                )
+                self.assertEqual(("vector(64)",), cursor.fetchone())
+                cursor.execute(
+                    """
+                    SELECT format_type(attribute.atttypid, attribute.atttypmod)
+                    FROM pg_attribute AS attribute
+                    WHERE attribute.attrelid = 'knowledge_chunks'::regclass
+                      AND attribute.attname = 'embedding'
+                    """
+                )
+                self.assertEqual(("vector(3)",), cursor.fetchone())
+
     def _document_snapshot(self, document_id: str) -> tuple[object, ...]:
         with psycopg.connect(PGVECTOR_DSN) as connection:
             with connection.cursor() as cursor:
@@ -257,6 +323,9 @@ class PgVectorIntegrationTest(unittest.TestCase):
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
+                    DROP TABLE IF EXISTS dashscope_knowledge_chunks CASCADE;
+                    DROP TABLE IF EXISTS dashscope_knowledge_documents CASCADE;
+                    DROP TABLE IF EXISTS dashscope_knowledge_schema_migrations CASCADE;
                     DROP TABLE IF EXISTS knowledge_chunks CASCADE;
                     DROP TABLE IF EXISTS knowledge_documents CASCADE;
                     DROP TABLE IF EXISTS knowledge_schema_migrations CASCADE;

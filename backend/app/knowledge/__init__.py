@@ -30,6 +30,12 @@ from .openai_embeddings import (
     OpenAIEmbeddingProvider,
     create_openai_embedding_client_factory,
 )
+from .dashscope_pgvector import (
+    DASHSCOPE_CHUNK_TABLE,
+    DASHSCOPE_DOCUMENT_TABLE,
+    DASHSCOPE_EMBEDDING_DIMENSIONS,
+    DashScopePgVectorKnowledgeBase,
+)
 from .pgvector import (
     DatabaseConnectionFactory,
     PGVECTOR_DIMENSIONS,
@@ -43,9 +49,13 @@ __all__ = [
     "DEMO_COURSE_DOCUMENT",
     "BatchingEmbeddingModel",
     "Citation",
+    "DASHSCOPE_CHUNK_TABLE",
+    "DASHSCOPE_DOCUMENT_TABLE",
+    "DASHSCOPE_EMBEDDING_DIMENSIONS",
     "DatabaseConnectionFactory",
     "DeterministicEmbeddingProvider",
     "Document",
+    "DashScopePgVectorKnowledgeBase",
     "EmbeddingAuthenticationError",
     "EmbeddingBatchError",
     "EmbeddingCache",

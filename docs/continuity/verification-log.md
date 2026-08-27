@@ -3542,3 +3542,23 @@
 
 - M11-T7 未达到真实向量写入与查询验收，状态为 `blocked`。解除条件是用户确认 Provider 配额/限流已恢复，并再次明确授权新的在线尝试。
 - 没有修改代码、依赖、默认离线配置、全局代理、数据库 schema 或前端；不安装 `socksio`，不自动重试。
+
+## V-20260827-004：M11-T7 DashScope 64 维离线准备（code complete，E3）
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-27，Asia/Shanghai
+- 验证目标：在不读取 Key、不开启网络调用的前提下，验证 DashScope `text-embedding-v4` 的显式 gate、OpenAI-compatible 请求形状、错误脱敏，以及与既有三维评测表隔离的真实 pgvector `vector(64)` schema。
+- 验证基线：`374514a`；本轮未执行外部 API，费用为 0。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_settings backend.tests.test_openai_embeddings backend.tests.test_dashscope_embeddings backend.tests.test_pgvector backend.tests.test_dashscope_pgvector backend.tests.test_container -q` | 0 | 74 项通过；覆盖离线默认、DashScope key/base URL/model/64 维 gate、SDK 请求体、错误脱敏、容器懒构造、原 OpenAI 回归与独立 migration Fake 合同 |
+| 配置本机 integration DSN 后运行 `backend.tests.pgvector_integration` | 0 | 6 项真实 localhost pgvector 通过；新用例同时断言 `knowledge_chunks` 保持 `vector(3)`、`dashscope_knowledge_chunks` 为 `vector(64)`，并完成写入/查询 |
+| `./.venv/Scripts/python.exe -B -m backend.app.evals.dashscope_embedding_smoke` | 2（预期） | 未带 `--authorized` 时 fail-closed 为 `online_authorization_required`，没有读取 Key 或联网 |
+| `git diff --check` | 0 | 通过；只有 Git 的 LF/CRLF 提示 |
+
+### 警告与未验证范围
+
+- 首次 pgvector 命令误用了 `postgres` role，实际容器返回 `role "postgres" does not exist`；随后按仓库 integration Compose 的 `ai_agent` role 重跑通过。该失败是测试 DSN 配置错误，不是代码回归。
+- 非必需的 `compileall` 尝试写入既有 `__pycache__` 时受工作区权限拒绝；所有验证命令均使用 `-B`，模块的无授权入口已实际执行。没有修改或清理任何缓存文件。
+- 未配置或读取 `DASHSCOPE_API_KEY`，未调用百炼，未验证真实 endpoint、Provider usage、实际费用、网络代理兼容性或在线返回语义。M11-T7 继续为 `blocked`，只能在用户新的单次授权后运行受控 CLI。

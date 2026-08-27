@@ -49,6 +49,7 @@ class OpenAIEmbeddingProvider:
         self,
         client_factory: OpenAIEmbeddingClientFactory,
         *,
+        provider_name: str = "openai",
         model: str,
         revision: str,
         dimensions: int,
@@ -56,7 +57,7 @@ class OpenAIEmbeddingProvider:
     ) -> None:
         self._client_factory = client_factory
         self._metadata = EmbeddingMetadata(
-            provider="openai",
+            provider=_required_label(provider_name, "provider"),
             model=_required_label(model, "model"),
             revision=_required_label(revision, "revision"),
             dimensions=dimensions,
@@ -110,6 +111,7 @@ def create_openai_embedding_client_factory(
     *,
     api_key: str,
     timeout_ms: int,
+    base_url: str | None = None,
 ) -> OpenAIEmbeddingClientFactory:
     """Create explicit per-batch SDK clients with SDK retries disabled."""
 
@@ -121,13 +123,17 @@ def create_openai_embedding_client_factory(
     ):
         raise ValueError("timeout_ms must be a positive integer")
 
+    client_options: dict[str, object] = {
+        "api_key": resolved_key,
+        "timeout": timeout_ms / 1_000,
+        "max_retries": 0,
+    }
+    if base_url is not None:
+        client_options["base_url"] = _required_label(base_url, "base_url")
+
     @contextmanager
     def create_client():
-        client = openai.OpenAI(
-            api_key=resolved_key,
-            timeout=timeout_ms / 1_000,
-            max_retries=0,
-        )
+        client = openai.OpenAI(**client_options)
         try:
             yield cast(OpenAIEmbeddingClient, client)
         finally:

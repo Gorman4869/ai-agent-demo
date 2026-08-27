@@ -468,24 +468,44 @@ def create_embedding_model(
             batch_size=config.batch_size,
             cache=cache,
         )
-    if (
-        not settings.online_embedding_enabled
-        or settings.openai_api_key is None
-        or config.model is None
-        or config.revision is None
-    ):
-        raise ValueError("openai embedding requires complete settings")
+    if config.provider == "openai":
+        if (
+            not settings.online_embedding_enabled
+            or settings.openai_api_key is None
+            or config.model is None
+            or config.revision is None
+        ):
+            raise ValueError("openai embedding requires complete settings")
+        api_key = settings.openai_api_key.get_secret_value()
+        provider_name = "openai"
+        base_url = None
+    elif config.provider == "dashscope":
+        if (
+            not settings.online_embedding_enabled
+            or settings.dashscope_api_key is None
+            or settings.dashscope_base_url is None
+            or config.model is None
+            or config.revision is None
+        ):
+            raise ValueError("dashscope embedding requires complete settings")
+        api_key = settings.dashscope_api_key.get_secret_value()
+        provider_name = "dashscope"
+        base_url = settings.dashscope_base_url
+    else:
+        raise ValueError("embedding provider is not supported")
 
     client_factory = (
         openai_client_factory
         if openai_client_factory is not None
         else create_openai_embedding_client_factory(
-            api_key=settings.openai_api_key.get_secret_value(),
+            api_key=api_key,
             timeout_ms=config.request_timeout_ms,
+            base_url=base_url,
         )
     )
     provider = OpenAIEmbeddingProvider(
         client_factory,
+        provider_name=provider_name,
         model=config.model,
         revision=config.revision,
         dimensions=config.dimensions,
