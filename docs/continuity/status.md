@@ -51,6 +51,7 @@
 - M11-T5 第六纵切验证基线提交：`7954c23`；实现提交：`9ae5e8a`
 - M11-T5 第七纵切验证基线提交：`f066a90`；实现提交：`4ec5444`
 - M11-T6 第一纵切验证基线提交：`f441615`；实现提交：`07ec390`
+- M11-T6 第二纵切验证基线提交：`f0e4899`；验证记录：`V-20260827-001`
 - 远程仓库：未配置
 - 在线付费调用：未授权执行
 
@@ -59,13 +60,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M11-T6` |
-| 状态 | `in_progress` |
+| 状态 | `verified` |
 | 目标 | 用不少于 50 条版本化查询固定 sparse/pgvector 的 Recall@K、MRR、回答依据正确率、阈值、延迟边界和失败分析 |
 | 设计依据 | 实施计划 M11-T6、已 verified 的 M11-T2–T5、`ADR-0023`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 第一纵切固定 `m11-rag-v1` 的 10 篇文档、50 条查询、相关文档/依据词、top_k 与 sparse/pgvector 阈值；通用 evaluator 计算 Recall@K/MRR/依据正确率并输出内容安全失败分析，真实 sparse 基线三项均为 1.0 |
-| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T2/T3/T5 实现提交 `7ebaa16`/`02664b8`/`4ec5444`、M11-T6 第一纵切实现提交 `07ec390` |
-| 下一动作 | 开始 M11-T6 第二纵切：只用同一 `m11-rag-v1` canonical 内容摘要、top_k 与冻结阈值执行真实 pgvector，形成 sparse/pgvector 对照和实际失败分析；不得为通过而静默改数据或阈值，不进入 M11-T7/前端 |
+| 当前修改 | 第二纵切以同一 `m11-rag-v1` canonical 摘要、50 条、top_k=3 与冻结阈值，使用真实 pgvector cosine/HNSW 和显式 eval-only 三维课程主题 Embedding 形成对照；sparse 为 1.0/1.0/1.0，pgvector 为 0.98/0.946667/0.98，并保留 1 条漏召回失败分析 |
+| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T2/T3/T5 实现提交 `7ebaa16`/`02664b8`/`4ec5444`、M11-T6 第一纵切实现提交 `07ec390` |
+| 下一动作 | M11-T6 已 verified。仅在用户提供 API Key、开启在线开关并作单次明确授权时，开始独立的 M11-T7 在线 Embedding 冒烟；不得把 eval-only 词表描述为通用或生产模型，不进入前端 |
 
 ## 里程碑状态
 
@@ -76,7 +77,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T5 已 `verified`；M11-T6 第一纵切已固定 50 条 RAG 数据集、指标/阈值与 sparse 基线，真实 pgvector 对照仍缺。在线冒烟继续由 M11-T7 独立授权承接 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T6 已 `verified`；M11-T6 已完成固定 50 条 sparse/真实 pgvector 对照并关闭 KI-006。在线 Embedding 冒烟继续由 M11-T7 独立授权承接 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -89,8 +90,8 @@
 
 ## 未验证范围
 
-- M11-T6 第一纵切见 `V-20260820-011/012/013`：新专项 12 项、Knowledge/Embedding/pgvector/Context/eval 相关 78 项、M1 隔离 10 项、sparse CLI 50 条与连续性通过；实现提交为 `07ec390`。版本 `m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，Recall@3/MRR/依据正确率为 1.0/1.0/1.0，高于冻结阈值 0.9/0.8/0.9。
-- 第一纵切只证明真实 `InMemoryKnowledgeBase.search()` 上的固定 sparse E3 和通用指标/脱敏合同。尚未用同一数据与阈值运行真实 pgvector，没有 retriever 对照结论；本地 wall-clock 不是生产延迟，Provider usage unavailable、费用 unknown，也不是在线模型回答质量。
+- M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
+- pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
 - M11-T5 第七纵切见 `V-20260820-008/009/010`：API 27 项、相关离线回归 115 项、真实 PostgreSQL application lifespan 2 项、完整 PostgreSQL integration 110 项、M1 隔离 10 项和完整门通过；全量后端 599 项通过、1 项既有 Windows symlink 能力跳过，Code Agent、依赖、Vue、MCP TypeScript 与 Compose 配置通过。验证基线为 `f066a90`，实现提交为 `4ec5444`。
 - 新 HTTP owner 只来自认证 Principal；兼容 create/no-version delete 保持。active list/detail、approved correction、version delete 与 audit 已固定 401/403/404/409/422；错误无事实内容，audit 只含 ID/version/action/digest。纠正后下一主 Run 只读新值，删除后再下一 Run 不读新旧值，第三个 application lifespan 恢复空 active set 和完整动作序列。
 - M11-T5 `verified` 不表示 Run/Event 与 Memory 同事务、后台扫描、mutation 自动重试、外部不可篡改审计、生产数据库、在线模型质量、Provider Token/usage 或费用已完成。SHA-256 对低熵事实仍可猜测，兼容 no-version delete 仍可绕过客户端 CAS；这些边界已显式保留给 M12/M13 或调用方迁移。
@@ -222,4 +223,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-20-m11-t6-rag-eval-foundation.md`，再核对 `V-20260820-011/012`、`ADR-0023/0024/0025`、验证基线 `f441615`、第一纵切实现提交字段、实施计划 M11-T6 和实际 dataset/evaluator/tests。按 handoff 重跑新专项 12 项、sparse CLI 50 条和连续性；若一致，不要重做 M11-T1–T5 或修改 `m11-rag-v1` 来粉饰结果，下一步只接同一 canonical 内容摘要与阈值的真实 pgvector 对照。不修改前端、不提前进入 M11-T7/M12/M13；没有用户新的明确授权，不得安装依赖、读取 Key、执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-27-m11-t6-pgvector-rag-eval.md`，再核对 `V-20260820-011/012/013`、`V-20260827-001`、`ADR-0023/0024/0025`、验证基线 `f0e4899`、实施计划 M11-T6 和实际 dataset/evaluator/tests。按 handoff 重跑 sparse/pgvector 专项和连续性；不得重做 M11-T1–T5、不得修改 `m11-rag-v1` 来粉饰结果，也不得把 eval-only 词表描述为通用模型。M11-T7 必须等待 API Key、在线开关和用户单次明确授权；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。

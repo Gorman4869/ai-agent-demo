@@ -798,6 +798,14 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 新增 12 个关键测试方法；覆盖版本/数量/canonical 摘要、固定阈值、指标与首相关排名、空召回、无关文本不能掩盖依据缺失、未知文档脱敏、非法标注/schema/数量和默认 50 条基线。扩大 Knowledge/Embedding/pgvector/Context/eval 相关回归 78 项与 M1 隔离 10 项通过。
 - 本纵切达到 sparse 指标合同的离线 E3，但 M11-T6 保持 `in_progress`：尚未用同一数据集和阈值执行真实 pgvector，也没有形成两种 retriever 的固定对照与实际失败分析。下一纵切不得静默修改 `m11-rag-v1` 数据或阈值来让 pgvector 通过；需要修正 fixture 时必须升版本并保留旧摘要证据。
 
+#### M11-T6 第二个真实 pgvector 纵切与任务验收结果
+
+- 新增明确仅供评测使用的三维、确定性课程主题 Embedding；它只识别固定课程词汇，不读取 Key、不调用在线 Provider，不能作为通用语义模型或生产检索质量的证据。
+- 使用现有 `PgVectorKnowledgeBase` 的真实 PostgreSQL `vector(3)` 列、cosine distance 与 HNSW 索引，对未改动的 `m11-rag-v1` 同一 canonical 摘要、50 条查询、`top_k=3` 和冻结阈值运行评测。新增集成测试直接断言 pgvector 报告通过。
+- sparse/pgvector 对照：sparse 为 Recall@3/MRR/依据正确率 `1.0/1.0/1.0`；pgvector 为 `0.98/0.946667/0.98`，通过 `0.9/0.8/0.9` 阈值。pgvector 保留 1 条 `memory-04` 漏召回及相关稳定失败码，未通过修改 fixture、标注或阈值隐藏它。
+- 新增 Embedding 单元测试 2 项，既有真实 pgvector integration 5 项和固定 sparse 专项 12 项通过；报告和 CLI 仍不输出 query、依据词或 excerpt。本地 wall-clock 仅作受控进程参考，usage unavailable、费用 unknown。
+- M11-T6 达到 `verified`，`KI-006` 关闭。在线 Embedding、生产容量/延迟、开放域质量、Provider Token/账单与持久/跨进程缓存仍不在本任务结论中；M11-T7 只能在 API Key、在线开关和用户单次授权后独立执行。
+
 ### M11-T7：显式在线 Embedding 冒烟
 
 - 依赖：M11-T3、M11-T6。

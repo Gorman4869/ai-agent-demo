@@ -3468,3 +3468,32 @@
 
 - 实现提交上的固定数据集、规范化内容摘要、sparse 指标、阈值和内容安全报告合同均保持稳定；第一纵切证据闭环。
 - M11-T6 仍为 `in_progress`：真实 pgvector 同数据对照和实际失败分析尚未执行，不能提升为 `verified`。
+
+## V-20260827-001：M11-T6 真实 pgvector 固定对照
+
+- 任务：`M11-T6 / verified`
+- 时间：2026-08-27，Asia/Shanghai
+- 验证目标：基线 HEAD `f0e4899` 上的第二纵切工作区
+- 模式：本地离线 E3 加本机 Docker pgvector；容器仅绑定 `127.0.0.1:55433`，无网络、无 Key、无在线 Provider、费用 0
+- 依赖事实：复用 `PgVectorKnowledgeBase`、既有 PostgreSQL vector(3)/cosine/HNSW migration、固定 `m11-rag-v1` fixture 与通用 evaluator；没有修改 fixture、查询、标注、top_k、阈值、公共 API、数据库 schema、前端或依赖
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -X utf8 -B -m unittest backend.tests.test_rag_retrieval_eval -q` | 0 | 固定 sparse fixture/evaluator 12 项通过，确认第二纵切未改变数据集与既有合同 |
+| `./.venv/Scripts/python.exe -X utf8 -B -m unittest backend.tests.test_pgvector_rag_retrieval -v` | 0 | 新增评测专用 Embedding 的匹配主题与空 DSN 2 项通过 |
+| 配置 `AI_AGENT_TEST_PGVECTOR_DSN` 后运行 `backend.tests.pgvector_integration` | 0 | 真实 pgvector 5 项通过；包含固定 50 条评估及既有 migration、replace/delete、rollback、seed 合同 |
+| 同一 DSN 调用 pgvector CLI 入口 | 0 | 输出 JSON；dataset digest 保持 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`；50 条、top_k=3，Recall@3/MRR/依据正确率为 `0.98/0.946667/0.98`，高于 `0.9/0.8/0.9`；无阈值失败码 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、116 份 Markdown 通过 |
+
+### 失败分析与边界
+
+- 首次主题词表覆盖不足时，真实集成测试失败，报告为 Recall@3 `0.84`、MRR `0.806667`、依据正确率 `0.84`；失败来自同一课程概念的换说法和跨主题 `Context` 词，不是容器或沙箱故障。随后只补全从课程材料可推出的概念锚点，没有改动 fixture、标注或阈值。
+- 最终报告仍保留 `memory-04` 的漏召回、未排名和依据缺失三个失败码；指标按冻结阈值通过，不把它删除或掩盖。pgvector 的本地 wall-clock 为一次受控进程测量（约 596ms 总计、11.923ms 平均），不是生产延迟承诺。
+- 三维词表模型明确仅用于此有界、离线课程评测；它不证明开放域语义能力或生产模型质量。Provider usage unavailable、费用 unknown；没有在线 API、Token、账单、生产容量、持久/跨进程 embedding cache 或模型答案质量证据。
+
+### 结论
+
+- M11-T6 的固定 sparse/真实 pgvector 对照、指标、阈值、延迟边界和失败分析均已具备可复现证据，任务达到 `verified`，`KI-006` 关闭。
+- M11-T7 的在线 Embedding 冒烟仍需要 API Key、显式开关和用户单次授权；本轮不进入该任务。

@@ -13,6 +13,9 @@ from backend.app.knowledge import (
     PgVectorKnowledgeBase,
     create_psycopg_connection_factory,
 )
+from backend.app.evals.pgvector_rag_retrieval import (
+    run_default_pgvector_rag_eval,
+)
 
 
 PGVECTOR_DSN = os.environ.get("AI_AGENT_TEST_PGVECTOR_DSN", "")
@@ -204,6 +207,25 @@ class PgVectorIntegrationTest(unittest.TestCase):
         self.assertEqual(1, len(results))
         self.assertEqual("Original", results[0].citation.title)
         self.assertEqual("course/original.md", results[0].citation.source)
+
+    def test_fixed_rag_evaluation_uses_real_pgvector_search(self) -> None:
+        report = run_default_pgvector_rag_eval(PGVECTOR_DSN)
+
+        self.assertTrue(report.passed)
+        self.assertEqual("m11-rag-v1", report.dataset_version)
+        self.assertEqual(50, len(report.results))
+        self.assertGreaterEqual(
+            report.recall_at_k,
+            report.thresholds.recall_at_k,
+        )
+        self.assertGreaterEqual(
+            report.mean_reciprocal_rank,
+            report.thresholds.mean_reciprocal_rank,
+        )
+        self.assertGreaterEqual(
+            report.grounding_accuracy,
+            report.thresholds.grounding_accuracy,
+        )
 
     def _document_snapshot(self, document_id: str) -> tuple[object, ...]:
         with psycopg.connect(PGVECTOR_DSN) as connection:
