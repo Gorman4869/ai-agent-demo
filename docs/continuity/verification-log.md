@@ -3497,3 +3497,22 @@
 
 - M11-T6 的固定 sparse/真实 pgvector 对照、指标、阈值、延迟边界和失败分析均已具备可复现证据，任务达到 `verified`，`KI-006` 关闭。
 - M11-T7 的在线 Embedding 冒烟仍需要 API Key、显式开关和用户单次授权；本轮不进入该任务。
+
+## V-20260827-002：M11-T6 实现提交后复验
+
+- 任务：`M11-T6 / verified`
+- 时间：2026-08-27，Asia/Shanghai
+- 验证目标：实现提交 `0b4e1d9`（`feat: evaluate fixed RAG corpus with pgvector`）
+- 模式：本地离线 E3 加本机 Docker pgvector；无网络、无 Key、费用 0
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -X utf8 -B -m unittest backend.tests.test_rag_retrieval_eval -q` | 0 | 12 项通过 |
+| `./.venv/Scripts/python.exe -X utf8 -B -m unittest backend.tests.test_pgvector_rag_retrieval -q` | 0 | 2 项通过 |
+| 配置本地测试 DSN 后运行 `backend.tests.pgvector_integration` | 0 | 5 项真实 pgvector 集成通过 |
+| pgvector CLI 入口 | 0 | JSON 报告 50 条通过；指标 `0.98/0.946667/0.98`，保留 1 条失败分析 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、116 份 Markdown 通过 |
+
+### 结论
+
+- 实现提交后的固定 sparse/pgvector 对照、内容安全报告、真实数据库集成和连续性均保持通过。M11-T6 继续为 `verified`；在线 Provider、生产容量/延迟和模型答案质量不在本次结论内。

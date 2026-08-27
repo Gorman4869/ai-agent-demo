@@ -3,6 +3,7 @@
 - 日期：2026-08-27
 - 任务：`M11-T6 / verified`
 - 验证基线：`f0e4899`
+- 实现提交：`0b4e1d9`（`feat: evaluate fixed RAG corpus with pgvector`）
 - 主要证据：`V-20260820-011/012/013`、`V-20260827-001`、`ADR-0023`、`ADR-0024`、`ADR-0025`
 
 ## 已完成
