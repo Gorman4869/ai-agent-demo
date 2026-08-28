@@ -32,6 +32,8 @@ onMounted(desk.initialize)
 
         <dl class="facts">
           <div><dt>SESSION</dt><dd>{{ desk.sessionId.value.slice(0, 8) || 'connecting' }}</dd></div>
+          <div><dt>RUN</dt><dd>{{ desk.runId.value.slice(0, 8) || 'not started' }}</dd></div>
+          <div><dt>SEQUENCE</dt><dd>{{ desk.sequence.value }}</dd></div>
           <div><dt>EVENTS</dt><dd>{{ desk.events.value.length }}</dd></div>
           <div><dt>SOURCES</dt><dd>{{ desk.evidence.value.length }}</dd></div>
         </dl>
@@ -55,17 +57,43 @@ onMounted(desk.initialize)
           v-model="desk.question.value"
           rows="4"
           maxlength="4000"
-          :disabled="desk.status.value === 'running'"
+          :disabled="!desk.canRun.value"
         ></textarea>
         <div class="prompt-actions">
           <span>{{ desk.question.value.length }} / 4000</span>
-          <button v-if="desk.status.value === 'running'" class="button button--ghost" @click="desk.cancel">停止</button>
+          <button
+            v-if="desk.canCancel.value"
+            class="button button--ghost"
+            :disabled="desk.isCancelling.value"
+            @click="desk.cancel"
+          >
+            {{ desk.isCancelling.value ? '正在停止…' : '停止' }}
+          </button>
           <button v-else class="button" :disabled="!desk.canRun.value" @click="desk.run">
             启动研究 <span>↗</span>
           </button>
         </div>
 
         <p v-if="desk.error.value" class="error-note" role="alert">{{ desk.error.value }}</p>
+
+        <section v-if="desk.approval.value" class="approval-card" aria-live="assertive">
+          <div>
+            <strong>工具操作等待审批</strong>
+            <p>{{ desk.approval.value.toolName }}</p>
+          </div>
+          <div class="approval-actions">
+            <button
+              class="button button--ghost"
+              :disabled="desk.isResolvingApproval.value"
+              @click="desk.decideApproval('reject')"
+            >拒绝</button>
+            <button
+              class="button"
+              :disabled="desk.isResolvingApproval.value"
+              @click="desk.decideApproval('approve')"
+            >批准</button>
+          </div>
+        </section>
 
         <article class="answer-block" aria-live="polite">
           <div class="answer-meta">
@@ -86,6 +114,20 @@ onMounted(desk.initialize)
             </article>
           </div>
           <p v-else class="empty-evidence">装载课程资料后运行问题，观察检索来源与相关度。</p>
+        </section>
+
+        <section class="usage-section">
+          <div class="section-title"><span>MODEL USAGE</span><span>SAME RUN</span></div>
+          <dl v-if="desk.usage.value" class="usage-grid">
+            <div><dt>INPUT</dt><dd>{{ desk.usage.value.input_tokens }}</dd></div>
+            <div><dt>OUTPUT</dt><dd>{{ desk.usage.value.output_tokens }}</dd></div>
+            <div><dt>TOTAL</dt><dd>{{ desk.usage.value.total_tokens }}</dd></div>
+            <div>
+              <dt>COST USD</dt>
+              <dd>{{ desk.usage.value.estimated_cost_usd === null ? '未知' : desk.usage.value.estimated_cost_usd.toFixed(6) }}</dd>
+            </div>
+          </dl>
+          <p v-else class="empty-evidence">当前 Run 尚未报告模型用量；未知不代表 0。</p>
         </section>
       </section>
 

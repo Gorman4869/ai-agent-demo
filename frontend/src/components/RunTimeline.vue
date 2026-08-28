@@ -5,22 +5,33 @@ defineProps<{ events: AgentEvent[] }>()
 
 const eventLabels: Record<string, string> = {
   'run.started': '运行已启动',
+  'run.resumed': '审批后继续运行',
+  'run.waiting_approval': '等待工具审批',
+  'context.failed': '上下文准备失败',
+  'rag.citations': '检索引用已固定',
+  'model.output.delta': '模型输出片段',
+  'model.usage': '模型用量已报告',
   'tool.started': '工具开始执行',
   'tool.completed': '工具执行完成',
   'tool.failed': '工具执行失败',
   'run.completed': '答案已完成',
   'run.failed': '运行失败',
+  'run.cancelled': '运行已取消',
+}
+
+function eventName(event: AgentEvent): string {
+  return event.type === 'unknown' ? event.eventType : event.type
 }
 </script>
 
 <template>
   <ol class="timeline" aria-label="Agent 运行事件" aria-live="polite">
     <li v-if="events.length === 0" class="timeline__empty">事件流将在这里留下可审计足迹。</li>
-    <li v-for="event in events" :key="`${event.data.run_id}-${event.data.index}`" class="timeline__item">
+    <li v-for="event in events" :key="`${event.data.run_id}-${event.data.sequence}`" class="timeline__item">
       <span class="timeline__marker" aria-hidden="true"></span>
       <div>
-        <strong>{{ eventLabels[event.type] ?? event.type }}</strong>
-        <small>#{{ event.data.index + 1 }} · {{ new Date(event.receivedAt).toLocaleTimeString() }}</small>
+        <strong>{{ eventLabels[eventName(event)] ?? eventName(event) }}</strong>
+        <small>#{{ event.data.sequence }} · {{ new Date(event.receivedAt).toLocaleTimeString() }}</small>
       </div>
     </li>
   </ol>

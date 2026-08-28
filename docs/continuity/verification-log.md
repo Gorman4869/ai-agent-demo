@@ -3744,3 +3744,25 @@
 - durable snapshot 逐页读取同 owner 的 EventStore，最新有效 `rag.citations` 与 `scope=run` 的 `model.usage` 是唯一投影来源。它不会查询当前 KnowledgeBase、执行 Runtime、拼接所有 Context，或从其它 Run/Session 聚合。
 - citation 仅公开 title、source、excerpt 和有限 score。document ID、query、prompt、Memory、最近消息、系统策略、Skill 内容、owner/session 均不进入该事件或 HTTP snapshot。畸形进度事件被忽略；未知 usage 或费用继续为 null，不能解释为零。
 - 默认离线 ManualRuntime 没有 `model.usage`，所以真实 PostgreSQL Run 的 usage 为 null 是预期契约。M12-T3 没有建立成本账本、价格表或预算控制；这些仍属于 M13。Vue 消费、浏览器 E2E 与 legacy Research API 退出仍未实现。
+
+## V-20260828-011：M12-T4 Vue durable Run 状态机（code_complete，C0/E2）
+
+- 任务：`M12-T4 / code_complete`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：将 Vue 从 legacy stream + 独立 Research 双链迁移到同一 durable Run，固定类型化事件、Run/sequence 标签页恢复、有界重连、审批、取消、citations 与 usage 展示的静态合同。
+- 验证基线：`9ef3eb6`。
+- 任务等级：A 类 capability、状态恢复和公开流协议；默认离线。未读取 Key、未调用 Provider、数据库或外部网络，费用为 0。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `npm.cmd run build`（`frontend`） | 0 | `vue-tsc -b && vite build` 通过；Vite 8.1.4，19 modules transformed，生产 bundle 成功生成。首次构建发现 `run.failed/run.cancelled` 联合分支未按字面量收窄，拆分后最终通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_persistent_run_api backend.tests.test_persistent_sse backend.tests.test_durable_run_projection -q` | 0 | 19 项通过；durable create/query/cancel/approval、owner/capability、SSE after/终态与同 Run citations/usage snapshot 的既有公共契约回归通过 |
+| `rg -n -e "createSession" -e "research\(" -e "streamRun\(" -e "/api/research" -e "/api/sessions/.*/runs/stream" -e "localStorage" frontend/src` | 1（预期无命中） | Vue 源码不再调用 legacy session/stream 或独立 Research API，也未使用 `localStorage` |
+| `git diff --check` | 0 | 通过；仅有 Git 的 LF/CRLF 工作树提示 |
+
+### 结论与边界
+
+- `AgentEvent` 已成为已评审事件的判别联合；SSE parser 校验事件 ID、Run envelope、sequence、关键 payload、citation 和 usage，加工未知事件时不让它改变已知业务状态。状态机只应用当前 Run 的严格递增 sequence，重复事件被忽略、缺口 fail closed。
+- 首个匿名幂等键由浏览器安全随机源生成，capability 仅保存在当前标签页版本化 `sessionStorage`；刷新先读 owner-scoped snapshot，再从最后已应用 sequence 续传。该方案仍受同源 XSS 影响，不是生产凭证安全或持久会话结论。
+- 组件卸载只断开 SSE，不取消服务端 Run；取消必须调用 durable cancel API。approval 只提交 ID + approve/reject，工具绑定继续由服务端持久事件恢复。answer/citations/usage 的最终值只取同 Run snapshot，不再被 `/api/research` 覆盖。
+- 本证据只有 TypeScript/Vite 构建与静态源码检查，未运行 SSE 分帧/无效 JSON/重复事件单测，也未验证真实浏览器断线、刷新、审批或取消。按实施计划这些属于 M12-T5，因此 M12-T4 只能是 `code_complete`，不能写为 verified。
