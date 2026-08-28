@@ -3577,3 +3577,20 @@
 
 - 本次授权只覆盖已执行的一次命令，不能自动重试。下一次尝试前，用户须在 Codex 本机环境补充 `AI_AGENT_TEST_PGVECTOR_DSN=postgresql://ai_agent@127.0.0.1:55433/ai_agent_integration?sslmode=disable`，并重新明确授权。
 - `pgvector_dsn_required` 是本机环境预检失败，不是百炼 Key、endpoint、模型、网络或 Provider 兼容性结论；M11-T7 保持 `blocked`。
+
+## V-20260828-002：M11-T7 执行器环境可见性检查（blocked）
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：在用户补充 pgvector DSN 并第二次明确授权后，区分“变量未进入 Codex 执行器”与数据库、百炼或 Provider 失败。
+
+| 动作 | 结果 | 证据 |
+| --- | --- | --- |
+| `dashscope_embedding_smoke --authorized` | 预检停止 | 再次返回 `pgvector_dsn_required`；未触达 Provider、未写入/查询临时文档、无 usage/费用 |
+| 配置可见性只读检查 | 未通过 | `DASHSCOPE_API_KEY`、`AI_AGENT_DASHSCOPE_BASE_URL` 与 `AI_AGENT_TEST_PGVECTOR_DSN` 在执行器中均为 `configured=false`；只输出布尔值，未读取或输出任何变量内容 |
+| 项目级 Codex 配置文件名检查 | 无入口 | `.codex` 与 `.agents` 下没有项目环境变量配置文件；未读取用户凭证文件 |
+
+### 结论
+
+- 第二次授权已使用，不能自动重试。用户之前的配置没有传入 Codex 的命令执行器；须先确认采用的配置位置，再进行第三次尝试。
+- 该结果不证明数据库不可达、Key 无效、endpoint 格式错误、模型不可用或网络不通；M11-T7 继续 `blocked`。
