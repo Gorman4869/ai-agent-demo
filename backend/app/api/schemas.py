@@ -30,6 +30,65 @@ class RunResponse(BaseModel):
     error: str | None = None
 
 
+class DurableRunRequest(BaseModel):
+    """Public input for the M12 durable Run API."""
+
+    message: str = Field(min_length=1, max_length=4_000)
+    session_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("message must not be blank")
+        return value
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value != value.strip() or any(
+            character.isspace() or not character.isprintable()
+            for character in value
+        ):
+            raise ValueError("session_id has an invalid format")
+        return value
+
+
+class DurableRunErrorResponse(BaseModel):
+    code: str
+    category: str
+    retryable: bool
+
+
+class DurableRunResponse(BaseModel):
+    id: str
+    run_id: str
+    session_id: str
+    status: Literal[
+        "queued",
+        "running",
+        "waiting_approval",
+        "completed",
+        "failed",
+        "cancelled",
+    ]
+    answer: str | None = None
+    citations: list[EvidenceResponse] = Field(default_factory=list)
+    usage: ModelUsageResponse | None = None
+    error: DurableRunErrorResponse | None = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    session_capability: str | None = None
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+
+
 class DocumentRequest(BaseModel):
     id: str = Field(min_length=1, max_length=100)
     title: str = Field(min_length=1, max_length=200)

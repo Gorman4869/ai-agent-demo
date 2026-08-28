@@ -149,6 +149,70 @@ class PostgresMemoryStoreContractTest(
 
 
 class PostgresFastApiApplicationTest(unittest.TestCase):
+    def test_durable_run_api_replays_and_reads_after_application_restart(self) -> None:
+        token = f"postgres-durable-token-{uuid4()}"
+        owner_id = f"postgres-durable-owner-{uuid4()}"
+        idempotency_key = f"postgres-durable-key-{uuid4()}"
+        auth_config = json.dumps(
+            {token: {"principal_id": owner_id, "roles": []}}
+        )
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN,
+            }
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": idempotency_key,
+        }
+
+        with patch.dict(
+            os.environ,
+            {"AI_AGENT_DEMO_AUTH_JSON": auth_config},
+            clear=False,
+        ):
+            first_app = create_app(settings=settings)
+            with TestClient(first_app) as client:
+                created = client.post(
+                    "/api/durable/runs",
+                    headers=headers,
+                    json={"message": "postgres durable run"},
+                )
+                replayed = client.post(
+                    "/api/durable/runs",
+                    headers=headers,
+                    json={"message": "postgres durable run"},
+                )
+
+                self.assertEqual(202, created.status_code)
+                self.assertEqual(202, replayed.status_code)
+                self.assertEqual(created.json()["id"], replayed.json()["id"])
+                self.assertIsNone(created.json()["session_capability"])
+                run_id = created.json()["id"]
+                session_id = created.json()["session_id"]
+                self.assertEqual(
+                    200,
+                    client.get(
+                        f"/api/durable/runs/{run_id}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    ).status_code,
+                )
+                self.assertEqual(
+                    "PostgresRunStore",
+                    type(first_app.state.container.run_store).__name__,
+                )
+
+            second_app = create_app(settings=settings)
+            with TestClient(second_app) as client:
+                listed = client.get(
+                    f"/api/durable/sessions/{session_id}/runs",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+                self.assertEqual(200, listed.status_code)
+                self.assertEqual([run_id], [item["id"] for item in listed.json()])
+
     def test_lifespan_persists_memory_across_application_restart(self) -> None:
         token = "postgres-application-token"
         auth_config = json.dumps(

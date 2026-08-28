@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import (
     Depends,
@@ -23,6 +27,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from backend.app.api.schemas import (
     DocumentRequest,
     DocumentResponse,
+    DurableRunRequest,
+    DurableRunResponse,
+    DurableRunErrorResponse,
     EvidenceResponse,
     EvalReportResponse,
     HealthResponse,
@@ -38,11 +45,14 @@ from backend.app.api.schemas import (
     RunRequest,
     RunResponse,
     SessionResponse,
+    ApprovalDecisionRequest,
 )
 from backend.app.agent import CancellationToken
 from backend.app.agent.research_workflow import create_research_workflow
 from backend.app.application_lifecycle import ApplicationNotAcceptingError
 from backend.app.container import ApplicationContainer
+from backend.app.domain.run import RunRecord as DurableRunRecord
+from backend.app.domain.run import RunStatus
 from backend.app.evals import EvalCase, OfflineEvaluator
 from backend.app.knowledge import (
     DEMO_COURSE_DOCUMENT,
@@ -70,7 +80,12 @@ from backend.app.services import InMemoryRunService
 from backend.app.services.run_service import RunRecord as LegacyRunRecord
 from backend.app.services.run_service import execute_agent
 from backend.app.settings import Settings
-from backend.app.tools import ToolExecutionContext
+from backend.app.stores import (
+    IdempotencyConflictError,
+    InvalidRunTransitionError,
+    RunNotFoundError,
+)
+from backend.app.tools import ApprovalResolutionError, ToolExecutionContext
 
 
 logger = logging.getLogger("ai_agent.api")
@@ -338,6 +353,209 @@ def create_app(
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return _to_run_response(run)
+
+    @app.post(
+        "/api/durable/runs",
+        response_model=DurableRunResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_durable_run(
+        request: DurableRunRequest,
+        principal: Principal = Depends(current_principal),
+        idempotency_key: str | None = Header(
+            default=None,
+            alias="Idempotency-Key",
+        ),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> DurableRunResponse:
+        if idempotency_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Idempotency-Key is required",
+            )
+        if not _is_valid_durable_idempotency_key(idempotency_key):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Idempotency-Key has an invalid format",
+            )
+        if (
+            not principal.authenticated
+            and x_session_token is None
+            and len(idempotency_key.encode("utf-8")) < 32
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Anonymous Idempotency-Key must be at least 32 bytes",
+            )
+        container = current_container()
+        access = await resolve_durable_access(
+            request.session_id,
+            principal=principal,
+            capability=x_session_token,
+            bootstrap_capability=idempotency_key,
+            require_existing_session=request.session_id is not None,
+        )
+        settings = container.settings
+        record = DurableRunRecord.create(
+            run_id=str(uuid4()),
+            session_id=access.session_id,
+            owner_id=access.owner_id,
+            runtime=settings.runtime,
+            model_provider=settings.model_provider,
+            model=(settings.openai_model or "mock"),
+            input_text=request.message,
+            idempotency_key=idempotency_key,
+            created_at=datetime.now(UTC),
+        )
+        try:
+            created = await container.run_store.create(record)
+        except IdempotencyConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Idempotency-Key conflicts with an existing Run",
+            ) from error
+        if created.created:
+            task = asyncio.create_task(
+                container.run_commands.execute(
+                    created.record.id,
+                    owner_id=access.owner_id,
+                    execution_context=_durable_execution_context(
+                        access,
+                        container=container,
+                    ),
+                ),
+                name=f"durable-run:{created.record.id}",
+            )
+            task.add_done_callback(_consume_durable_task_result)
+        return _to_durable_run_response(
+            created.record,
+            session_capability=(
+                access.created_capability if created.created else None
+            ),
+        )
+
+    @app.get("/api/durable/runs/{run_id}", response_model=DurableRunResponse)
+    async def get_durable_run(
+        run_id: str,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> DurableRunResponse:
+        container = current_container()
+        access = _durable_access_for_existing_request(
+            principal=principal,
+            capability=x_session_token,
+        )
+        record = await container.run_store.get(run_id, owner_id=access.owner_id)
+        if record is None:
+            raise _durable_run_not_found()
+        return _to_durable_run_response(record)
+
+    @app.get(
+        "/api/durable/sessions/{session_id}/runs",
+        response_model=list[DurableRunResponse],
+    )
+    async def list_durable_session_runs(
+        session_id: str,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> list[DurableRunResponse]:
+        container = current_container()
+        access = _durable_access_for_existing_request(
+            principal=principal,
+            capability=x_session_token,
+            session_id=session_id,
+        )
+        records = await container.run_store.list_for_session(
+            session_id,
+            owner_id=access.owner_id,
+        )
+        if not records:
+            raise _durable_session_not_found()
+        return [_to_durable_run_response(record) for record in records]
+
+    @app.post(
+        "/api/durable/runs/{run_id}/cancel",
+        response_model=DurableRunResponse,
+    )
+    async def cancel_durable_run(
+        run_id: str,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> DurableRunResponse:
+        container = current_container()
+        access = _durable_access_for_existing_request(
+            principal=principal,
+            capability=x_session_token,
+        )
+        try:
+            await container.run_commands.cancel(run_id, owner_id=access.owner_id)
+        except RunNotFoundError as error:
+            raise _durable_run_not_found() from error
+        record = await container.run_store.get(run_id, owner_id=access.owner_id)
+        if record is None:
+            raise _durable_run_not_found()
+        return _to_durable_run_response(record)
+
+    @app.post(
+        "/api/durable/runs/{run_id}/approvals/{approval_id}",
+        response_model=DurableRunResponse,
+    )
+    async def resolve_durable_approval(
+        run_id: str,
+        approval_id: str,
+        request: ApprovalDecisionRequest,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> DurableRunResponse:
+        container = current_container()
+        access = _durable_access_for_existing_request(
+            principal=principal,
+            capability=x_session_token,
+        )
+        record = await container.run_store.get(run_id, owner_id=access.owner_id)
+        if record is None:
+            raise _durable_run_not_found()
+        if record.status is not RunStatus.WAITING_APPROVAL:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Run is not waiting for approval",
+            )
+        event = await _approval_event_for_run(
+            container,
+            run_id=run_id,
+            owner_id=access.owner_id,
+            approval_id=approval_id,
+        )
+        if event is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Approval request not found",
+            )
+        try:
+            resolved = await container.run_commands.resume_approval(
+                run_id,
+                owner_id=access.owner_id,
+                approval_id=approval_id,
+                tool_call_id=event["tool_call_id"],
+                tool_name=event["tool_name"],
+                arguments_digest=event["arguments_digest"],
+                decision=request.decision,
+                execution_context=_durable_execution_context(
+                    access,
+                    container=container,
+                ),
+            )
+        except ApprovalResolutionError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Approval decision conflicts with the stored request",
+            ) from error
+        except (InvalidRunTransitionError, RunNotFoundError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Run approval state changed",
+            ) from error
+        return _to_durable_run_response(resolved)
 
     @app.get(
         "/api/observability/runs",
@@ -618,6 +836,74 @@ def create_app(
             authenticated=False,
         )
 
+    async def resolve_durable_access(
+        session_id: str | None,
+        *,
+        principal: Principal,
+        capability: str | None,
+        bootstrap_capability: str | None = None,
+        require_existing_session: bool,
+    ) -> _DurableAccess:
+        if principal.authenticated:
+            access = _DurableAccess(
+                owner_id=principal.principal_id,
+                session_id=(
+                    session_id
+                    or _initial_durable_session_id(
+                        principal.principal_id,
+                        bootstrap_capability or "",
+                    )
+                ),
+                roles=principal.roles,
+            )
+        else:
+            resolved_capability = capability or bootstrap_capability
+            if resolved_capability is None or not resolved_capability.strip():
+                raise _durable_session_not_found()
+            owner_id = _anonymous_durable_owner_id(resolved_capability)
+            access = _DurableAccess(
+                owner_id=owner_id,
+                session_id=(
+                    session_id
+                    or _initial_durable_session_id(
+                        owner_id,
+                        resolved_capability,
+                    )
+                ),
+                roles=frozenset(),
+                created_capability=(
+                    resolved_capability if capability is None else None
+                ),
+            )
+        if require_existing_session:
+            existing = await current_container().run_store.list_for_session(
+                access.session_id,
+                owner_id=access.owner_id,
+            )
+            if not existing:
+                raise _durable_session_not_found()
+        return access
+
+    def _durable_access_for_existing_request(
+        *,
+        principal: Principal,
+        capability: str | None,
+        session_id: str | None = None,
+    ) -> _DurableAccess:
+        if principal.authenticated:
+            return _DurableAccess(
+                owner_id=principal.principal_id,
+                session_id=session_id or "durable-session-lookup",
+                roles=principal.roles,
+            )
+        if capability is None or not capability.strip():
+            raise _durable_session_not_found()
+        return _DurableAccess(
+            owner_id=_anonymous_durable_owner_id(capability),
+            session_id=session_id or "durable-session-lookup",
+            roles=frozenset(),
+        )
+
     return app
 
 
@@ -630,6 +916,116 @@ def _to_run_response(run: LegacyRunRecord) -> RunResponse:
         event_types=list(run.event_types),
         error=run.error,
     )
+
+
+@dataclass(frozen=True)
+class _DurableAccess:
+    owner_id: str
+    session_id: str
+    roles: frozenset[str]
+    created_capability: str | None = None
+
+
+def _anonymous_durable_owner_id(capability: str) -> str:
+    if len(capability.encode("utf-8")) < 32:
+        raise _durable_session_not_found()
+    digest = hashlib.sha256(capability.encode("utf-8")).hexdigest()
+    return f"anonymous-capability-v1-{digest}"
+
+
+def _is_valid_durable_idempotency_key(value: str) -> bool:
+    return (
+        bool(value)
+        and value == value.strip()
+        and len(value.encode("utf-8")) <= 512
+        and not any(
+            character.isspace() or not character.isprintable()
+            for character in value
+        )
+    )
+
+
+def _initial_durable_session_id(owner_id: str, capability: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"durable-session-v1:{owner_id}:{capability}"))
+
+
+def _durable_execution_context(
+    access: _DurableAccess,
+    *,
+    container: ApplicationContainer,
+) -> ToolExecutionContext:
+    return ToolExecutionContext(
+        principal_id=access.owner_id,
+        roles=access.roles,
+        approval_store=container.approval_store,
+    )
+
+
+def _to_durable_run_response(
+    record: DurableRunRecord,
+    *,
+    session_capability: str | None = None,
+) -> DurableRunResponse:
+    return DurableRunResponse(
+        id=record.id,
+        run_id=record.id,
+        session_id=record.session_id,
+        status=record.status.value,
+        answer=record.answer,
+        error=(
+            DurableRunErrorResponse(
+                code=record.failure.code,
+                category=record.failure.category,
+                retryable=record.failure.retryable,
+            )
+            if record.failure is not None
+            else None
+        ),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        session_capability=session_capability,
+    )
+
+
+def _durable_run_not_found() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+
+def _durable_session_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Session not found",
+    )
+
+
+async def _approval_event_for_run(
+    container: ApplicationContainer,
+    *,
+    run_id: str,
+    owner_id: str,
+    approval_id: str,
+) -> dict[str, str] | None:
+    events = await container.event_store.list_for_run(
+        run_id,
+        owner_id=owner_id,
+    )
+    for event in reversed(events):
+        if (
+            event.type == "run.waiting_approval"
+            and event.data.get("approval_id") == approval_id
+            and all(
+                isinstance(event.data.get(key), str)
+                for key in ("tool_call_id", "tool_name", "arguments_digest")
+            )
+        ):
+            return {
+                "tool_call_id": event.data["tool_call_id"],
+                "tool_name": event.data["tool_name"],
+                "arguments_digest": event.data["arguments_digest"],
+            }
+    return None
 
 
 def _to_memory_fact_response(fact: MemoryFact) -> MemoryFactResponse:
@@ -754,6 +1150,20 @@ def _consume_task_result(run_task: asyncio.Task[LegacyRunRecord]) -> None:
     except Exception as error:
         logger.warning(
             "Background run task failed",
+            extra={"error_type": type(error).__name__},
+        )
+
+
+def _consume_durable_task_result(
+    run_task: asyncio.Task[DurableRunRecord],
+) -> None:
+    try:
+        run_task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception as error:
+        logger.warning(
+            "Durable background run task failed",
             extra={"error_type": type(error).__name__},
         )
 

@@ -3663,3 +3663,25 @@
 
 - M11-T7 已完成真实 Provider E4：两次请求分别覆盖合成文档向量化和查询向量化，隔离 64 维 pgvector 写入/查询成功且临时数据已删除。
 - 费用来源与美元成本未由 Provider 返回，保持 unknown/null；本地约 2077 ms 仅是一次受控冒烟的 wall-clock，不是生产延迟或容量结论。没有改变全局代理、默认离线路径、M11-T6 固定三维评测或 `m11-rag-v1`。
+
+## V-20260828-007：M12-T1 持久 Run HTTP 状态事务（code_complete）
+
+- 任务：`M12-T1 / code_complete`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：在不修改 legacy Run HTTP/SSE 的前提下，新增 durable Run 创建、查询、会话列表、取消与审批 API，并使它们只通过 Container 的 RunStore/EventStore/RunCommands 访问持久主链。
+- 验证基线：`e8f4f3b`。
+- 任务等级：A 类持久化、身份、匿名 capability、幂等与公开 API 合同；默认离线、没有读取 Key、没有 Provider 调用或费用。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_persistent_run_api backend.tests.test_api backend.tests.test_run_store_contract backend.tests.test_langgraph_approval_resume -q` | 0 | 76 项通过：新 API 的匿名/身份隔离、同键重放、内容无关冲突、会话列表、取消终态和 server-owned 审批绑定，以及旧 API、Store CAS 与审批恢复回归均通过 |
+| `./.venv/Scripts/python.exe -B -c "import backend.tests.postgres_store_integration"` | 0 | 新增 PostgreSQL lifespan API 用例可导入；没有建立数据库连接 |
+| `docker exec ai-agent-demo-m11-postgres-1 pg_isready -U ai_agent -d ai_agent_test` | 非 0 | 沙箱内先被 Docker named pipe 拒绝；经最小沙箱外重试确认容器存在但未运行，因此没有执行真实 PostgreSQL API 用例 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有既有 LF/CRLF 工作树提示 |
+
+### 结论与边界
+
+- 新 `/api/durable` 路径创建 Run 后才后台调度 Coordinator；查询、会话列表、取消和审批全部用同一 owner-scoped durable Store。旧 `/api/sessions/.../runs`、`/api/runs/{id}` 和 SSE 没有修改，也没有双写。
+- 认证 owner 只来自 Principal。匿名初次请求使用至少 32 字节的随机 `Idempotency-Key` 建立 capability bootstrap，Store 只保留 SHA-256 派生 owner；后续请求使用 `X-Session-Token`。审批工具绑定只从 owned `run.waiting_approval` 事件恢复。
+- 创建/查询快照已有 citations、usage、error 的统一字段；M12-T1 尚未将 RAG/usage 聚合到主 Run，故 citations 为空、usage 为 null，M12-T3 负责填充。
+- 离线内存 E3 和共享 Store/审批回归已通过，但 Docker integration PostgreSQL 容器未运行，新增跨 application lifespan durable API 用例未执行。因此 M12-T1 只能是 `code_complete`，不能写为 `verified`；没有执行 SSE、Vue、真实模型或在线调用。
