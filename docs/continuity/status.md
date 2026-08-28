@@ -53,20 +53,20 @@
 - M11-T6 第一纵切验证基线提交：`f441615`；实现提交：`07ec390`
 - M11-T6 第二纵切验证基线提交：`f0e4899`；实现提交：`0b4e1d9`；验证记录：`V-20260827-001/002`
 - 远程仓库：未配置
-- 在线付费调用：DashScope 已获四次授权；前三次在本机预检停止，第四次进入执行但以脱敏通用失败码停止，未完成可验证的 Provider 成功证据
+- 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
 ## 当前任务
 
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M11-T7` |
-| 状态 | `blocked` |
+| 状态 | `verified` |
 | 目标 | 在单次授权下以真实 DashScope `text-embedding-v4` 写入隔离的 64 维 pgvector 表并查询，记录模型、维度、批次、耗时、usage 与费用边界 |
 | 设计依据 | 实施计划 M11-T7、已 verified 的 M11-T3/M11-T6、`ADR-0023`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | OpenAI 首次尝试仍保留为失败历史；已新增 DashScope 离线 Provider、受限 Workspace endpoint gate、独立 `vector(64)` pgvector migration 与 online CLI。无 Key、无网络、无费用的定向 75 项和本机 pgvector 6 项通过；2026-08-28 的前两次 DashScope 授权命令以 `pgvector_dsn_required` 停止，第三次以 `dashscope_smoke_settings_invalid` 停止，第四次进入执行后以 `dashscope_smoke_failed` 停止。现已将 SDK 客户端创建 `ImportError` 收敛为 `embedding_provider_client_configuration_invalid` 并离线覆盖；隔离表存在且临时文档为 0，真实 DashScope 成功未验证 |
-| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003/004`、`V-20260828-001/002/003/004/005`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
-| 下一动作 | 用户决定是否允许仅针对下一次 DashScope 冒烟进程清除 SOCKS proxy 变量，或提供可用的 SOCKS 依赖方案；在不安装依赖、不修改全局代理的前提下，再明确授权一次新的 DashScope 冒烟。不得把 Key 发到聊天、自动重试或进入 M12 |
+| 当前修改 | OpenAI 首次尝试仍保留为失败历史；DashScope 已具备受限 Workspace endpoint gate、独立 `vector(64)` pgvector migration 与 online CLI。离线定向 75 项和本机 pgvector 6 项通过；第五次单次授权在仅临时清除 `ALL_PROXY/all_proxy` 的子进程内成功完成 `text-embedding-v4` 两次请求、64 维写入/查询，返回 27 input/total tokens、约 2077 ms，临时文档计数为 0；费用来源 unknown |
+| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003/004`、`V-20260828-001/002/003/004/005/006`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
+| 下一动作 | M11-T7 已 `verified`；M11-T8 为学习交付与验收，当前未启动。未经用户改变优先级，不进入 M12、安装依赖、改全局代理或执行新的在线调用 |
 
 ## 里程碑状态
 
@@ -77,7 +77,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T6 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断，现已完成 DashScope 隔离 64 维离线准备，尚无真实向量写入/查询 E4 证据 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -224,4 +224,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md`、`docs/continuity/handoffs/2026-08-27-m11-t7-dashscope-offline-preparation.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-commit-anchor.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-dsn-preflight-blocked.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-executor-environment-blocked.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-settings-preflight-blocked.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-execution-failed.md` 与 `docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-client-config-mapping.md`，再核对 `V-20260827-003/004`、`V-20260828-001/002/003/004/005`、`ADR-0023/0024/0025`、实施计划 M11-T7 和现有 DashScope 在线 Embedding Adapter。不要重做 M11-T1–T6、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理来绕开此次阻断。在线重试前，用户必须选择进程级 SOCKS proxy 处理方式并明确授权；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-smoke-verified.md`，再核对 `V-20260828-005/006`、`ADR-0025`、实施计划 M11-T7 和现有 DashScope 在线 Embedding Adapter。M11-T7 已 verified，不要重做 M11-T1–T7、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理。只有用户启动 M11-T8 或明确改优先级后，才进入下一任务；未经授权不读取 Key、不执行新的在线/付费调用或配置远程 Git。

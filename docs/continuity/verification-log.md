@@ -3645,3 +3645,21 @@
 
 - `EmbeddingClientConfigurationError` 使用稳定码 `embedding_provider_client_configuration_invalid`。Provider 仅在 SDK 客户端构造抛出 `ImportError` 时映射该码，不自动安装可选依赖、不改变 proxy、不发网络请求、不重试。
 - SOCKS 配置与此前通用错误之间仍是高概率推断，尚未用新的在线授权验证实际 CLI 输出；不能将其描述为根因已证实、Provider 已达或 E4 成功。M11-T7 保持 `blocked`。
+
+## V-20260828-006：M11-T7 DashScope 在线 Embedding 冒烟（verified）
+
+- 任务：`M11-T7 / verified`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：在用户单次授权下，使用真实 DashScope `text-embedding-v4` 将一篇非敏感合成文档写入隔离 `vector(64)` pgvector 表、查询并清理；记录模型、维度、批次、usage、耗时和费用边界。
+- 验证基线：`5ed22c5`。
+
+| 动作 | 结果 | 证据 |
+| --- | --- | --- |
+| 代理处理 | 通过 | 仅在本次临时 PowerShell 子进程中移除 `ALL_PROXY/all_proxy`；未修改 Windows 用户环境变量或全局代理 |
+| `./.venv/Scripts/python.exe -B -m backend.app.evals.dashscope_embedding_smoke --authorized` | 0 | Provider=`dashscope`、model=`text-embedding-v4`、dimensions=`64`、batch size=`1`、provider requests=`2`、input/total tokens=`27/27`、elapsed=`2077 ms`、cost=`unknown` |
+| pgvector 临时文档只读检查 | 0 | `dashscope_knowledge_documents` 中 `m11-t7-dashscope-embedding-smoke` 计数为 `0`，确认 finally 清理完成 |
+
+### 结论与边界
+
+- M11-T7 已完成真实 Provider E4：两次请求分别覆盖合成文档向量化和查询向量化，隔离 64 维 pgvector 写入/查询成功且临时数据已删除。
+- 费用来源与美元成本未由 Provider 返回，保持 unknown/null；本地约 2077 ms 仅是一次受控冒烟的 wall-clock，不是生产延迟或容量结论。没有改变全局代理、默认离线路径、M11-T6 固定三维评测或 `m11-rag-v1`。
