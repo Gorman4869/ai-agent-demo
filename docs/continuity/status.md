@@ -3,7 +3,7 @@
 - 更新时间：2026-08-28，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`4a079e0`
+- 最近已确认实现提交：`0f81b0a`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -52,7 +52,7 @@
 - M11-T5 第七纵切验证基线提交：`f066a90`；实现提交：`4ec5444`
 - M11-T6 第一纵切验证基线提交：`f441615`；实现提交：`07ec390`
 - M11-T6 第二纵切验证基线提交：`f0e4899`；实现提交：`0b4e1d9`；验证记录：`V-20260827-001/002`
-- M12-T4 实现提交：`8610f06`；M12-T5 验证基线：`8610f06`；验证记录：`V-20260828-012`
+- M12-T4 实现提交：`8610f06`；M12-T5 实现提交：`0f81b0a`；M12-T6 验证基线：`0f81b0a`；验证记录：`V-20260828-013`
 - 远程仓库：未配置
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -60,14 +60,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M12-T5` |
+| 任务 ID | `M12-T6` |
 | 状态 | `verified` |
-| 目标 | 用单元测试和真实浏览器固定 SSE parser、durable Run 状态机、取消、重连、刷新恢复与审批 UI |
-| 设计依据 | 实施计划 M12-T5、`ADR-0029`、`ADR-0030`、`ADR-0031`、`ADR-0032` |
+| 目标 | 决定 legacy Research/旧 SSE 的兼容边界，记录 durable API 迁移，并完成 M12 跟练验收 |
+| 设计依据 | 实施计划 M12-T6、`ADR-0029`–`ADR-0033` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 锁定 Vitest/Vue Test Utils/happy-dom/Playwright；新增 parser/状态机 12 项单测、真实 FastAPI + Vite + Chromium 两项 E2E，以及只供浏览器审批场景使用的后端测试 Runtime 装配。生产 durable API、权限与 Runtime 未改 |
-| 验证 | `V-20260828-012`（基线 `8610f06`）：单测 12 项、Chromium E2E 2 项、审批/durable 回归 30 项、Vue build 和统一全量离线门通过；全量后端 643 项通过、1 项既有 symlink 跳过 |
-| 下一动作 | M12-T4/M12-T5 已 `verified`。下一任务是 M12-T6：只做 legacy Research/旧 SSE 兼容层的保留或替代决策、迁移记录与 M12 跟练，不提前进入 M13、生产部署或在线模型 |
+| 当前修改 | 新增 `ADR-0033`、durable API 迁移记录和 M12 一页速查；扩充 Stage 12 六次跟练、自测、费曼、30 项映射及验收清单；修正前端规约的 legacy `streamRun()` 漂移。业务代码和旧端点均未修改或删除 |
+| 验证 | `V-20260828-013`（基线 `0f81b0a`）：新旧后端契约 46 项、前端单测 12 项、Chromium E2E 2 项、Vue build、连续性与统一全量离线门通过；全量后端 643 项通过、1 项既有 symlink 跳过 |
+| 下一动作 | M12-T1–T6 已 `verified`。按用户当前工程优先级，下一任务是 M13-T1：只设计并实现可替换 Trace/Metrics sink 与持久 usage/cost 边界；开始前重新恢复、审计依赖和授权范围，不在本次提交提前实现 |
 
 ## 里程碑状态
 
@@ -77,21 +77,23 @@
 | C0 连续性基线 | `verified` | 计划基线 `6f8490a`；验证见 `V-20260716-001`、`V-20260716-002` |
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
-| M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
+| M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；当时保留的进程重启/PostgreSQL/ToolExecution 缺口已由 M11/M12 承接，`KI-004` 现已关闭 |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
-| M12 统一 Run 与实时 UI | `in_progress` | M12-T1–T5 `verified`；Vue durable-only 主链、parser/状态机单测和真实 Chromium 断线/刷新/审批恢复已通过，剩 M12-T6 兼容层决策与跟练验收 |
+| M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M12-T1–T5 已通过后端持久主链、前端单测和真实 Chromium；Research API/legacy SSE 的兼容层最终保留或替代尚待 M12-T6 决策。
-- npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12-T5 行为验证，但须由 M13 独立升级任务处理。
-- 新的真实模型在线冒烟未执行，也不需要用于 M12-T1。
+- M12 当前无工程阻塞；legacy Research/旧 SSE 已由 `ADR-0033` 决定保留为隔离兼容层，Vue 主链不再调用。
+- npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12 验收，但须由 M13 独立升级任务处理。
+- M12-T6 没有读取 Key 或执行新的真实模型在线冒烟；里程碑验收不需要在线调用。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
 ## 未验证范围
 
+- M12-T6 没有验证仓库外 legacy 消费者、HTTP deprecation header、生产调用遥测、OIDC/HttpOnly、capability 撤销、CSP、Nginx、多实例通知、跨浏览器矩阵、生产容量或 usage/cost 账本。旧端点只标记为兼容保留；被 `superseded` 的是 Vue 双链主流程，不是物理路由。
+- M12-T6 未重新运行真实 PostgreSQL integration；durable API、SSE 与 projection 的数据库重启证据继续引用 `V-20260828-008/009/010`。本轮只改文档、规约和连续性记录，不改数据库或业务代码。
 - M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
 - pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
 - M11-T7 首次外部尝试见 `V-20260827-003`：Key 仅以安全布尔值确认存在；最终 Provider 返回 `embedding_provider_quota_or_rate_limited`，未发生成功向量写入、查询、usage 或费用记录。该错误码不能区分项目配额耗尽与短期限流，须由用户在平台恢复后重新授权；初始 SOCKS client 初始化失败也不是 Provider 兼容证据。
@@ -226,4 +228,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-smoke-verified.md`，再核对 `V-20260828-005/006`、`ADR-0025`、实施计划 M11-T7 和现有 DashScope 在线 Embedding Adapter。M11-T7 已 verified，不要重做 M11-T1–T7、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理。只有用户启动 M11-T8 或明确改优先级后，才进入下一任务；未经授权不读取 Key、不执行新的在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-28-m12-t6-compatibility-course-verified.md`，再核对 `V-20260828-013`、`ADR-0033`、`docs/m12-api-migration.md` 和实施计划 M12-T6。M12-T1–T6 已 verified，不要删除 legacy sessions/runs/POST SSE 或 `/api/research`，也不要把它们代理或双写到 durable Store。按用户当前工程优先级，下一原子任务为 M13-T1；开始前重新检查状态、依赖和授权，未经新授权不升级依赖、不读取 Key、不执行在线/付费调用或配置远程 Git。

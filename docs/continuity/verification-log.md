@@ -3798,3 +3798,62 @@
 - M12-T4 的 parser、类型化状态机、服务端取消、有界重连、审批和标签页恢复已由 12 项单测及真实 Chromium 补齐，M12-T4/M12-T5 达到 `verified`；`KI-007` 关闭，`KI-008` 的前端部分完成。
 - 浏览器 E2E 使用真实 FastAPI durable API、RunStore/EventStore/Coordinator/SSE、Vite 和 Chromium；审批工具本身是测试 fixture，不证明生产匿名用户具有 editor 权限，也不执行真实副作用。
 - 本任务没有验证 Nginx、生产认证、CSP、跨浏览器矩阵、浏览器崩溃、后端硬进程重启、真实 PostgreSQL 浏览器链或在线模型。兼容 Research API 的最终保留/替代决策仍属于 M12-T6，统一 CI 与依赖升级属于 M13。
+
+## V-20260828-013：M12-T6 兼容层决策与里程碑跟练验收
+
+- 任务：`M12-T6 / verified`
+- 时间：2026-08-28 21:44，Asia/Shanghai
+- 验证目标：在不删除或改写 legacy HTTP 的前提下，确认 Vue durable-only 主链、固定新旧
+  API 兼容边界，并交付 M12 跟练、迁移记录、速查、自测、费曼和 30 项大纲映射。
+- 验证基线：`0f81b0a`。
+- 任务等级：A 类公共 API 迁移决策 + B 类里程碑课程整合；默认 offline。没有读取 Key、
+  调用在线模型或外部服务，费用为 0。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `rg -n "/api/research\|/runs/stream\|/api/sessions\|/api/runs/" frontend/src` | 1（预期无匹配） | Vue 生产源码无 legacy Research/Run/SSE 调用；PowerShell 包装把“无匹配”归一为审计成功 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_api backend.tests.test_persistent_run_api backend.tests.test_persistent_sse backend.tests.test_durable_run_projection -v` | 0 | 46 项通过；legacy shape/POST SSE/Research、新 durable owner/幂等/取消/审批、SSE 续传及同 Run citation/usage 均通过 |
+| `npm.cmd --prefix frontend run test:unit`（沙箱外最终） | 0 | 2 个文件、12 项通过；parser、sequence、重连、取消、审批和恢复状态机回归通过 |
+| `npm.cmd --prefix frontend run test:e2e`（沙箱外） | 0 | Chromium 2 项通过；真实 FastAPI + Vite 首次断流/刷新恢复与 waiting approval 拒绝链均通过 |
+| `npm.cmd --prefix frontend run build`（沙箱外最终） | 0 | `vue-tsc -b && vite build` 通过，Vite 转换 19 modules |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 课程文档后 52 个稳定任务/139 个 Markdown 通过；最终 handoff 后重跑为 52/140，任务、链接、状态和恢复入口一致 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（沙箱外） | 0 | 里程碑全量离线门通过：后端 643 项通过、1 项既有 Windows symlink 跳过；Code Agent、`pip check`、Vue、MCP TypeScript 与 Compose 配置全部通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有 Git LF/CRLF 工作树提示 |
+
+### 决策与课程产物
+
+- `ADR-0033` 将 Vue 的 legacy POST SSE + 终态后独立 Research 覆盖答案双链标记为
+  `superseded`；该状态只描述前端主流程，不表示 HTTP 端点已物理删除。
+- legacy sessions/runs/read/POST SSE 与 `/api/research` 继续作为隔离兼容层，既有合同测试
+  保留，且不得向 durable Store 双写、共享 Run ID 或静默代理。新调用方只采用
+  `/api/durable/*`。
+- `docs/m12-api-migration.md` 固定 202/幂等/capability/sequence/snapshot/cancel/approval 和
+  同 Run evidence 的迁移差异；删除旧端点需要消费者、通知、回归和新 ADR 证据。
+- Stage 12 已形成六次跟练、三张状态图、固定排查顺序、概念/实操/场景题、评分红线、
+  速查表、费曼复述、最终验收清单及 30 项大纲映射。学习者个人完成情况仍只写
+  `docs/progress.md`。
+
+### 失败尝试、警告与未验证范围
+
+- Vitest 在受控沙箱首次因 Vite 子进程 `spawn EPERM` 失败；Vue build 首次因既有
+  `tsconfig.app.tsbuildinfo` 写入 `TS5033/EPERM` 失败。相同命令经授权在沙箱外分别
+  12 项通过和构建成功；这是执行边界，不是 Node engine 失败，Node 22.16.0 无需切换。
+- 文档编辑时补丁工具拒绝“删除并同名重建” Stage 文件；改为对原文件分段 patch。
+  自审又发现两个误写成独立模块的代码入口，已按实际实现改回 `backend/app/main.py` 与
+  `run_event_notifier.py`，没有修改业务代码。
+- 全量门保留既有 Starlette/httpx 弃用提示、asyncio 慢任务诊断和一项 Windows symlink
+  能力跳过；没有升级依赖或运行 `npm audit fix`，`KI-027` 保持 open。
+- 本次未重新运行真实 PostgreSQL integration；M12-T1–T3 的数据库 API/SSE/projection
+  重启证据仍引用 `V-20260828-008/009/010`，本轮没有数据库或公共业务代码变化。
+- 未验证仓库外 legacy 消费者、HTTP deprecation header、生产调用遥测、OIDC/HttpOnly、
+  capability 撤销、CSP、Nginx、多实例通知、跨浏览器、生产容量、usage 账本或在线模型。
+
+### 结论
+
+- M12-T1–T6 的工程代码、自动化、迁移决策、课程材料和里程碑离线门均有证据，M12 达到
+  `verified`。旧 Vue 双链主流程被替代，旧 HTTP 端点仍按 `ADR-0033` 保留兼容。
+- `KI-004`、`KI-005` 关闭；`KI-008` 仍等待 M13-T3 统一 CI，`KI-027` 等待独立依赖升级。
+- `status.md` 的旧 M11-T7 恢复入口漂移已登记为 `KI-028` 并在本轮修正。下一工程任务为
+  M13-T1；本次不实现 Trace、成本账本、生产部署或在线调用。

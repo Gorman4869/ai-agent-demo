@@ -880,6 +880,20 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：`docs/stages/12-realtime-agent-ui.md`、API 迁移记录和旧端点保留/替代 ADR。
 - 验收：只有新旧契约、Vue 和文档全过后，旧 POST SSE 或独立 Research 主链才能标记 `superseded`。
 
+#### M12-T6 课程与兼容层验收结果
+
+- `ADR-0033` 将 Vue 的 legacy POST SSE + 终态后 Research 覆盖答案双链标记为
+  `superseded`，但保留 legacy sessions/runs/read/POST SSE 与独立 Research API 的隔离
+  合同；没有删除端点、静默代理或 durable/legacy 双写。
+- `docs/m12-api-migration.md` 固定 202、幂等、capability、sequence、snapshot、取消、审批
+  与同 Run evidence 的迁移步骤；旧端点退出必须另有消费者、通知、回归和新 ADR 证据。
+- Stage 12 汇总六次跟练、三张状态图、排错、自测、速查、费曼、最终清单和 30 项映射。
+  Vue 生产源码 legacy 引用为零；46 项新旧 API 契约、12 项前端单测、2 项 Chromium E2E、
+  Vue build、连续性和全量离线门均通过。
+- 里程碑全量门后端 643 项通过、1 项既有 Windows symlink 能力跳过，其余 Code Agent、
+  依赖、Vue、MCP TypeScript 与 Compose 配置通过。M12 达到 `verified`；生产认证、Nginx、
+  统一 CI、usage/cost 账本和依赖公告仍由 M13 承接。
+
 ## M13：生产工程、观测、测试与部署
 
 ### M13-T1：Trace、Metrics、Usage 与成本
