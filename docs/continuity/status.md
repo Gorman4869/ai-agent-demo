@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-08-27，Asia/Shanghai
+- 更新时间：2026-08-28，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`0b4e1d9`
+- 最近已确认实现提交：`4a079e0`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -77,7 +77,7 @@
 | M8 真实模型与运行时 | `code_complete` | M8-T1、M8-T2、M8-T3、M8-T5、M8-T7 verified；M8-T4、M8-T6 code_complete；全量离线门通过，真实在线 E4 未授权，不能 accepted |
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
-| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T6 已 `verified`；M11-T7 已获一次授权但被 Provider `quota_or_rate_limited` 阻断，尚无真实向量写入/查询 E4 证据 |
+| M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T6 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断，现已完成 DashScope 隔离 64 维离线准备，尚无真实向量写入/查询 E4 证据 |
 | M12 统一 Run 与实时 UI | `planned` | 依赖 M10、M11 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
@@ -224,4 +224,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-27-m11-t7-online-embedding-blocked.md`，再核对 `V-20260827-003`、`ADR-0023/0024`、实施计划 M11-T7 和现有在线 Embedding Adapter。不要重做 M11-T1–T6、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理来绕开此次阻断。只有用户恢复 Provider 可用额度/限流窗口并再次明确授权后，才可用两段非敏感文本做一次新的在线尝试；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md`、`docs/continuity/handoffs/2026-08-27-m11-t7-dashscope-offline-preparation.md` 与 `docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-commit-anchor.md`，再核对 `V-20260827-003/004`、`ADR-0023/0024/0025`、实施计划 M11-T7 和现有 DashScope 在线 Embedding Adapter。不要重做 M11-T1–T6、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理来绕开此次阻断。只有用户在本机配置百炼环境并再次明确授权后，才可用两段非敏感文本做一次新的在线尝试；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。
