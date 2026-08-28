@@ -53,7 +53,7 @@
 - M11-T6 第一纵切验证基线提交：`f441615`；实现提交：`07ec390`
 - M11-T6 第二纵切验证基线提交：`f0e4899`；实现提交：`0b4e1d9`；验证记录：`V-20260827-001/002`
 - 远程仓库：未配置
-- 在线付费调用：DashScope 已获三次授权，均在本机预检停止；未触达 Provider
+- 在线付费调用：DashScope 已获四次授权；前三次在本机预检停止，第四次进入执行但以脱敏通用失败码停止，未完成可验证的 Provider 成功证据
 
 ## 当前任务
 
@@ -64,9 +64,9 @@
 | 目标 | 在单次授权下以真实 DashScope `text-embedding-v4` 写入隔离的 64 维 pgvector 表并查询，记录模型、维度、批次、耗时、usage 与费用边界 |
 | 设计依据 | 实施计划 M11-T7、已 verified 的 M11-T3/M11-T6、`ADR-0023`、`ADR-0024` 与 `ADR-0025` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | OpenAI 首次尝试仍保留为失败历史；已新增 DashScope 离线 Provider、受限 Workspace endpoint gate、独立 `vector(64)` pgvector migration 与 online CLI。无 Key、无网络、无费用的定向 74 项和本机 pgvector 6 项通过；2026-08-28 的前两次 DashScope 授权命令以 `pgvector_dsn_required` 停止，第三次确认三项变量可见后，以 `dashscope_smoke_settings_invalid` 停止。真实 DashScope 未执行 |
-| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003/004`、`V-20260828-001/002/003`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
-| 下一动作 | 用户在本机补齐 DashScope 的 7 项非敏感在线开关与固定测试参数，确认后重新明确授权一次 DashScope 在线冒烟。不得把 Key 发到聊天、安装依赖、改全局代理、自动重试或进入 M12 |
+| 当前修改 | OpenAI 首次尝试仍保留为失败历史；已新增 DashScope 离线 Provider、受限 Workspace endpoint gate、独立 `vector(64)` pgvector migration 与 online CLI。无 Key、无网络、无费用的定向 74 项和本机 pgvector 6 项通过；2026-08-28 的前两次 DashScope 授权命令以 `pgvector_dsn_required` 停止，第三次以 `dashscope_smoke_settings_invalid` 停止，第四次进入执行后以 `dashscope_smoke_failed` 停止。隔离表存在且临时文档为 0；真实 DashScope 成功未验证 |
+| 前置证据 | `V-20260809-001/002/003/004/005/006/007`、`V-20260820-008/009/010/011/012/013`、`V-20260827-001/002/003/004`、`V-20260828-001/002/003/004`、`ADR-0023`、`ADR-0024`、`ADR-0025`、M11-T3 实现提交 `02664b8`、M11-T6 实现提交 `0b4e1d9` |
+| 下一动作 | 先离线诊断并收紧 `dashscope_smoke_failed` 的稳定错误归类及测试，再由用户明确授权一次新的 DashScope 冒烟。不得把 Key 发到聊天、安装依赖、改全局代理、自动重试或进入 M12 |
 
 ## 里程碑状态
 
@@ -224,4 +224,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md`、`docs/continuity/handoffs/2026-08-27-m11-t7-dashscope-offline-preparation.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-commit-anchor.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-dsn-preflight-blocked.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-executor-environment-blocked.md` 与 `docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-settings-preflight-blocked.md`，再核对 `V-20260827-003/004`、`V-20260828-001/002/003`、`ADR-0023/0024/0025`、实施计划 M11-T7 和现有 DashScope 在线 Embedding Adapter。不要重做 M11-T1–T6、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理来绕开此次阻断。只有确认 DashScope gate、维度、批次和 retry 参数都正确后，才可用两段非敏感文本做一次新的在线尝试；未经授权不读取 Key、不执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md`、`docs/continuity/handoffs/2026-08-27-m11-t7-dashscope-offline-preparation.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-commit-anchor.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-dsn-preflight-blocked.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-executor-environment-blocked.md`、`docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-settings-preflight-blocked.md` 与 `docs/continuity/handoffs/2026-08-28-m11-t7-dashscope-execution-failed.md`，再核对 `V-20260827-003/004`、`V-20260828-001/002/003/004`、`ADR-0023/0024/0025`、实施计划 M11-T7 和现有 DashScope 在线 Embedding Adapter。不要重做 M11-T1–T6、不要修改 `m11-rag-v1`，也不要安装 SOCKS 依赖或改全局代理来绕开此次阻断。先在离线测试中缩小通用失败码范围；未经用户新的明确授权，不读取 Key、不执行在线/付费调用或配置远程 Git。

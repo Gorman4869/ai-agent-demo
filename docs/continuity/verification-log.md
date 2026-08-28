@@ -3610,3 +3610,19 @@
 
 - 第三次授权已使用，不能自动重试。用户须补充非敏感的 online switch、provider、model、revision、64 维、batch=1、retry=0 配置，并再次明确授权。
 - 该结果不证明 Key、endpoint、数据库、模型或网络故障；M11-T7 继续 `blocked`。
+
+## V-20260828-004：M11-T7 DashScope 授权执行失败（blocked）
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：在完整配置预检通过后，以单次用户授权调用 DashScope `text-embedding-v4`，向隔离 `vector(64)` 表写入、查询并清理一篇合成文档。
+
+| 动作 | 结果 | 证据 |
+| --- | --- | --- |
+| `dashscope_embedding_smoke --authorized` | 失败 | 返回脱敏稳定码 `dashscope_smoke_failed`；CLI 禁止 retry，未输出 Key、endpoint、请求文本或原始异常 |
+| 本机 pgvector 只读清理检查 | 通过 | `dashscope_knowledge_documents`、`dashscope_knowledge_chunks` 均存在，临时 document ID 的计数为 0 |
+
+### 结论与边界
+
+- 此命令已离开预检阶段，但通用错误码不能单独证明 Provider 是否收到请求、是否返回向量、实际 usage 或费用；不得将它描述为成功 E4、零费用或特定 Provider 故障。
+- 已用授权不能自动重试。下一步应先离线补足通用错误的稳定分类与回归测试，之后才可请求新的单次在线授权。M11-T7 保持 `blocked`。
