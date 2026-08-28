@@ -59,14 +59,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M12-T2` |
+| 任务 ID | `M12-T3` |
 | 状态 | `verified` |
-| 目标 | 提供 owner-scoped durable Run 事件 SSE：按 sequence 历史补发、实时等待、心跳、终态关闭与断线续传，同时保留 legacy HTTP/SSE 隔离 |
-| 设计依据 | 实施计划 M12-T2、`ADR-0003`、`ADR-0007`、`ADR-0029`、`ADR-0030` |
+| 目标 | 将同一 durable Run 已选择的 RAG 引用与已持久化 model usage 投影到 snapshot，并保持 Context、审批、终态与 SSE 使用同一 Run ID |
+| 设计依据 | 实施计划 M12-T3、`ADR-0025`、`ADR-0026`、`ADR-0029`、`ADR-0030`、`ADR-0031` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 新增 `/api/durable/runs/{run_id}/events?after=`：owner-scoped Store history replay、进程内无 payload notifier 实时唤醒、Store fallback、transport heartbeat 与终态关闭。终态关闭前再次查询 Store，避免终态事件与批次读取竞态丢最后一帧；旧 HTTP/SSE 不改、不双写 |
-| 前置证据 | `V-20260808-013`、`V-20260828-006`、`V-20260828-007/008/009`、`ADR-0029`、`ADR-0030` |
-| 下一动作 | M12-T2 已 `verified`；下一任务为 M12-T3。开始前只读审阅 RAG/usage 事件聚合与 durable Run snapshot 边界；不要提前进入 Vue、M12-T4 或新的在线调用 |
+| 当前修改 | 同步/异步 Context Runtime 均只从已入选的 RAG fragments 持久化公开 `rag.citations`；准备失败写入安全 `context.failed`。durable snapshot 按同 owner 的 EventStore sequence 全量分页投影最新有效 citations 和 `scope=run` usage，不重新检索、不泄漏 prompt/Memory，也不将 unknown usage/cost 伪装为零 |
+| 验证 | `V-20260828-010`（基线 `f8770a1`）：离线 Context/Run/API/SSE/Coordinator 79 项、真实 PostgreSQL 跨 FastAPI restart durable citation + 相邻 Run/SSE 3 项通过；未调用在线模型 |
+| 下一动作 | M12-T3 已 `verified`；下一任务为 M12-T4。开始前只读审阅 Vue 结构、durable snapshot/SSE 消费边界和现有 Research API 调用；不得进入 M12-T5+、成本账本或新的在线调用 |
 
 ## 里程碑状态
 
@@ -78,13 +78,13 @@
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
-| M12 统一 Run 与实时 UI | `in_progress` | M12-T1/T2 `verified`；durable API、持久事件 SSE 与真实 PostgreSQL application 回放均有证据，下一步为 M12-T3 RAG/usage 聚合 |
+| M12 统一 Run 与实时 UI | `in_progress` | M12-T1–T3 `verified`；同 Run 的 Context/RAG citations、usage 投影、持久 SSE 与真实 PostgreSQL application restart 均有证据；下一步为 M12-T4 Vue 状态机 |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M12-T1 PostgreSQL API 用例与 M12-T2 持久 SSE 重启回放均已通过；M12-T3 RAG/usage 聚合、Vue 状态机和浏览器 E2E 尚无证据。
+- M12-T1–T3 后端主链已有真实 PostgreSQL restart 证据；Vue 状态机、浏览器 E2E 和 Research API 兼容层退出尚无证据。
 - 新的真实模型在线冒烟未执行，也不需要用于 M12-T1。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 

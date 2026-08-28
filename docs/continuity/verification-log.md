@@ -3724,3 +3724,23 @@
 - notifier 只保存当前连接的 coalesced signal，Coordinator 在事件持久化后才通知；每次唤醒仍从 EventStore 读取。应用重启、跨进程通知缺失或慢客户端都不会成为丢失历史或重放副作用的正确性前提。
 - 专项端到端测试发现并修复“终态事件在历史批次读取后写入时可能提前关闭”的竞态：终态关闭前会再次检查 EventStore 是否还有未发送 sequence。
 - 本轮没有 Vue SSE parser、半包/多帧浏览器解析、页面刷新恢复、RAG/usage 聚合、Redis/LISTEN-NOTIFY、Nginx 部署或在线模型调用；分别留给 M12-T3 至 T5 和 M13。
+
+## V-20260828-010：M12-T3 同 Run RAG 引用与 usage 投影（verified，E3/C1）
+
+- 任务：`M12-T3 / verified`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：使 Context、RAG、审批/终态兼容链、回答、公开 citation 与 SDK 已报告 usage 均可通过同一 durable Run 的持久事件核验；snapshot 不重新检索、不公开 prompt/Memory，且应用重启后仍读取相同证据。
+- 验证基线：`f8770a1`。
+- 任务等级：A 类持久化、公开 API 与数据边界；默认离线。未读取 Key、未调用 Provider 或外部网络，费用为 0。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_context_runtime backend.tests.test_async_context_runtime backend.tests.test_durable_run_projection backend.tests.test_persistent_run_api backend.tests.test_persistent_sse backend.tests.test_run_coordinator -v` | 0 | 79 项通过：同步/异步 Context 仅为已入选 RAG 片段发 `rag.citations`，RAG source 异常生成安全 `context.failed` 后终态失败，snapshot 投影同 Run citation/usage 并忽略后续畸形 usage；既有 durable API/SSE/Coordinator 回归通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.postgres_store_integration.PostgresFastApiApplicationTest.test_durable_snapshot_projects_rag_citations_across_application_restart backend.tests.postgres_store_integration.PostgresFastApiApplicationTest.test_durable_sse_replays_persisted_events_after_application_restart backend.tests.postgres_store_integration.PostgresFastApiApplicationTest.test_durable_run_api_replays_and_reads_after_application_restart -v`（仅本次子进程注入本机 integration DSN） | 0 | 3 项真实本地 PostgreSQL FastAPI lifespan 通过：citation 事件和 completed Run 写入后关闭应用，新应用的 owner-scoped snapshot 仍返回同一 citation；相邻 durable Run 与 SSE 续传重启回归通过 |
+| `git diff --check` | 0 | 通过；仅有 Git 的 LF/CRLF 工作树提示 |
+
+### 结论与边界
+
+- durable snapshot 逐页读取同 owner 的 EventStore，最新有效 `rag.citations` 与 `scope=run` 的 `model.usage` 是唯一投影来源。它不会查询当前 KnowledgeBase、执行 Runtime、拼接所有 Context，或从其它 Run/Session 聚合。
+- citation 仅公开 title、source、excerpt 和有限 score。document ID、query、prompt、Memory、最近消息、系统策略、Skill 内容、owner/session 均不进入该事件或 HTTP snapshot。畸形进度事件被忽略；未知 usage 或费用继续为 null，不能解释为零。
+- 默认离线 ManualRuntime 没有 `model.usage`，所以真实 PostgreSQL Run 的 usage 为 null 是预期契约。M12-T3 没有建立成本账本、价格表或预算控制；这些仍属于 M13。Vue 消费、浏览器 E2E 与 legacy Research API 退出仍未实现。

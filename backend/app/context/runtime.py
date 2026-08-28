@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
@@ -7,6 +9,7 @@ from backend.app.agent.runtime import (
     AgentRuntime,
     RuntimeControl,
     RuntimeContextIdentity,
+    RuntimeEvent,
     RuntimeEventSink,
     RuntimeOutcome,
     RuntimeRequest,
@@ -16,6 +19,7 @@ from backend.app.context.assembler import (
     ContextAssembler,
     ContextAssembly,
     ContextAssemblyError,
+    ContextSource,
 )
 from backend.app.context.collector import (
     ContextCollectionError,
@@ -169,11 +173,19 @@ class ContextAwareRuntime:
                 collector=self._collector,
                 assembler=self._assembler,
             )
+            citation_event = citation_event_from_assembly(prepared.assembly)
         except (
             ContextRuntimePreparationError,
             ContextCollectionError,
             ContextAssemblyError,
         ):
+            await emit(
+                RuntimeEvent(
+                    type="context.failed",
+                    step=0,
+                    data={"code": "context_unavailable"},
+                )
+            )
             return RuntimeResult(
                 status=RunStatus.FAILED,
                 failure=RunFailure(
@@ -184,11 +196,65 @@ class ContextAwareRuntime:
                 ),
                 step=0,
             )
+        if citation_event is not None:
+            await emit(citation_event)
         return await self._delegate.run(
             prepared.request,
             emit=emit,
             control=control,
         )
+
+
+def citation_event_from_assembly(
+    assembly: ContextAssembly,
+) -> RuntimeEvent | None:
+    """Expose only RAG fragments that were selected into this Run's prompt."""
+
+    citations = [
+        _citation_from_fragment(fragment.content)
+        for fragment in assembly.fragments
+        if fragment.source is ContextSource.RAG
+    ]
+    if not citations:
+        return None
+    return RuntimeEvent(
+        type="rag.citations",
+        step=0,
+        data={"citations": citations},
+    )
+
+
+def _citation_from_fragment(content: str) -> dict[str, object]:
+    try:
+        record = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
+        raise ContextRuntimePreparationError(
+            "context_rag_citation_invalid"
+        ) from None
+    if not isinstance(record, dict):
+        raise ContextRuntimePreparationError("context_rag_citation_invalid")
+    title = record.get("title")
+    source = record.get("source")
+    excerpt = record.get("excerpt")
+    score = record.get("score")
+    if (
+        not isinstance(title, str)
+        or not title
+        or not isinstance(source, str)
+        or not source
+        or not isinstance(excerpt, str)
+        or not excerpt
+        or not isinstance(score, (int, float))
+        or isinstance(score, bool)
+        or not math.isfinite(float(score))
+    ):
+        raise ContextRuntimePreparationError("context_rag_citation_invalid")
+    return {
+        "title": title,
+        "source": source,
+        "excerpt": excerpt,
+        "score": float(score),
+    }
 
 
 __all__ = [
@@ -198,5 +264,6 @@ __all__ = [
     "RuntimeContextBinding",
     "RuntimeContextBindingFactory",
     "RuntimeIdentityBindingFactory",
+    "citation_event_from_assembly",
     "prepare_context_request",
 ]

@@ -21,6 +21,7 @@ from backend.app.application_lifecycle import ApplicationLifecycleState
 from backend.app.container import ApplicationContainer
 from backend.app.main import create_app
 from backend.app.domain import Message
+from backend.app.knowledge import Document, InMemoryKnowledgeBase
 from backend.app.domain.run import (
     RunRecord,
     RunStatus,
@@ -149,6 +150,73 @@ class PostgresMemoryStoreContractTest(
 
 
 class PostgresFastApiApplicationTest(unittest.TestCase):
+    def test_durable_snapshot_projects_rag_citations_across_application_restart(self) -> None:
+        token = f"postgres-citation-token-{uuid4()}"
+        owner_id = f"postgres-citation-owner-{uuid4()}"
+        auth_config = json.dumps(
+            {token: {"principal_id": owner_id, "roles": []}}
+        )
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN,
+            }
+        )
+        knowledge_base = InMemoryKnowledgeBase()
+        knowledge_base.add(
+            Document(
+                id="postgres-agent-guide",
+                title="Agent Guide",
+                content="Agents use trusted tools.",
+                source="docs/agent.md",
+            )
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": f"postgres-citation-key-{uuid4()}",
+        }
+
+        with patch.dict(
+            os.environ,
+            {"AI_AGENT_DEMO_AUTH_JSON": auth_config},
+            clear=False,
+        ):
+            first_app = create_app(
+                settings=settings,
+                knowledge_base=knowledge_base,
+            )
+            with TestClient(first_app) as client:
+                created = client.post(
+                    "/api/durable/runs",
+                    headers=headers,
+                    json={"message": "How does an Agent use tools?"},
+                )
+                self.assertEqual(202, created.status_code)
+                run_id = created.json()["id"]
+                events = client.get(
+                    f"/api/durable/runs/{run_id}/events?after=0",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+            second_app = create_app(
+                settings=settings,
+                knowledge_base=knowledge_base,
+            )
+            with TestClient(second_app) as client:
+                snapshot = client.get(
+                    f"/api/durable/runs/{run_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+        self.assertEqual(200, events.status_code)
+        self.assertIn("event: rag.citations", events.text)
+        self.assertEqual(200, snapshot.status_code)
+        self.assertEqual("completed", snapshot.json()["status"])
+        self.assertEqual(
+            "Agent Guide",
+            snapshot.json()["citations"][0]["title"],
+        )
+
     def test_durable_sse_replays_persisted_events_after_application_restart(self) -> None:
         token = f"postgres-sse-token-{uuid4()}"
         owner_id = f"postgres-sse-owner-{uuid4()}"

@@ -5,6 +5,7 @@ from dataclasses import replace
 from backend.app.agent.runtime import (
     AgentRuntime,
     RuntimeControl,
+    RuntimeEvent,
     RuntimeEventSink,
     RuntimeOutcome,
     RuntimeRequest,
@@ -20,6 +21,7 @@ from .runtime import (
     PreparedContextRequest,
     RuntimeContextBinding,
     RuntimeContextBindingFactory,
+    citation_event_from_assembly,
 )
 
 
@@ -95,11 +97,19 @@ class AsyncContextAwareRuntime:
                 collector=self._collector,
                 assembler=self._assembler,
             )
+            citation_event = citation_event_from_assembly(prepared.assembly)
         except (
             ContextRuntimePreparationError,
             ContextCollectionError,
             ContextAssemblyError,
         ):
+            await emit(
+                RuntimeEvent(
+                    type="context.failed",
+                    step=0,
+                    data={"code": "context_unavailable"},
+                )
+            )
             return RuntimeResult(
                 status=RunStatus.FAILED,
                 failure=RunFailure(
@@ -110,6 +120,8 @@ class AsyncContextAwareRuntime:
                 ),
                 step=0,
             )
+        if citation_event is not None:
+            await emit(citation_event)
         return await self._delegate.run(
             prepared.request,
             emit=emit,

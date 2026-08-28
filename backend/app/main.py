@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -39,6 +40,7 @@ from backend.app.api.schemas import (
     MemoryFactResponse,
     MemoryRequest,
     MemoryResponse,
+    ModelUsageResponse,
     ResearchRequest,
     ResearchResponse,
     RunErrorResponse,
@@ -428,7 +430,8 @@ def create_app(
                 name=f"durable-run:{created.record.id}",
             )
             task.add_done_callback(_consume_durable_task_result)
-        return _to_durable_run_response(
+        return await _to_durable_run_response(
+            container,
             created.record,
             session_capability=(
                 access.created_capability if created.created else None
@@ -449,7 +452,7 @@ def create_app(
         record = await container.run_store.get(run_id, owner_id=access.owner_id)
         if record is None:
             raise _durable_run_not_found()
-        return _to_durable_run_response(record)
+        return await _to_durable_run_response(container, record)
 
     @app.get("/api/durable/runs/{run_id}/events")
     async def stream_durable_run_events(
@@ -498,7 +501,10 @@ def create_app(
         )
         if not records:
             raise _durable_session_not_found()
-        return [_to_durable_run_response(record) for record in records]
+        return [
+            await _to_durable_run_response(container, record)
+            for record in records
+        ]
 
     @app.post(
         "/api/durable/runs/{run_id}/cancel",
@@ -521,7 +527,7 @@ def create_app(
         record = await container.run_store.get(run_id, owner_id=access.owner_id)
         if record is None:
             raise _durable_run_not_found()
-        return _to_durable_run_response(record)
+        return await _to_durable_run_response(container, record)
 
     @app.post(
         "/api/durable/runs/{run_id}/approvals/{approval_id}",
@@ -582,7 +588,7 @@ def create_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Run approval state changed",
             ) from error
-        return _to_durable_run_response(resolved)
+        return await _to_durable_run_response(container, resolved)
 
     @app.get(
         "/api/observability/runs",
@@ -988,17 +994,21 @@ def _durable_execution_context(
     )
 
 
-def _to_durable_run_response(
+async def _to_durable_run_response(
+    container: ApplicationContainer,
     record: DurableRunRecord,
     *,
     session_capability: str | None = None,
 ) -> DurableRunResponse:
+    events = await _durable_events_for_snapshot(container, record)
     return DurableRunResponse(
         id=record.id,
         run_id=record.id,
         session_id=record.session_id,
         status=record.status.value,
         answer=record.answer,
+        citations=_durable_citations(events),
+        usage=_durable_usage(events),
         error=(
             DurableRunErrorResponse(
                 code=record.failure.code,
@@ -1013,6 +1023,125 @@ def _to_durable_run_response(
         started_at=record.started_at,
         finished_at=record.finished_at,
         session_capability=session_capability,
+    )
+
+
+async def _durable_events_for_snapshot(
+    container: ApplicationContainer,
+    record: DurableRunRecord,
+) -> tuple[StoredRunEvent, ...]:
+    cursor = 0
+    events: list[StoredRunEvent] = []
+    while True:
+        batch = await container.event_store.list_for_run(
+            record.id,
+            owner_id=record.owner_id,
+            after_sequence=cursor,
+            limit=500,
+        )
+        if not batch:
+            return tuple(events)
+        events.extend(batch)
+        cursor = batch[-1].sequence
+        if len(batch) < 500:
+            return tuple(events)
+
+
+def _durable_citations(
+    events: tuple[StoredRunEvent, ...],
+) -> list[EvidenceResponse]:
+    citations: list[EvidenceResponse] = []
+    for event in events:
+        if event.type != "rag.citations":
+            continue
+        parsed = _citation_projection(event.data)
+        if parsed is not None:
+            citations = parsed
+    return citations
+
+
+def _citation_projection(data: dict[str, object]) -> list[EvidenceResponse] | None:
+    raw_citations = data.get("citations")
+    if not isinstance(raw_citations, list) or not raw_citations:
+        return None
+    if len(raw_citations) > 16:
+        return None
+    citations: list[EvidenceResponse] = []
+    for raw_citation in raw_citations:
+        if not isinstance(raw_citation, dict):
+            return None
+        title = raw_citation.get("title")
+        source = raw_citation.get("source")
+        excerpt = raw_citation.get("excerpt")
+        score = raw_citation.get("score")
+        if (
+            not isinstance(title, str)
+            or not title
+            or not isinstance(source, str)
+            or not source
+            or not isinstance(excerpt, str)
+            or not excerpt
+            or not isinstance(score, (int, float))
+            or isinstance(score, bool)
+            or not math.isfinite(float(score))
+        ):
+            return None
+        citations.append(
+            EvidenceResponse(
+                title=title,
+                source=source,
+                excerpt=excerpt,
+                score=float(score),
+            )
+        )
+    return citations
+
+
+def _durable_usage(
+    events: tuple[StoredRunEvent, ...],
+) -> ModelUsageResponse | None:
+    usage: ModelUsageResponse | None = None
+    for event in events:
+        if event.type != "model.usage":
+            continue
+        parsed = _usage_projection(event.data)
+        if parsed is not None:
+            usage = parsed
+    return usage
+
+
+def _usage_projection(data: dict[str, object]) -> ModelUsageResponse | None:
+    if data.get("scope") != "run":
+        return None
+    token_values = {
+        name: data.get(name)
+        for name in ("input_tokens", "output_tokens", "total_tokens")
+    }
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in token_values.values()
+    ):
+        return None
+    if (
+        token_values["total_tokens"] == 0
+        or token_values["total_tokens"]
+        != token_values["input_tokens"] + token_values["output_tokens"]
+    ):
+        return None
+    raw_cost = data.get("estimated_cost_usd")
+    cost = (
+        float(raw_cost)
+        if isinstance(raw_cost, (int, float))
+        and not isinstance(raw_cost, bool)
+        and math.isfinite(float(raw_cost))
+        and raw_cost >= 0
+        else None
+    )
+    return ModelUsageResponse(
+        input_tokens=token_values["input_tokens"],
+        output_tokens=token_values["output_tokens"],
+        total_tokens=token_values["total_tokens"],
+        estimated_cost_usd=cost,
     )
 
 
