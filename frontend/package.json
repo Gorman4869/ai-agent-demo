@@ -6,16 +6,23 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
     "vue": "^3.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "latest",
     "@vitejs/plugin-vue": "latest",
+    "@vue/test-utils": "^2.5.0",
+    "happy-dom": "^20.11.12",
     "typescript": "5.9.3",
     "vite": "latest",
+    "vitest": "^4.1.11",
     "vue-tsc": "latest"
   }
 }

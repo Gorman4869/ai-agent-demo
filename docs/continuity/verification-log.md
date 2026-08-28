@@ -3766,3 +3766,35 @@
 - 首个匿名幂等键由浏览器安全随机源生成，capability 仅保存在当前标签页版本化 `sessionStorage`；刷新先读 owner-scoped snapshot，再从最后已应用 sequence 续传。该方案仍受同源 XSS 影响，不是生产凭证安全或持久会话结论。
 - 组件卸载只断开 SSE，不取消服务端 Run；取消必须调用 durable cancel API。approval 只提交 ID + approve/reject，工具绑定继续由服务端持久事件恢复。answer/citations/usage 的最终值只取同 Run snapshot，不再被 `/api/research` 覆盖。
 - 本证据只有 TypeScript/Vite 构建与静态源码检查，未运行 SSE 分帧/无效 JSON/重复事件单测，也未验证真实浏览器断线、刷新、审批或取消。按实施计划这些属于 M12-T5，因此 M12-T4 只能是 `code_complete`，不能写为 verified。
+
+## V-20260828-012：M12-T5 前端单元测试与真实 Chromium E2E（verified，E3/C）
+
+- 任务：`M12-T5 / verified`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：用自动化固定 durable SSE parser、Vue Run 状态机、取消、审批、重连和标签页恢复，并在真实 Chromium 中执行同一 durable Run 的断线续传、刷新恢复与审批决议。
+- 验证基线：`8610f06`。
+- 任务等级：A/C 类（capability、恢复状态、浏览器与测试依赖）。Node `22.16.0`、npm `10.9.2`；未读取 Key、未调用在线模型或付费 Provider。联网仅用于用户已授权的 npm 包、Playwright Chromium 下载和 npm advisory 查询，费用为 0。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `npm.cmd install --save-dev vitest@latest @vue/test-utils@latest happy-dom@latest @playwright/test@latest`（`frontend`） | 0 | 锁定 Vitest `4.1.11`、Vue Test Utils `2.5.0`、happy-dom `20.11.12`、Playwright Test `1.62.1`；安装提示 `nopt/abbrev` 的 Node engine 下限高于当前 Node，但实际测试未出现兼容失败 |
+| `npx.cmd playwright install chromium`（`frontend`） | 0 | 下载 Chromium/Chrome for Testing `151.0.7922.34`、headless shell、FFmpeg 与 Winldd；沙箱外最小 launch 返回相同浏览器版本 |
+| `npm.cmd run test:unit`（`frontend`，最终） | 0 | 2 个文件、12 项通过：分帧/CRLF/多帧、无效 JSON、ID 不一致、Abort、无终态、usage 校验、重复/缺口 sequence、有界重连、服务端取消、审批 ID/decision 和刷新 cursor 恢复 |
+| `npm.cmd run test:e2e`（`frontend`，最终） | 0 | 真实 Chromium 2 项通过：FastAPI + Vite 下首次 SSE 请求断开后续传、完成并刷新恢复；真实 `ApprovalLangGraphRuntime` 测试装配下 waiting approval 刷新恢复、同 Run 拒绝和失败终态 |
+| `npm.cmd run build`（`frontend`） | 0 | `vue-tsc -b && vite build` 通过；新增 Vitest/Playwright 配置进入 Node 侧类型检查，Vite 8.1.4 转换 19 modules |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_langgraph_approval_resume backend.tests.test_persistent_run_api backend.tests.test_persistent_sse backend.tests.test_durable_run_projection -q` | 0 | 30 项通过；审批恢复、durable API、SSE 和同 Run projection 回归通过，仅有既有 Starlette/httpx 弃用提示与 asyncio 慢任务诊断 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1` | 0 | 统一全量离线门通过：后端 643 项通过、1 项既有 Windows symlink 能力跳过；Code Agent Demo、`pip check`、Vue、MCP TypeScript 和 Compose 配置全部通过 |
+| `npm.cmd audit --json`（`frontend`） | 1 | 只读确认既有 `postcss@8.5.19` 与 `nanoid@3.3.16` 分别有 1 个 moderate/high advisory；HEAD 原锁文件已含相同版本，没有执行 `npm audit fix`，登记 `KI-027` |
+| `git diff --check` | 0 | 无 whitespace 错误；只有 Git LF/CRLF 工作树提示 |
+
+### 失败尝试与修正
+
+- Vitest 和 Chromium 首次均在受控沙箱命中 `spawn EPERM`；未改系统策略，同命令在已授权的沙箱外环境通过。这不是 Node engine 失败，当前无需切换 nvm。
+- Playwright 首次用 `./.venv/...` 启动后端时被 Windows `cmd.exe` 拒绝；改为从 `import.meta.url` 解析并引用绝对解释器路径。端口 8000 又落入本机 TCP 保留区间 `7941–8040`，测试专用端口改为 18080，默认开发代理仍保持 8000。
+- 默认 manual Runtime 的匿名 `publish_report` 因生产角色策略正常完成为工具拒绝，不产生审批中断。最终 E2E 使用独立测试模块装配真实 `ApprovalLangGraphRuntime` 和无生产角色要求的合成高风险工具；生产 `main.py`、默认 Runtime、工具权限与 durable HTTP 契约均未改。
+
+### 结论与边界
+
+- M12-T4 的 parser、类型化状态机、服务端取消、有界重连、审批和标签页恢复已由 12 项单测及真实 Chromium 补齐，M12-T4/M12-T5 达到 `verified`；`KI-007` 关闭，`KI-008` 的前端部分完成。
+- 浏览器 E2E 使用真实 FastAPI durable API、RunStore/EventStore/Coordinator/SSE、Vite 和 Chromium；审批工具本身是测试 fixture，不证明生产匿名用户具有 editor 权限，也不执行真实副作用。
+- 本任务没有验证 Nginx、生产认证、CSP、跨浏览器矩阵、浏览器崩溃、后端硬进程重启、真实 PostgreSQL 浏览器链或在线模型。兼容 Research API 的最终保留/替代决策仍属于 M12-T6，统一 CI 与依赖升级属于 M13。

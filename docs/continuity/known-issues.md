@@ -10,8 +10,8 @@
 | KI-004 | high | mitigated | M10–M12 | M10 已完成审批与同进程结果未知故障边界；M11-T1 已跨进程恢复 checkpoint、审批私有状态和 ToolExecution，并把 lease、scanner、quiesce、async façade 与默认 opt-in Container/FastAPI 生命周期接通。M12-T1 durable HTTP 主链已在真实 PostgreSQL FastAPI lifespan 下通过创建、重放、查询和重启后的会话列表验证，旧 Run HTTP 仍为兼容链 | `V-20260722-009`、`V-20260803-001`、`V-20260803-003`、`V-20260803-005`、`V-20260808-002`、`V-20260808-005`、`V-20260808-007`、`V-20260808-009`、`V-20260808-013`、`V-20260828-007/008`；M12 SSE 续传和统一主链后关闭 |
 | KI-005 | high | mitigated | M10–M12 | M10-T3 已把有界动态计划、失败诊断、白名单重规划、预算/循环停止和副作用禁重放接入可注入的 durable Coordinator Run；M11-T4/T5 已完成可信 Context、原子幂等 turn 发布、公开 owner-scoped fact read/version CAS correction/delete/audit 和跨 application lifespan 主 Run。纠正后 Context 只读新值，删除后不再注入。M11 的上下文与记忆部分已满足；但 Run/Memory 仍非共同事务且无后台扫描，M12 统一 durable Run、实时 API/UI 和跨域故障一致性仍未完成 | `V-20260722-001`、`V-20260808-013`、`V-20260809-008`、`V-20260809-010`、`V-20260809-012`、`V-20260809-014`、`V-20260809-016`、`V-20260810-001`、`V-20260819-001`、`V-20260819-003`、`V-20260820-001`、`V-20260820-003`、`V-20260820-005`、`V-20260820-008`；M12 统一 Run 上下文、实时恢复和跨域故障评测通过后关闭 |
 | KI-006 | high | closed | M11 | M11-T6 在未改动 `m11-rag-v1` canonical 摘要、50 条、`top_k=3` 或冻结阈值的前提下，完成真实 pgvector cosine/HNSW 对照；sparse 为 1.0/1.0/1.0，评测专用离线三维课程主题 Embedding 的 pgvector 为 0.98/0.946667/0.98。剩余 1 条漏召回保留在失败分析中；在线 Provider、生产容量与跨进程缓存不属于本问题 | `V-20260809-001/003/004/006`：pgvector/Embedding 工程边界；`V-20260820-011`：固定数据集与 sparse E3；`V-20260827-001`：真实 pgvector 固定对照和阈值通过。在线 E4 由 M11-T7 独立记录 |
-| KI-007 | high | mitigated | M12 | M12-T2/T3 已完成 durable SSE 与同 Run citations/usage snapshot。M12-T4 Vue 代码已只消费 durable create/snapshot/SSE/approval/cancel，删除流后独立 Research 覆盖，并实现标签页级 Run/sequence 恢复；当前只有 TypeScript/Vite 构建和静态检查，尚无分帧、断线、审批、取消与真实刷新浏览器证据 | `V-20260828-009/010/011`；M12-T5 单元测试与单 Run 浏览器续传/刷新恢复 E2E 通过后关闭 |
-| KI-008 | high | open | M12–M13 | M9-T3 已补 TypeScript MCP STDIO 协议自动化；仍缺前端和真实数据库自动化测试及统一分层门 | 分层测试进入统一验证和 CI |
+| KI-007 | high | closed | M12 | durable SSE、同 Run citations/usage、Vue durable-only 状态机、服务端取消、有界重连和标签页恢复已完成；M12-T5 又用 12 项单测和真实 Chromium 固定分帧、无效 JSON、重复/缺口、Abort、首次断线续传、刷新与审批恢复 | `V-20260828-009/010/011/012`：后端 durable 主链、前端状态机和真实浏览器恢复均通过 |
+| KI-008 | high | mitigated | M12–M13 | M9-T3 已补 TypeScript MCP STDIO，M11/M12 已有真实 PostgreSQL 自动化，M12-T5 已补前端单元与真实 Chromium E2E；仍缺把 offline、MCP、PostgreSQL、frontend、E2E、Docker 和 online opt-in 汇总为不会误报成功的统一 CI 门 | M13-T3 分层验证与 CI 通过后关闭 |
 | KI-009 | medium | open | M13 | Compose 仅配置通过，镜像和容器健康未验证 | Docker 构建、健康和 Nginx SSE 验证通过 |
 | KI-010 | high | open | M14 | 浏览器审批未绑定完整 URL/计划，且缺少私网、DNS 与重定向防护 | 真实浏览器安全和 SSRF 测试通过 |
 | KI-011 | high | open | M13–M14 | 代码 Agent 在截断前完整缓冲输出，超时未证明清理进程树 | 有界流式输出和进程树测试通过 |
@@ -30,6 +30,7 @@
 | KI-024 | low | closed | M1/M11 连续性 | M11 第四纵切 handoff 固定的 M1 恢复数量为当时的 7 项；后续学习者提交 `beefc1a` 新增 3 项且未修改 M11 lease/Coordinator，当前同一隔离命令实际通过 10 项。历史 handoff 保持不可变，新恢复记录更新当前基线 | `V-20260808-001`：PostgreSQL 76 项、M1 10 项和连续性 52/80 通过 |
 | KI-025 | low | closed | M11 连续性 | Git 与 `V-20260809-006/007` 已证明 M11-T3 第三纵切提交为 `02664b8` 且当前任务为 M11-T4；动态 `status.md` 已回填实现锚点，并把恢复入口切到最新 M11-T4 handoff | `V-20260809-008/009`：先登记漂移，再修正 status；52 个稳定任务/100 个 Markdown、diff 与 Git 工作区复核通过 |
 | KI-026 | low | closed | M11 连续性 | M11-T5 第六纵切已由 Git `9ae5e8a`、`V-20260820-005/006/007` 和 handoff 固定，但恢复时发现动态 `status.md` 底部仍指向第五纵切；先登记冲突，再修正到第六纵切并以 HEAD `f066a90` 恢复第七纵切，未重做已验证工作 | `V-20260820-008/009`：第六纵切恢复基线、Git/文档事实、第七纵切实现与 52 个稳定任务/114 个 Markdown 连续性一致 |
+| KI-027 | medium | open | M13 | npm advisory 查询确认既有 Vue/Vite 构建链的 `postcss@8.5.19` 和 `nanoid@3.3.16` 各有一个 moderate/high 公告；本次测试依赖安装前的 HEAD 锁文件已含相同版本，受控源码/固定参数未命中已知利用前提，但不能把通过测试等同为依赖风险已消除 | 在独立依赖升级任务中升级到公告修复版本，重跑前端单元、E2E、生产构建和全量门；不得用忽略 audit 或只读缓存结果关闭 |
 
 ## 状态值
 
