@@ -63,6 +63,10 @@
 - Raw error details may exist in deterministic in-process evaluation objects, but a log or external API must choose fields explicitly.
 - Mock evaluation is deterministic and network-free. Real-model evaluation is opt-in and must report its provider, model, usage and cost source.
 - Missing usage data remains unknown; it must not be reported as zero.
+- Keep the legacy synchronous `RunObserver` separate from durable Run observability. Durable Trace, Metrics, and usage ledger projections read only the same owner-scoped persisted Run events.
+- Trace and Metrics exporters are replaceable async sinks invoked only after persistence. Export failure is best effort and cannot rewrite the durable Run; EventStore remains the rebuildable source of truth.
+- Durable Trace records use an explicit content-free allowlist. Prompts, answers, model deltas, RAG excerpts, Memory, tool arguments/results, raw exceptions, owner/session identifiers, and secrets never enter Trace or Metrics.
+- Run-scoped aggregate usage is a cumulative event snapshot, not a single-call `UsageRecord`. Preserve every valid ledger entry, use only the latest sequence for the Run cost summary, and never sum cumulative snapshots twice.
 
 ## 10. Tool Security
 
@@ -111,6 +115,7 @@
 - Heartbeats are transport events and never consume a business event sequence. Consumers rely on unique increasing sequence values; they do not sort by timestamps.
 - Durable SSE is isolated below `/api/durable/runs/{run_id}/events`. It authenticates the same owner scope as the Run, treats `after` as an exclusive EventStore sequence cursor, replays Store history before waiting, and emits heartbeat comments without a business sequence. A live notifier may coalesce wakeups but must not retain event payloads or be the source of truth; close only after a terminal Run has no unread stored events.
 - Durable snapshot citations and aggregate usage are projections of that same owner-scoped Run's persisted events, never a fresh KnowledgeBase search or a reconstruction from `prompt_context`. Context may emit `rag.citations` only from RAG fragments selected into the assembled prompt and only with reviewed public fields. Ignore malformed events, keep the last valid projection, and preserve unknown usage/cost as `null`; M12 does not create a usage ledger, pricing source, or zero-cost inference.
+- M13 durable observability promotes valid `scope=run` usage events into an event-sourced ledger and latest cumulative cost summary without adding a second persistence write. PostgreSQL durability comes from the existing EventStore; no adapter may silently create a separate non-atomic usage write path.
 - `UsageRecord` describes exactly one model call. Unknown cost remains `None`; persisted currency uses `Decimal`, never a float conversion.
 - Side-effecting `ToolExecution` records require an idempotency digest at creation. Raw arguments and raw results are not retained; safe summaries and digests are bounded.
 - Logs use `safe_summary()` or an explicit allowlist. `repr=False` is defense in depth and does not authorize `dataclasses.asdict()` on records containing content.

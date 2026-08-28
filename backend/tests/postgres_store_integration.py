@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from psycopg import Error as PsycopgError
 
-from backend.app.agent import RuntimeResult
+from backend.app.agent import RuntimeEvent, RuntimeResult
 from backend.app.application_lifecycle import ApplicationLifecycleState
 from backend.app.container import ApplicationContainer
 from backend.app.main import create_app
@@ -34,6 +34,12 @@ from backend.app.memory import (
     MemoryFactAuditAction,
     MemoryScope,
     PublishTurn,
+)
+from backend.app.observability import (
+    EventRunObservability,
+    InMemoryMetricsSink,
+    InMemoryTraceSink,
+    RunTelemetryExporter,
 )
 from backend.app.postgres_execution import PostgresExecutionComposition
 from backend.app.services.run_recovery import (
@@ -113,6 +119,66 @@ class PostgresRunStoreContractTest(
 
     async def create_store_pair(self) -> tuple[RunStore, EventStore]:
         return self.persistence.run_store, self.persistence.event_store
+
+
+class PostgresDurableObservabilityTest(unittest.IsolatedAsyncioTestCase):
+    async def test_usage_and_trace_rebuild_after_persistence_reopen(self) -> None:
+        run_id = f"postgres-observability-{uuid4()}"
+        owner_id = f"postgres-observability-owner-{uuid4()}"
+        first = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await first.setup()
+            run = RunRecord.create(
+                run_id=run_id,
+                session_id=f"{run_id}-session",
+                owner_id=owner_id,
+                runtime="manual",
+                input_text="private postgres observability input",
+                idempotency_key=f"{run_id}-key",
+                created_at=datetime.now(UTC),
+            )
+            await first.run_store.create(run)
+            observability = EventRunObservability(first.event_store)
+            trace_sink = InMemoryTraceSink()
+            metrics_sink = InMemoryMetricsSink()
+            coordinator = RunCoordinator(
+                run_store=first.run_store,
+                event_store=first.event_store,
+                runtimes={"manual": _PostgresUsageRuntime()},
+                event_observer=RunTelemetryExporter(
+                    observability,
+                    trace_sink=trace_sink,
+                    metrics_sink=metrics_sink,
+                ),
+                run_timeout_ms=1_000,
+            )
+
+            completed = await coordinator.execute(run_id, owner_id=owner_id)
+            self.assertEqual(RunStatus.COMPLETED, completed.status)
+            self.assertTrue(trace_sink.spans(run_id=run_id))
+            self.assertTrue(metrics_sink.metrics(run_id=run_id))
+        finally:
+            await first.close()
+
+        second = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await second.setup()
+            rebuilt = await EventRunObservability(second.event_store).snapshot(
+                run_id,
+                owner_id=owner_id,
+            )
+        finally:
+            await second.close()
+
+        self.assertEqual(1, len(rebuilt.usage_ledger))
+        self.assertEqual(7, rebuilt.cost_summary.total_tokens)
+        self.assertIsNone(rebuilt.cost_summary.estimated_cost_usd)
+        self.assertEqual("unknown", rebuilt.cost_summary.cost_source)
+        self.assertIn("run", {span.layer.value for span in rebuilt.spans})
+        self.assertNotIn(
+            "private postgres observability input",
+            repr(rebuilt.to_record()),
+        )
 
 
 class PostgresApprovalStoreContractTest(
@@ -2089,6 +2155,33 @@ class PostgresUnavailableTest(unittest.IsolatedAsyncioTestCase):
             await PostgresPersistence.open(unavailable, timeout=0.2)
 
         self.assertEqual("store_unavailable", raised.exception.code)
+
+
+class _PostgresUsageRuntime:
+    async def run(self, request, *, emit, control) -> RuntimeResult:
+        del request, control
+        await emit(
+            RuntimeEvent(
+                type="model.usage",
+                step=1,
+                data={
+                    "scope": "run",
+                    "provider": "fake-provider",
+                    "model": "fake-model-v1",
+                    "requests": 1,
+                    "input_tokens": 3,
+                    "output_tokens": 4,
+                    "total_tokens": 7,
+                    "estimated_cost_usd": None,
+                    "cost_source": "unknown",
+                },
+            )
+        )
+        return RuntimeResult(
+            status=RunStatus.COMPLETED,
+            answer="postgres observability complete",
+            step=1,
+        )
 
 
 class _ContextCapturingRuntime:

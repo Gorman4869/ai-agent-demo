@@ -3,7 +3,7 @@
 - 更新时间：2026-08-28，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`0f81b0a`
+- 最近已确认实现提交：`3fcc91b`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -53,6 +53,7 @@
 - M11-T6 第一纵切验证基线提交：`f441615`；实现提交：`07ec390`
 - M11-T6 第二纵切验证基线提交：`f0e4899`；实现提交：`0b4e1d9`；验证记录：`V-20260827-001/002`
 - M12-T4 实现提交：`8610f06`；M12-T5 实现提交：`0f81b0a`；M12-T6 验证基线：`0f81b0a`；验证记录：`V-20260828-013`
+- M13-T1 验证基线：`3fcc91b`；验证记录：`V-20260828-014`
 - 远程仓库：未配置
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -60,14 +61,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M12-T6` |
+| 任务 ID | `M13-T1` |
 | 状态 | `verified` |
-| 目标 | 决定 legacy Research/旧 SSE 的兼容边界，记录 durable API 迁移，并完成 M12 跟练验收 |
-| 设计依据 | 实施计划 M12-T6、`ADR-0029`–`ADR-0033` |
-| 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 新增 `ADR-0033`、durable API 迁移记录和 M12 一页速查；扩充 Stage 12 六次跟练、自测、费曼、30 项映射及验收清单；修正前端规约的 legacy `streamRun()` 漂移。业务代码和旧端点均未修改或删除 |
-| 验证 | `V-20260828-013`（基线 `0f81b0a`）：新旧后端契约 46 项、前端单测 12 项、Chromium E2E 2 项、Vue build、连续性与统一全量离线门通过；全量后端 643 项通过、1 项既有 symlink 跳过 |
-| 下一动作 | M12-T1–T6 已 `verified`。按用户当前工程优先级，下一任务是 M13-T1：只设计并实现可替换 Trace/Metrics sink 与持久 usage/cost 边界；开始前重新恢复、审计依赖和授权范围，不在本次提交提前实现 |
+| 目标 | 在保留旧 `RunObserver` 的前提下，为 durable Run 增加可替换 Trace/Metrics sink、可持久重建的 usage ledger/cost summary 和 owner-scoped 排障接口 |
+| 设计依据 | 实施计划 M13-T1、`ADR-0034`、`docs/m13-observability.md` |
+| 执行协议 | A 类持久化投影、公共 API 与遥测隔离；见 `docs/continuity/course-delivery-playbook.md` |
+| 当前修改 | 新增基于 EventStore 的 `EventRunObservability`、终态 `RunTelemetryExporter`、可替换 sink、脱敏 spans/metrics、Run 级 usage/cost 投影和 `GET /api/durable/runs/{run_id}/observability`；不新增表或依赖，不改旧观测 API |
+| 验证 | `V-20260828-014`（基线 `3fcc91b`）：8 项新场景、128 项聚焦回归、651 项后端全量通过且 1 项既有 symlink 跳过、114 项真实 PostgreSQL integration、统一离线门与构建门通过 |
+| 下一动作 | M13-T1 已 `verified`。下一任务是 M13-T2：重新审计稳定错误、retryable、模型/工具/Run timeout 与副作用幂等边界；不把 Trace/ledger 当成重试授权，不提前进入 CI 或部署 |
 
 ## 里程碑状态
 
@@ -80,20 +81,21 @@
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；当时保留的进程重启/PostgreSQL/ToolExecution 缺口已由 M11/M12 承接，`KI-004` 现已关闭 |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
-| M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
+| M13 生产工程闭环 | `in_progress` | M13-T1 `verified`；M13-T2–T4 尚未开始 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M12 当前无工程阻塞；legacy Research/旧 SSE 已由 `ADR-0033` 决定保留为隔离兼容层，Vue 主链不再调用。
+- M13-T1 当前无工程阻塞；durable 观测以 EventStore 为可重建真相源，sink 故障不改变 Run 终态。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12 验收，但须由 M13 独立升级任务处理。
-- M12-T6 没有读取 Key 或执行新的真实模型在线冒烟；里程碑验收不需要在线调用。
+- M13-T1 没有读取模型 Key 或执行在线 Provider；本任务的持久化与故障定位验收不需要在线调用。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
 ## 未验证范围
 
-- M12-T6 没有验证仓库外 legacy 消费者、HTTP deprecation header、生产调用遥测、OIDC/HttpOnly、capability 撤销、CSP、Nginx、多实例通知、跨浏览器矩阵、生产容量或 usage/cost 账本。旧端点只标记为兼容保留；被 `superseded` 的是 Vue 双链主流程，不是物理路由。
-- M12-T6 未重新运行真实 PostgreSQL integration；durable API、SSE 与 projection 的数据库重启证据继续引用 `V-20260828-008/009/010`。本轮只改文档、规约和连续性记录，不改数据库或业务代码。
+- M13-T1 没有实现 OpenTelemetry/vendor exporter、跨服务 propagation、逐调用 Provider usage、版本化价格表或 `max_cost_usd` 硬门；未知费用保持 `null/unknown`，`KI-018` 只降为 mitigated。
+- 单事件缺少可靠成对边界时，细分 span 的 `duration_ms` 保持 `null`；当前不会用 Run 总耗时冒充纯模型或工具耗时。
+- M13-T1 已用真实 PostgreSQL 114 项和 close/reopen 专项证明 EventStore 重建，但未验证生产容量、多实例 exporter、在线 Provider 计费、M13-T2 超时/重试、M13-T3 CI 或 M13-T4 部署。
 - M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
 - pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
 - M11-T7 首次外部尝试见 `V-20260827-003`：Key 仅以安全布尔值确认存在；最终 Provider 返回 `embedding_provider_quota_or_rate_limited`，未发生成功向量写入、查询、usage 或费用记录。该错误码不能区分项目配额耗尽与短期限流，须由用户在平台恢复后重新授权；初始 SOCKS client 初始化失败也不是 Provider 兼容证据。
@@ -224,8 +226,8 @@
 - 没有用户新的单次授权，因此没有读取真实 Key、运行带 `-Authorized` 的脚本、访问模型服务或产生费用；Provider strict schema、真实 streaming、工具调用、usage、模型质量、费用和资源清理仍无 E4 证据。
 - `KI-018` 的逐调用硬成本门、版本化定价源与持久 usage/cost 账本仍未实现；本次 operator-supplied 费用估算不得描述成账单事实。
 - M8 课程和离线工程已 `code_complete`，但没有真实在线 E4，不能标记 `accepted`；学习者个人自测与费曼勾选仍只写 `docs/progress.md`。
-- `KI-001` 保持 mitigated；`KI-016`、`KI-017`、`KI-018` 的生产缺口不变，后续分别由 M11-M13 承接。
+- `KI-018` 因 M13-T1 持久 Run 级 ledger/cost summary 改为 mitigated；逐调用 usage、版本化定价、硬成本门和在线低预算证据仍待后续任务。`KI-016`、`KI-017` 的生产缺口不变。
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-28-m12-t6-compatibility-course-verified.md`，再核对 `V-20260828-013`、`ADR-0033`、`docs/m12-api-migration.md` 和实施计划 M12-T6。M12-T1–T6 已 verified，不要删除 legacy sessions/runs/POST SSE 或 `/api/research`，也不要把它们代理或双写到 durable Store。按用户当前工程优先级，下一原子任务为 M13-T1；开始前重新检查状态、依赖和授权，未经新授权不升级依赖、不读取 Key、不执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-28-m13-t1-durable-observability-verified.md`，再核对 `V-20260828-014`、`ADR-0034`、`docs/m13-observability.md` 和实施计划 M13-T1。M13-T1 已 verified；EventStore 是 durable 观测的可重建真相源，旧 `RunObserver` 和旧观测 API 必须保留。下一原子任务为 M13-T2；开始前重新审计稳定错误、重试、超时与幂等边界，未经新授权不升级依赖、不读取 Key、不执行在线/付费调用或配置远程 Git。

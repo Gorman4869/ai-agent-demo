@@ -29,6 +29,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from backend.app.api.schemas import (
     DocumentRequest,
     DocumentResponse,
+    DurableRunObservabilityResponse,
     DurableRunRequest,
     DurableRunResponse,
     DurableRunErrorResponse,
@@ -73,7 +74,7 @@ from backend.app.memory import (
     MemoryScope,
     MemoryStore,
 )
-from backend.app.observability import RunObservation
+from backend.app.observability import RunCostSummary, RunObservation
 from backend.app.security import (
     AuthenticationError,
     Principal,
@@ -453,6 +454,31 @@ def create_app(
         if record is None:
             raise _durable_run_not_found()
         return await _to_durable_run_response(container, record)
+
+    @app.get(
+        "/api/durable/runs/{run_id}/observability",
+        response_model=DurableRunObservabilityResponse,
+    )
+    async def get_durable_run_observability(
+        run_id: str,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> DurableRunObservabilityResponse:
+        container = current_container()
+        access = _durable_access_for_existing_request(
+            principal=principal,
+            capability=x_session_token,
+        )
+        record = await container.run_store.get(run_id, owner_id=access.owner_id)
+        if record is None:
+            raise _durable_run_not_found()
+        snapshot = await container.run_observability.snapshot(
+            record.id,
+            owner_id=record.owner_id,
+        )
+        return DurableRunObservabilityResponse.model_validate(
+            snapshot.to_record()
+        )
 
     @app.get("/api/durable/runs/{run_id}/events")
     async def stream_durable_run_events(
@@ -1001,6 +1027,7 @@ async def _to_durable_run_response(
     session_capability: str | None = None,
 ) -> DurableRunResponse:
     events = await _durable_events_for_snapshot(container, record)
+    observability = container.run_observability.project(record.id, events)
     return DurableRunResponse(
         id=record.id,
         run_id=record.id,
@@ -1008,7 +1035,7 @@ async def _to_durable_run_response(
         status=record.status.value,
         answer=record.answer,
         citations=_durable_citations(events),
-        usage=_durable_usage(events),
+        usage=_durable_usage(observability.cost_summary),
         error=(
             DurableRunErrorResponse(
                 code=record.failure.code,
@@ -1097,51 +1124,18 @@ def _citation_projection(data: dict[str, object]) -> list[EvidenceResponse] | No
     return citations
 
 
-def _durable_usage(
-    events: tuple[StoredRunEvent, ...],
-) -> ModelUsageResponse | None:
-    usage: ModelUsageResponse | None = None
-    for event in events:
-        if event.type != "model.usage":
-            continue
-        parsed = _usage_projection(event.data)
-        if parsed is not None:
-            usage = parsed
-    return usage
-
-
-def _usage_projection(data: dict[str, object]) -> ModelUsageResponse | None:
-    if data.get("scope") != "run":
+def _durable_usage(summary: RunCostSummary | None) -> ModelUsageResponse | None:
+    if summary is None:
         return None
-    token_values = {
-        name: data.get(name)
-        for name in ("input_tokens", "output_tokens", "total_tokens")
-    }
-    if any(
-        not isinstance(value, int) or isinstance(value, bool) or value < 0
-        for value in token_values.values()
-    ):
-        return None
-    if (
-        token_values["total_tokens"] == 0
-        or token_values["total_tokens"]
-        != token_values["input_tokens"] + token_values["output_tokens"]
-    ):
-        return None
-    raw_cost = data.get("estimated_cost_usd")
-    cost = (
-        float(raw_cost)
-        if isinstance(raw_cost, (int, float))
-        and not isinstance(raw_cost, bool)
-        and math.isfinite(float(raw_cost))
-        and raw_cost >= 0
-        else None
-    )
     return ModelUsageResponse(
-        input_tokens=token_values["input_tokens"],
-        output_tokens=token_values["output_tokens"],
-        total_tokens=token_values["total_tokens"],
-        estimated_cost_usd=cost,
+        input_tokens=summary.input_tokens,
+        output_tokens=summary.output_tokens,
+        total_tokens=summary.total_tokens,
+        estimated_cost_usd=(
+            float(summary.estimated_cost_usd)
+            if summary.estimated_cost_usd is not None
+            else None
+        ),
     )
 
 

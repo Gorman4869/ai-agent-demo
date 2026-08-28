@@ -81,9 +81,31 @@ class EventNotifier(Protocol):
         ...
 
 
+class RunEventObserver(Protocol):
+    """Best-effort observer of events that are already durable."""
+
+    async def observe(
+        self,
+        event: StoredRunEvent,
+        *,
+        owner_id: str,
+    ) -> None:
+        ...
+
+
 class NullEventNotifier(EventNotifier):
     async def notify(self, event: StoredRunEvent) -> None:
         del event
+
+
+class NullRunEventObserver(RunEventObserver):
+    async def observe(
+        self,
+        event: StoredRunEvent,
+        *,
+        owner_id: str,
+    ) -> None:
+        del event, owner_id
 
 
 class PersistentEventEmitter:
@@ -96,6 +118,7 @@ class PersistentEventEmitter:
         run_id: str,
         owner_id: str,
         notifier: EventNotifier | None = None,
+        observer: RunEventObserver | None = None,
         event_id_factory: EventIdFactory | None = None,
         notify_timeout_ms: int = 1_000,
     ) -> None:
@@ -109,6 +132,7 @@ class PersistentEventEmitter:
         self._run_id = run_id
         self._owner_id = owner_id
         self._notifier = notifier or NullEventNotifier()
+        self._observer = observer or NullRunEventObserver()
         self._event_id_factory = event_id_factory or self._default_event_id
         self._notify_timeout_ms = notify_timeout_ms
         self._ordinal = 0
@@ -125,6 +149,7 @@ class PersistentEventEmitter:
         )
         if result.created:
             await self._safe_notify(result.event)
+            await self._safe_observe(result.event)
         return result
 
     async def notify_committed(
@@ -135,6 +160,7 @@ class PersistentEventEmitter:
     ) -> None:
         if created:
             await self._safe_notify(event)
+            await self._safe_observe(event)
 
     async def _safe_notify(self, event: StoredRunEvent) -> None:
         try:
@@ -143,6 +169,19 @@ class PersistentEventEmitter:
         except Exception:
             LOGGER.warning(
                 "run event notification failed",
+                extra={"run_id": event.run_id, "sequence": event.sequence},
+            )
+
+    async def _safe_observe(self, event: StoredRunEvent) -> None:
+        try:
+            async with asyncio.timeout(self._notify_timeout_ms / 1_000):
+                await self._observer.observe(
+                    event,
+                    owner_id=self._owner_id,
+                )
+        except Exception:
+            LOGGER.warning(
+                "run telemetry export failed",
                 extra={"run_id": event.run_id, "sequence": event.sequence},
             )
 
@@ -298,6 +337,7 @@ class RunCoordinator:
         runtimes: Mapping[RuntimeName | str, AgentRuntime],
         memory_store: AsyncMemoryStore | None = None,
         notifier: EventNotifier | None = None,
+        event_observer: RunEventObserver | None = None,
         run_timeout_ms: int = 30_000,
         notify_timeout_ms: int | None = None,
         run_lease_store: RunLeaseStore | None = None,
@@ -315,6 +355,7 @@ class RunCoordinator:
         self._runtimes = dict(runtimes)
         self._memory_store = memory_store
         self._notifier = notifier or NullEventNotifier()
+        self._event_observer = event_observer or NullRunEventObserver()
         self._run_timeout_ms = run_timeout_ms
         self._notify_timeout_ms = (
             min(1_000, run_timeout_ms)
@@ -1262,6 +1303,7 @@ class RunCoordinator:
             run_id=run_id,
             owner_id=owner_id,
             notifier=self._notifier,
+            observer=self._event_observer,
             notify_timeout_ms=self._notify_timeout_ms,
         )
 

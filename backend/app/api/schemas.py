@@ -182,6 +182,68 @@ class ModelUsageResponse(BaseModel):
     estimated_cost_usd: float | None
 
 
+class DurableTraceSpanResponse(BaseModel):
+    id: str
+    run_id: str
+    parent_id: str | None
+    layer: Literal["run", "node", "model", "tool"]
+    name: str
+    status: Literal["completed", "failed", "cancelled", "retrying"]
+    step: int = Field(ge=0)
+    started_at: datetime
+    finished_at: datetime
+    duration_ms: float | None = Field(default=None, ge=0)
+    error_code: str | None
+    error_category: str | None
+    attempt: int | None = Field(default=None, ge=1)
+
+
+class DurableMetricPointResponse(BaseModel):
+    id: str
+    run_id: str
+    name: str
+    value: float = Field(ge=0)
+    unit: str
+    layer: Literal["run", "node", "model", "tool"]
+    status: Literal["completed", "failed", "cancelled", "retrying"]
+    step: int = Field(ge=0)
+    observed_at: datetime
+
+
+class RunUsageLedgerEntryResponse(BaseModel):
+    event_id: str
+    run_id: str
+    sequence: int = Field(ge=1)
+    provider: str | None
+    model: str | None
+    requests: int | None = Field(default=None, ge=1)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=1)
+    estimated_cost_usd: str | None
+    cost_source: str
+    created_at: datetime
+
+
+class RunCostSummaryResponse(BaseModel):
+    entry_count: int = Field(ge=1)
+    latest_sequence: int = Field(ge=1)
+    requests: int | None = Field(default=None, ge=1)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=1)
+    estimated_cost_usd: str | None
+    cost_source: str
+
+
+class DurableRunObservabilityResponse(BaseModel):
+    run_id: str
+    spans: list[DurableTraceSpanResponse]
+    metrics: list[DurableMetricPointResponse]
+    usage_ledger: list[RunUsageLedgerEntryResponse]
+    cost_summary: RunCostSummaryResponse | None
+
+
 class RunObservationResponse(BaseModel):
     run_id: str
     status: str

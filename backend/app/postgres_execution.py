@@ -10,6 +10,12 @@ from typing import Protocol
 
 from backend.app.agent import AgentRuntime
 from backend.app.domain.run import RuntimeName
+from backend.app.observability import (
+    EventRunObservability,
+    MetricsSink,
+    RunTelemetryExporter,
+    TraceSink,
+)
 from backend.app.services.run_coordinator import EventNotifier, RunCoordinator
 from backend.app.services.run_recovery import RunRecoveryService
 from backend.app.services.run_recovery_supervisor import RunRecoverySupervisor
@@ -54,12 +60,14 @@ class PostgresExecutionComposition:
         persistence: PostgresPersistence,
         runtimes: Mapping[RuntimeName | str, AgentRuntime],
         coordinator: RunCoordinator,
+        run_observability: EventRunObservability,
         recovery_supervisor: RunRecoverySupervisor,
         coordinator_quiesce_timeout_ms: int,
     ) -> None:
         self._persistence = persistence
         self._runtimes = runtimes
         self._coordinator = coordinator
+        self._run_observability = run_observability
         self._recovery_supervisor = recovery_supervisor
         self._coordinator_quiesce_timeout_ms = coordinator_quiesce_timeout_ms
         self._state = PostgresExecutionCompositionState.STARTING
@@ -73,6 +81,8 @@ class PostgresExecutionComposition:
         runtimes: Mapping[RuntimeName | str, AgentRuntime] | None = None,
         runtime_factory: PostgresRuntimeFactory | None = None,
         notifier: EventNotifier | None = None,
+        trace_sink: TraceSink | None = None,
+        metrics_sink: MetricsSink | None = None,
         run_timeout_ms: int = 30_000,
         notify_timeout_ms: int | None = None,
         lease_ttl_ms: int = 30_000,
@@ -99,12 +109,20 @@ class PostgresExecutionComposition:
             if resolved_runtimes is None:
                 raise ValueError("runtime_factory returned no runtimes")
             resolved_runtimes = MappingProxyType(dict(resolved_runtimes))
+            run_observability = EventRunObservability(
+                persistence.event_store
+            )
             coordinator = RunCoordinator(
                 run_store=persistence.run_store,
                 event_store=persistence.event_store,
                 runtimes=resolved_runtimes,
                 memory_store=persistence.async_memory_store,
                 notifier=notifier,
+                event_observer=RunTelemetryExporter(
+                    run_observability,
+                    trace_sink=trace_sink,
+                    metrics_sink=metrics_sink,
+                ),
                 run_timeout_ms=run_timeout_ms,
                 notify_timeout_ms=notify_timeout_ms,
                 run_lease_store=persistence.run_lease_store,
@@ -127,6 +145,7 @@ class PostgresExecutionComposition:
                 persistence=persistence,
                 runtimes=resolved_runtimes,
                 coordinator=coordinator,
+                run_observability=run_observability,
                 recovery_supervisor=supervisor,
                 coordinator_quiesce_timeout_ms=coordinator_quiesce_timeout_ms,
             )
@@ -156,6 +175,10 @@ class PostgresExecutionComposition:
     @property
     def coordinator(self) -> RunCoordinator:
         return self._coordinator
+
+    @property
+    def run_observability(self) -> EventRunObservability:
+        return self._run_observability
 
     @property
     def recovery_supervisor(self) -> RunRecoverySupervisor:

@@ -904,6 +904,21 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：成功、重试、工具拒绝、模型失败和 RAG 失败均产生相关联观测。
 - 验收：能从 run ID 定位一次预置失败的层、步骤、耗时和成本。
 
+#### M13-T1 实现结果（2026-08-28）
+
+- 保留旧同步 `RunObserver`；durable 主链新增 `EventRunObservability`，从 owner-scoped
+  EventStore 重建 run/runtime node、plan/context node、model、tool spans 与对应 Metrics。
+- 新增 async `TraceSink`/`MetricsSink` Protocol、No-op 与 deterministic in-memory adapter。
+  Coordinator 只在事件持久化后观察，终态导出失败不回滚、不改写 Run。
+- `scope=run` aggregate usage 成为事件溯源 ledger；累计快照不相加，cost summary 取最新有效
+  sequence。未知费用保持 `null/unknown`，已知费用内部使用 Decimal；没有伪造单调用
+  `UsageRecord`、版本化价格表或硬成本门。
+- 新增 owner-scoped `GET /api/durable/runs/{run_id}/observability`；prompt、answer、delta、RAG
+  excerpt、Memory、工具参数/结果、raw error、owner/session 和密钥均不进入返回或 sink。
+- 8 项专项覆盖成功、累计 usage、模型重试、工具拒绝、模型失败、RAG 失败、sink 隔离和 owner
+  隔离；真实 PostgreSQL 关闭/重开后按同一 run ID 重建 Trace/ledger。验证见
+  `V-20260828-014`、设计见 `ADR-0034`。
+
 ### M13-T2：统一错误、重试、超时与取消
 
 - 依赖：M12-T1、M13-T1。

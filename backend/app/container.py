@@ -43,6 +43,12 @@ from backend.app.knowledge import (
     create_openai_embedding_client_factory,
 )
 from backend.app.memory import ConversationMemory, MemoryStore
+from backend.app.observability import (
+    EventRunObservability,
+    MetricsSink,
+    RunTelemetryExporter,
+    TraceSink,
+)
 from backend.app.security import StaticTokenAuthenticator
 from backend.app.services import (
     InMemoryRunService,
@@ -99,6 +105,7 @@ class ApplicationContainer:
     run_service: InMemoryRunService
     run_store: RunStore
     event_store: EventStore
+    run_observability: EventRunObservability
     event_notifier: InProcessEventNotifier = field(repr=False)
     runtimes: Mapping[RuntimeName | str, AgentRuntime]
     run_coordinator: RunCoordinator
@@ -141,6 +148,8 @@ class ApplicationContainer:
         approval_store: ApprovalStore | None = None,
         authenticator: StaticTokenAuthenticator | None = None,
         event_notifier: InProcessEventNotifier | None = None,
+        trace_sink: TraceSink | None = None,
+        metrics_sink: MetricsSink | None = None,
     ) -> ApplicationContainer:
         if (run_store is None) != (event_store is None):
             raise ValueError("run_store and event_store must be provided together")
@@ -179,12 +188,18 @@ class ApplicationContainer:
         )
         resolved_async_memory_store = AsyncLocalMemoryStore(resolved_memory)
         resolved_event_notifier = event_notifier or InProcessEventNotifier()
+        run_observability = EventRunObservability(resolved_event_store)
         run_coordinator = RunCoordinator(
             run_store=resolved_run_store,
             event_store=resolved_event_store,
             runtimes=resolved_runtimes,
             memory_store=resolved_async_memory_store,
             notifier=resolved_event_notifier,
+            event_observer=RunTelemetryExporter(
+                run_observability,
+                trace_sink=trace_sink,
+                metrics_sink=metrics_sink,
+            ),
             run_timeout_ms=resolved_settings.budget.run_timeout_ms,
         )
         resolved_mcp_clients = _resolve_mcp_clients(
@@ -214,6 +229,7 @@ class ApplicationContainer:
             ),
             run_store=resolved_run_store,
             event_store=resolved_event_store,
+            run_observability=run_observability,
             event_notifier=resolved_event_notifier,
             runtimes=resolved_runtimes,
             run_coordinator=run_coordinator,
@@ -251,6 +267,8 @@ class ApplicationContainer:
         embedding_model: EmbeddingModel | None = None,
         authenticator: StaticTokenAuthenticator | None = None,
         event_notifier: InProcessEventNotifier | None = None,
+        trace_sink: TraceSink | None = None,
+        metrics_sink: MetricsSink | None = None,
     ) -> ApplicationContainer:
         """Open an explicitly configured PostgreSQL application container."""
 
@@ -301,6 +319,8 @@ class ApplicationContainer:
                 ),
                 run_timeout_ms=resolved_settings.budget.run_timeout_ms,
                 notifier=resolved_event_notifier,
+                trace_sink=trace_sink,
+                metrics_sink=metrics_sink,
             )
         else:
             composition = await PostgresExecutionComposition.open(
@@ -308,6 +328,8 @@ class ApplicationContainer:
                 runtimes=_resolve_runtimes(resolved_settings, runtimes),
                 run_timeout_ms=resolved_settings.budget.run_timeout_ms,
                 notifier=resolved_event_notifier,
+                trace_sink=trace_sink,
+                metrics_sink=metrics_sink,
             )
         try:
             persistence = composition.persistence
@@ -328,6 +350,9 @@ class ApplicationContainer:
                 run_service=resolved_run_service,
                 run_store=persistence.run_store,
                 event_store=persistence.event_store,
+                run_observability=EventRunObservability(
+                    persistence.event_store
+                ),
                 event_notifier=resolved_event_notifier,
                 runtimes=resolved_runtimes,
                 run_coordinator=composition.coordinator,

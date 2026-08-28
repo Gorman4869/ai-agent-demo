@@ -3857,3 +3857,65 @@
 - `KI-004`、`KI-005` 关闭；`KI-008` 仍等待 M13-T3 统一 CI，`KI-027` 等待独立依赖升级。
 - `status.md` 的旧 M11-T7 恢复入口漂移已登记为 `KI-028` 并在本轮修正。下一工程任务为
   M13-T1；本次不实现 Trace、成本账本、生产部署或在线调用。
+
+## V-20260828-014：M13-T1 durable Trace、Metrics 与 usage ledger
+
+- 任务：`M13-T1 / verified`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：保留旧 `RunObserver`，为 durable 主链增加可替换 Trace/Metrics sink、可从
+  EventStore 重建的 node/model/tool spans、Run 级 usage ledger/cost summary，以及同 owner 的
+  run ID 排障接口。
+- 验证基线：`3fcc91b`。
+- 任务等级：A 类（持久化投影、公共 owner-scoped API、遥测失败隔离与成本语义）。默认
+  offline；没有读取模型 Key、调用 Provider、外部网络或付费服务，模型费用为 0。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_durable_observability -v` | 0 | 最终 8 项通过：成功、累计 usage 不重复求和、模型重试、工具拒绝、模型失败、RAG 失败、sink 故障隔离及 owner/cross-owner API |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_durable_observability backend.tests.test_durable_run_projection backend.tests.test_observability backend.tests.test_run_coordinator backend.tests.test_container backend.tests.test_postgres_execution backend.tests.test_application_lifecycle backend.tests.test_api -v` | 0 | 修改后聚焦回归 128 项通过；旧 `RunObserver`、M12 usage/citation shape、Coordinator、Container、PostgreSQL composition、lifespan 与 legacy API 均保持 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.postgres_store_integration.PostgresDurableObservabilityTest.test_usage_and_trace_rebuild_after_persistence_reopen -v`（仅本次子进程注入本机 integration DSN） | 0 | 真实 PostgreSQL 1 项通过：完成 Run、终态导出、关闭 pool、重新打开后按同 run ID 重建 Trace、Metrics 输入和 usage/cost；未读取或输出 DSN |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.postgres_store_integration -q`（仅本次子进程注入本机 integration DSN） | 0 | 完整真实 PostgreSQL integration 114 项通过；不可达数据库负向用例保留一条预期 connection timeout |
+| `./.venv/Scripts/python.exe -B -m unittest discover -s backend/tests -p "test_*.py" -v`（沙箱内首轮） | 1 | 651 项收集完成，但 35 项因 Windows Temp 写入拒绝报错，MCP 子进程的 2 项由预期 timeout/协议错误变为 `process_unavailable`；属于受控沙箱进程/临时目录限制，不作为通过证据 |
+| 同一完整后端命令（经批准沙箱外重跑） | 0 | 651 项通过，1 项既有 Windows symlink 能力跳过；首轮环境失败与最终结果均保留 |
+| `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1`（经批准沙箱外） | 0 | 统一离线门通过：后端 651 项通过/1 项既有 symlink 跳过，Code Agent demo、`pip check`、Vue build、MCP TypeScript build 和 Compose 配置均通过 |
+| `npm.cmd run build`（`frontend`） | 0 | Node 22.16.0 下 `vue-tsc -b && vite build` 通过，19 modules transformed；不需要切换 nvm |
+| `npm.cmd run build`（`mcp-servers/knowledge-server`） | 0 | TypeScript build 通过 |
+| `docker compose -f deploy/compose.yaml config --quiet` | 0 | Compose 配置门通过；本任务不执行 M13-T4 镜像、Nginx 或部署验收 |
+| `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-continuity.ps1` | 0 | 最终状态、ADR、教程和 handoff 后 52 个稳定任务、143 个 Markdown 文件通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有 Git 的 LF/CRLF 工作树提示 |
+
+### 决策、实现与安全边界
+
+- `EventRunObservability` 从同一 owner-scoped EventStore 重建 Trace、Metrics、usage ledger 和
+  cost summary。没有新 migration、usage 表或 EventStore 后双写；PostgreSQL durability 来自
+  已验收的持久事件。
+- `scope=run` usage 是累计快照，不是单次调用 `UsageRecord`；ledger 保留有效 sequence，
+  summary 只取最新快照。费用内部使用 Decimal；未知费用继续为 `null/unknown`，不能解释为 0。
+- run/runtime node、plan/context node、model 和 tool spans 只包含稳定 ID、layer/name、status、
+  step/attempt、持久时间、可信 duration 和稳定错误分类。prompt、answer、model delta、RAG
+  excerpt、Memory、工具参数/结果、raw error、owner/session 与 secret 均未进入投影或 sink。
+- Coordinator 只在事件持久化并通知后调用 observer；终态投影向可替换 async sink 导出。
+  sink 失败/timeout 只记录安全 warning，不回滚或改写 Run，HTTP 仍可从 EventStore 重建。
+- 新 `GET /api/durable/runs/{run_id}/observability` 复用 durable owner/capability；cross-owner 与
+  missing 相同 404。旧 `/api/observability/runs` 和 `RunObserver` 未修改。
+
+### 失败尝试、警告与未验证范围
+
+- 完整后端及单独 Code Agent demo 在受控沙箱内因 Windows Temp/MCP 子进程权限失败；相同
+  命令经批准在沙箱外通过。没有删除临时目录、修改系统策略或把环境失败改写成代码失败。
+- 保留既有 Starlette/httpx 弃用提示、PostgreSQL 不可达负向 timeout 和一项 Windows
+  symlink 能力跳过；未升级依赖，`KI-027` 不变。
+- 本任务没有 OpenTelemetry/vendor exporter、跨服务 propagation、逐调用 Provider usage、
+  版本化价格表或 `max_cost_usd` 硬门。单事件没有可靠成对边界时细分 span duration 保持 null；
+  不用 Run 总耗时冒充纯模型耗时。`KI-018` 因持久 ledger 已实现改为 mitigated，但未关闭。
+- 没有在线模型、DashScope、Embedding、外部网络或付费调用；没有提前实现 M13-T2 重试策略、
+  M13-T3 CI 或 M13-T4 部署。
+
+### 结论
+
+- M13-T1 的代码、脱敏边界、五类失败/成功观测、owner-scoped 查询、PostgreSQL 重启和全量
+  离线回归均有可复现证据，达到 `verified`。
+- 下一原子任务为 M13-T2；开始前须重新审计稳定错误、retryable、模型/工具/Run timeout 与
+  side-effect 幂等边界，不得把本任务的 Trace 或 ledger 当成重试授权。
