@@ -49,6 +49,10 @@ class EmbeddingAuthenticationError(EmbeddingError):
     code = "embedding_provider_authentication_failed"
 
 
+class EmbeddingClientConfigurationError(EmbeddingError):
+    code = "embedding_provider_client_configuration_invalid"
+
+
 class EmbeddingQuotaError(EmbeddingError):
     code = "embedding_provider_quota_or_rate_limited"
 
@@ -419,6 +423,7 @@ __all__ = [
     "EmbeddingAuthenticationError",
     "EmbeddingBatchError",
     "EmbeddingCache",
+    "EmbeddingClientConfigurationError",
     "EmbeddingDimensionError",
     "EmbeddingError",
     "EmbeddingInputError",

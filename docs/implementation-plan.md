@@ -827,6 +827,7 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 学习者于 2026-08-27 选择阿里云百炼 `text-embedding-v4` 作为替代的在线 Embedding Provider；它不能复用固定 `vector(3)` 的 M11-T6 评测表。
 - 新增独立的 `dashscope_knowledge_*` 64 维 pgvector migration、受限百炼 Workspace OpenAI-compatible endpoint、显式 `DASHSCOPE_API_KEY` gate 和无 Key 的 SDK/错误/pgvector 集成验证。原 OpenAI Adapter、三维表、固定评测集和默认离线路径保持不变。
 - 在线 CLI 必须显式 `--authorized`，并固定 batch size 1、retry 0；它只写入一篇非敏感合成文档、查询一次、finally 删除，最多两次 Provider 请求。真实百炼 E4、usage 和费用仍未执行或记录。
+- SDK 客户端创建阶段的可选依赖 `ImportError` 必须映射为无原始异常的稳定 `embedding_provider_client_configuration_invalid`；它不能被 CLI 吞为无法排查的通用失败码，也不能触发重试。
 
 ### M11-T8：M11 跟练与验收
 

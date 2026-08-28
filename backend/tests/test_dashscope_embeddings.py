@@ -12,6 +12,7 @@ import openai
 from backend.app.container import ApplicationContainer, create_embedding_model
 from backend.app.knowledge import (
     EmbeddingAuthenticationError,
+    EmbeddingClientConfigurationError,
     OpenAIEmbeddingClient,
     OpenAIEmbeddingClientFactory,
     create_openai_embedding_client_factory,
@@ -167,6 +168,26 @@ class DashScopeEmbeddingAdapterTest(unittest.TestCase):
         with self.assertRaises(EmbeddingAuthenticationError) as context:
             model.embed("private course text")
 
+        self.assertNotIn("private", str(context.exception))
+
+    def test_sdk_client_import_error_is_stable_and_content_free(self) -> None:
+        @contextmanager
+        def missing_optional_client_dependency() -> Iterator[OpenAIEmbeddingClient]:
+            raise ImportError("private SOCKS dependency detail")
+            yield Mock()
+
+        model = create_embedding_model(
+            _dashscope_settings(),
+            openai_client_factory=missing_optional_client_dependency,
+        )
+
+        with self.assertRaises(EmbeddingClientConfigurationError) as context:
+            model.embed("private course text")
+
+        self.assertEqual(
+            "embedding_provider_client_configuration_invalid",
+            str(context.exception),
+        )
         self.assertNotIn("private", str(context.exception))
 
     def test_client_factory_adds_a_configured_base_url_without_eager_io(self) -> None:

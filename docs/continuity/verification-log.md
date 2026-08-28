@@ -3626,3 +3626,22 @@
 
 - 此命令已离开预检阶段，但通用错误码不能单独证明 Provider 是否收到请求、是否返回向量、实际 usage 或费用；不得将它描述为成功 E4、零费用或特定 Provider 故障。
 - 已用授权不能自动重试。下一步应先离线补足通用错误的稳定分类与回归测试，之后才可请求新的单次在线授权。M11-T7 保持 `blocked`。
+
+## V-20260828-005：M11-T7 SDK 客户端配置错误离线归类
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：将 OpenAI-compatible SDK 客户端创建阶段的可选依赖导入失败映射为稳定、无内容的领域错误，避免 DashScope CLI 将它吞为 `dashscope_smoke_failed`。
+- 验证基线：`dedd10d`；本轮没有执行在线 CLI、没有读取 Key、没有网络或费用。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 只读代理布尔检查 | 0 | `ALL_PROXY/all_proxy` 均已配置且为 SOCKS；未输出 proxy 地址、凭证或其他值 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_openai_embeddings backend.tests.test_dashscope_embeddings -v` | 0 | 14 项通过；新增 DashScope 回归断言 SDK `ImportError` 映射为 `embedding_provider_client_configuration_invalid`，不包含原始私有文本 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_settings backend.tests.test_openai_embeddings backend.tests.test_dashscope_embeddings backend.tests.test_pgvector backend.tests.test_dashscope_pgvector backend.tests.test_container -q` | 0 | 75 项通过；仅有既有 Starlette/TestClient 弃用警告及 asyncio 慢任务诊断 |
+| `git diff --check` | 0 | 通过；仅有 Git LF/CRLF 工作树提示 |
+
+### 结论与边界
+
+- `EmbeddingClientConfigurationError` 使用稳定码 `embedding_provider_client_configuration_invalid`。Provider 仅在 SDK 客户端构造抛出 `ImportError` 时映射该码，不自动安装可选依赖、不改变 proxy、不发网络请求、不重试。
+- SOCKS 配置与此前通用错误之间仍是高概率推断，尚未用新的在线授权验证实际 CLI 输出；不能将其描述为根因已证实、Provider 已达或 E4 成功。M11-T7 保持 `blocked`。

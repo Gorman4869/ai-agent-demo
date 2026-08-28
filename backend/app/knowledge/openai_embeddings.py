@@ -10,6 +10,7 @@ import openai
 from .embeddings import (
     EmbeddingAuthenticationError,
     EmbeddingBatchError,
+    EmbeddingClientConfigurationError,
     EmbeddingMetadata,
     EmbeddingProviderRequestError,
     EmbeddingQuotaError,
@@ -88,6 +89,8 @@ class OpenAIEmbeddingProvider:
             openai.InternalServerError,
         ):
             raise RetryableEmbeddingError() from None
+        except ImportError:
+            raise EmbeddingClientConfigurationError() from None
         except (
             openai.AuthenticationError,
             openai.PermissionDeniedError,
