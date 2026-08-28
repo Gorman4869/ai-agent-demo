@@ -3562,3 +3562,18 @@
 - 首次 pgvector 命令误用了 `postgres` role，实际容器返回 `role "postgres" does not exist`；随后按仓库 integration Compose 的 `ai_agent` role 重跑通过。该失败是测试 DSN 配置错误，不是代码回归。
 - 非必需的 `compileall` 尝试写入既有 `__pycache__` 时受工作区权限拒绝；所有验证命令均使用 `-B`，模块的无授权入口已实际执行。没有修改或清理任何缓存文件。
 - 未配置或读取 `DASHSCOPE_API_KEY`，未调用百炼，未验证真实 endpoint、Provider usage、实际费用、网络代理兼容性或在线返回语义。M11-T7 继续为 `blocked`，只能在用户新的单次授权后运行受控 CLI。
+
+## V-20260828-001：M11-T7 DashScope 授权前置检查（blocked）
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：在用户明确单次授权后，执行 DashScope 受限冒烟入口；确认必须在 Provider 请求前具备本机 pgvector 连接配置。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m backend.app.evals.dashscope_embedding_smoke --authorized` | 2 | 以稳定错误码 `pgvector_dsn_required` 停止；缺少 `AI_AGENT_TEST_PGVECTOR_DSN`，因此未建立数据库连接、未读取或输出 Key、未触达 DashScope Provider、未写入或查询临时文档、usage/费用均为 0/unknown |
+
+### 结论
+
+- 本次授权只覆盖已执行的一次命令，不能自动重试。下一次尝试前，用户须在 Codex 本机环境补充 `AI_AGENT_TEST_PGVECTOR_DSN=postgresql://ai_agent@127.0.0.1:55433/ai_agent_integration?sslmode=disable`，并重新明确授权。
+- `pgvector_dsn_required` 是本机环境预检失败，不是百炼 Key、endpoint、模型、网络或 Provider 兼容性结论；M11-T7 保持 `blocked`。
