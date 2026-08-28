@@ -3685,3 +3685,20 @@
 - 认证 owner 只来自 Principal。匿名初次请求使用至少 32 字节的随机 `Idempotency-Key` 建立 capability bootstrap，Store 只保留 SHA-256 派生 owner；后续请求使用 `X-Session-Token`。审批工具绑定只从 owned `run.waiting_approval` 事件恢复。
 - 创建/查询快照已有 citations、usage、error 的统一字段；M12-T1 尚未将 RAG/usage 聚合到主 Run，故 citations 为空、usage 为 null，M12-T3 负责填充。
 - 离线内存 E3 和共享 Store/审批回归已通过，但 Docker integration PostgreSQL 容器未运行，新增跨 application lifespan durable API 用例未执行。因此 M12-T1 只能是 `code_complete`，不能写为 `verified`；没有执行 SSE、Vue、真实模型或在线调用。
+
+## V-20260828-008：M12-T1 PostgreSQL durable API 验证闭环
+
+- 任务：`M12-T1 / verified`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：纠正 M12-T1 初次验证误用的旧容器/数据库目标，并在截图对应的本机 integration PostgreSQL 上验证 durable Run API 跨 FastAPI application lifespan 的持久行为。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `docker exec ai-agent-demo-integration-postgres-1 pg_isready -U ai_agent -d ai_agent_test` | 非 0 | integration 容器健康，但旧库名 `ai_agent_test` 不存在；失败为本机测试 DSN 目标错误 |
+| `docker exec ai-agent-demo-integration-postgres-1 psql -U ai_agent -d postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"` | 0 | 只读确认可用隔离库为 `ai_agent_integration` |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.postgres_store_integration.PostgresFastApiApplicationTest.test_durable_run_api_replays_and_reads_after_application_restart -v`（`AI_AGENT_TEST_POSTGRES_DSN=.../ai_agent_integration`） | 0 | 1 项通过：真实 PostgreSQL default Container/FastAPI lifespan 创建、同键重放、查询、关闭并重启后的 owner-scoped session list 均通过 |
+
+### 结论与边界
+
+- M12-T1 的离线 76 项和真实 PostgreSQL application API 1 项均通过，任务更新为 `verified`。旧 HTTP/SSE 没有双写，M12-T2 SSE、M12-T3 RAG/usage 聚合、Vue、浏览器 E2E 和在线模型仍未执行。
+- 错误容器名和错误数据库名均保留为命令目标错误，不是 durable API、PostgreSQL 容器或应用配置失败。

@@ -60,13 +60,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M12-T1` |
-| 状态 | `code_complete` |
+| 状态 | `verified` |
 | 目标 | 提供 durable Run 创建、查询、会话列表、审批与取消 API，保留 legacy HTTP/SSE 隔离，并以 server-owned Idempotency-Key、身份和匿名 capability 绑定所有权 |
 | 设计依据 | 实施计划 M12-T1、`ADR-0006`、`ADR-0007`、`ADR-0012`、`ADR-0022`、`ADR-0026`、`ADR-0029` |
 | 执行协议 | 课程优先、里程碑验收；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 新增 `/api/durable` API 与独立 response schema：创建 `202` 返回 `run_id`，同键同请求重放、异请求 `409`；认证 Principal 或匿名 capability 摘要决定 owner；取消和审批由 RunCommands/Coordinator 执行，审批绑定仅从持久 `run.waiting_approval` 事件读取。旧 HTTP/SSE 不改、不双写。离线 76 项通过；真实 PostgreSQL API 用例已加入但本机 integration 容器未运行 |
-| 前置证据 | `V-20260808-013`、`V-20260828-006`、`V-20260828-007`、`ADR-0029` |
-| 下一动作 | 启动本机隔离 PostgreSQL integration 容器后，只运行 `PostgresFastApiApplicationTest.test_durable_run_api_replays_and_reads_after_application_restart`；通过后更新为 `verified`。不要进入 M12-T2 SSE、Vue、M12-T3 或新的在线调用 |
+| 当前修改 | 新增 `/api/durable` API 与独立 response schema：创建 `202` 返回 `run_id`，同键同请求重放、异请求 `409`；认证 Principal 或匿名 capability 摘要决定 owner；取消和审批由 RunCommands/Coordinator 执行，审批绑定仅从持久 `run.waiting_approval` 事件读取。旧 HTTP/SSE 不改、不双写。离线 76 项与真实 PostgreSQL FastAPI cross-lifespan API 用例 1 项均通过 |
+| 前置证据 | `V-20260808-013`、`V-20260828-006`、`V-20260828-007/008`、`ADR-0029` |
+| 下一动作 | M12-T1 已 `verified`；下一任务为 M12-T2。开始前只读审阅持久事件 SSE 的 after/heartbeat/实时等待边界；不要提前进入 Vue、M12-T3 或新的在线调用 |
 
 ## 里程碑状态
 
@@ -78,13 +78,13 @@
 | M9 MCP Client 与 Skill | `verified` | M9-T1–M9-T6 verified，`KI-002` closed；本地 Python/Node STDIO、共同工具边界、只读 Skill/Runtime 上下文、课程材料和离线全量门均有证据，远程/生产 E4 不在本里程碑证据内 |
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；真正进程重启、PostgreSQL 和持久 ToolExecution 仍属 M11，`KI-004` 保持 mitigated |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
-| M12 统一 Run 与实时 UI | `in_progress` | M12-T1 `code_complete`；离线 durable API 已通过，真实 PostgreSQL application API 用例等待本机 integration 容器恢复 |
+| M12 统一 Run 与实时 UI | `in_progress` | M12-T1 `verified`；离线 durable API 与真实 PostgreSQL application API 用例均已通过，下一步为 M12-T2 持久事件 SSE |
 | M13 生产工程闭环 | `planned` | 依赖 M12 主链路 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M12-T1 新增的真实 PostgreSQL FastAPI lifespan/API 用例等待本机 integration 容器恢复。当前容器存在但未运行；不得把离线 Store 合同或旧 M11 lifespan 证据写成该新 HTTP 路径已验证。
+- M12-T1 PostgreSQL API 用例已通过；M12-T2 尚未开始，持久事件 SSE、after、heartbeat 和断线续传仍无证据。
 - 新的真实模型在线冒烟未执行，也不需要用于 M12-T1。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
 
