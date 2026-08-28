@@ -3594,3 +3594,19 @@
 
 - 第二次授权已使用，不能自动重试。用户之前的配置没有传入 Codex 的命令执行器；须先确认采用的配置位置，再进行第三次尝试。
 - 该结果不证明数据库不可达、Key 无效、endpoint 格式错误、模型不可用或网络不通；M11-T7 继续 `blocked`。
+
+## V-20260828-003：M11-T7 DashScope Settings 前置检查（blocked）
+
+- 任务：`M11-T7 / blocked`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：在执行器确认 Key、endpoint 与本机 pgvector DSN 均可见后，验证受限 online CLI 的 provider、batch/retry gate。
+
+| 动作 | 结果 | 证据 |
+| --- | --- | --- |
+| 配置可见性只读检查 | 通过 | `DASHSCOPE_API_KEY`、`AI_AGENT_DASHSCOPE_BASE_URL` 与 `AI_AGENT_TEST_PGVECTOR_DSN` 均为 `configured=true`；未输出变量内容 |
+| `dashscope_embedding_smoke --authorized` | 预检停止 | 返回 `dashscope_smoke_settings_invalid`；该入口要求 embedding provider=`dashscope`、batch size=`1`、retry=`0`，Provider 客户端尚未构造，未联网、未写入/查询临时文档、无 usage/费用 |
+
+### 结论
+
+- 第三次授权已使用，不能自动重试。用户须补充非敏感的 online switch、provider、model、revision、64 维、batch=1、retry=0 配置，并再次明确授权。
+- 该结果不证明 Key、endpoint、数据库、模型或网络故障；M11-T7 继续 `blocked`。
