@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -52,7 +53,7 @@ from backend.app.agent.research_workflow import create_research_workflow
 from backend.app.application_lifecycle import ApplicationNotAcceptingError
 from backend.app.container import ApplicationContainer
 from backend.app.domain.run import RunRecord as DurableRunRecord
-from backend.app.domain.run import RunStatus
+from backend.app.domain.run import RunStatus, StoredRunEvent
 from backend.app.evals import EvalCase, OfflineEvaluator
 from backend.app.knowledge import (
     DEMO_COURSE_DOCUMENT,
@@ -449,6 +450,32 @@ def create_app(
         if record is None:
             raise _durable_run_not_found()
         return _to_durable_run_response(record)
+
+    @app.get("/api/durable/runs/{run_id}/events")
+    async def stream_durable_run_events(
+        run_id: str,
+        after: Annotated[int, Query(ge=0)] = 0,
+        principal: Principal = Depends(current_principal),
+        x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    ) -> StreamingResponse:
+        container = current_container()
+        access = _durable_access_for_existing_request(
+            principal=principal,
+            capability=x_session_token,
+        )
+        record = await container.run_store.get(run_id, owner_id=access.owner_id)
+        if record is None:
+            raise _durable_run_not_found()
+        return StreamingResponse(
+            _durable_event_stream(
+                container,
+                run_id=run_id,
+                owner_id=access.owner_id,
+                after_sequence=after,
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.get(
         "/api/durable/sessions/{session_id}/runs",
@@ -1174,3 +1201,72 @@ app = create_app()
 def _format_sse(event_type: str, data: dict[str, object]) -> str:
     payload = json.dumps(data, ensure_ascii=False)
     return f"event: {event_type}\ndata: {payload}\n\n"
+
+
+_DURABLE_SSE_HEARTBEAT_SECONDS = 15.0
+_DURABLE_SSE_STORE_RECHECK_SECONDS = 1.0
+
+
+async def _durable_event_stream(
+    container: ApplicationContainer,
+    *,
+    run_id: str,
+    owner_id: str,
+    after_sequence: int,
+) -> AsyncIterator[str]:
+    """Replay owned durable events, then await committed event notifications."""
+
+    cursor = after_sequence
+    last_heartbeat_at = time.monotonic()
+    async with container.event_notifier.subscribe(run_id) as signal:
+        while True:
+            events = await container.event_store.list_for_run(
+                run_id,
+                owner_id=owner_id,
+                after_sequence=cursor,
+            )
+            for event in events:
+                cursor = event.sequence
+                yield _format_durable_sse(event)
+            if events:
+                continue
+
+            record = await container.run_store.get(run_id, owner_id=owner_id)
+            if record is None:
+                return
+            if record.status.is_terminal:
+                trailing_events = await container.event_store.list_for_run(
+                    run_id,
+                    owner_id=owner_id,
+                    after_sequence=cursor,
+                )
+                if trailing_events:
+                    continue
+                return
+
+            elapsed = time.monotonic() - last_heartbeat_at
+            wait_seconds = min(
+                _DURABLE_SSE_STORE_RECHECK_SECONDS,
+                max(_DURABLE_SSE_HEARTBEAT_SECONDS - elapsed, 0.0),
+            )
+            try:
+                await asyncio.wait_for(signal.wait(), timeout=wait_seconds)
+            except TimeoutError:
+                pass
+            else:
+                signal.clear()
+
+            if time.monotonic() - last_heartbeat_at >= _DURABLE_SSE_HEARTBEAT_SECONDS:
+                last_heartbeat_at = time.monotonic()
+                yield ": heartbeat\n\n"
+
+
+def _format_durable_sse(event: StoredRunEvent) -> str:
+    data: dict[str, object] = {
+        "run_id": event.run_id,
+        "sequence": event.sequence,
+        "step": event.step,
+        "created_at": event.created_at.isoformat(),
+        "data": event.data,
+    }
+    return f"id: {event.sequence}\n" + _format_sse(event.type, data)

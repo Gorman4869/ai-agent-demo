@@ -149,6 +149,56 @@ class PostgresMemoryStoreContractTest(
 
 
 class PostgresFastApiApplicationTest(unittest.TestCase):
+    def test_durable_sse_replays_persisted_events_after_application_restart(self) -> None:
+        token = f"postgres-sse-token-{uuid4()}"
+        owner_id = f"postgres-sse-owner-{uuid4()}"
+        auth_config = json.dumps(
+            {token: {"principal_id": owner_id, "roles": []}}
+        )
+        settings = Settings.from_environment(
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN,
+            }
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": f"postgres-sse-key-{uuid4()}",
+        }
+
+        with patch.dict(
+            os.environ,
+            {"AI_AGENT_DEMO_AUTH_JSON": auth_config},
+            clear=False,
+        ):
+            first_app = create_app(settings=settings)
+            with TestClient(first_app) as client:
+                created = client.post(
+                    "/api/durable/runs",
+                    headers=headers,
+                    json={"message": "postgres durable sse"},
+                )
+                self.assertEqual(202, created.status_code)
+                run_id = created.json()["id"]
+                events = client.get(
+                    f"/api/durable/runs/{run_id}/events?after=0",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                self.assertEqual(200, events.status_code)
+                self.assertIn("id: 1\nevent: run.started", events.text)
+                self.assertIn("event: run.completed", events.text)
+
+            second_app = create_app(settings=settings)
+            with TestClient(second_app) as client:
+                replay = client.get(
+                    f"/api/durable/runs/{run_id}/events?after=1",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+                self.assertEqual(200, replay.status_code)
+                self.assertNotIn("id: 1", replay.text)
+                self.assertIn("event: run.completed", replay.text)
+
     def test_durable_run_api_replays_and_reads_after_application_restart(self) -> None:
         token = f"postgres-durable-token-{uuid4()}"
         owner_id = f"postgres-durable-owner-{uuid4()}"

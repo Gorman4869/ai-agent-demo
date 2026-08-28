@@ -3702,3 +3702,25 @@
 
 - M12-T1 的离线 76 项和真实 PostgreSQL application API 1 项均通过，任务更新为 `verified`。旧 HTTP/SSE 没有双写，M12-T2 SSE、M12-T3 RAG/usage 聚合、Vue、浏览器 E2E 和在线模型仍未执行。
 - 错误容器名和错误数据库名均保留为命令目标错误，不是 durable API、PostgreSQL 容器或应用配置失败。
+
+## V-20260828-009：M12-T2 持久事件 SSE 与续传（verified，E3/C1）
+
+- 任务：`M12-T2 / verified`
+- 时间：2026-08-28，Asia/Shanghai
+- 验证目标：为 durable Run 提供 owner-scoped SSE 历史补发、执行期可观察事件、`after` 续传、心跳、慢消费者隔离与终态关闭；Store 是唯一事件真相，legacy HTTP/SSE 不修改。
+- 验证基线：`506c8ae`。
+- 任务等级：A 类（并发、持久化、身份与公共流式契约）。默认离线；未读取 Key、未调用模型或外部网络，费用为 0。
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_persistent_sse -v` | 0 | 8 项通过：HTTP owner/非法 cursor、`after` 历史续传、顺序 envelope、Coordinator 执行期可观察、终态最后事件、通知唤醒、心跳、断开无副作用和慢读者不反压 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_persistent_sse backend.tests.test_persistent_run_api backend.tests.test_api backend.tests.test_container backend.tests.test_run_coordinator backend.tests.test_run_store_contract -q` | 0 | 133 项通过；覆盖 durable SSE、既有 durable API、legacy API/SSE、Container 注入、Coordinator 持久化通知顺序与 Run/Event Store 合同。输出的 `run lease release failed`、三条 `run event notification failed` 均来自既有故障注入测试的预期日志 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.postgres_store_integration.PostgresFastApiApplicationTest.test_durable_sse_replays_persisted_events_after_application_restart -v`（临时本机 integration DSN） | 0 | 1 项真实 PostgreSQL FastAPI lifespan 通过：创建 durable Run 后 SSE 收到持久事件；关闭并重启应用后从 `after=1` 仅回放未读事件 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅有 Git 的 LF/CRLF 工作树提示 |
+
+### 结论与边界
+
+- `/api/durable/runs/{run_id}/events?after=` 使用相同 owner/capability 规则；业务事件按 EventStore sequence 递增，SSE `id` 与 payload sequence 对齐。心跳是注释帧，不占 sequence。
+- notifier 只保存当前连接的 coalesced signal，Coordinator 在事件持久化后才通知；每次唤醒仍从 EventStore 读取。应用重启、跨进程通知缺失或慢客户端都不会成为丢失历史或重放副作用的正确性前提。
+- 专项端到端测试发现并修复“终态事件在历史批次读取后写入时可能提前关闭”的竞态：终态关闭前会再次检查 EventStore 是否还有未发送 sequence。
+- 本轮没有 Vue SSE parser、半包/多帧浏览器解析、页面刷新恢复、RAG/usage 聚合、Redis/LISTEN-NOTIFY、Nginx 部署或在线模型调用；分别留给 M12-T3 至 T5 和 M13。

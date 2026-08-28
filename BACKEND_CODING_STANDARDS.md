@@ -109,6 +109,7 @@
 - Event IDs are caller-generated stable IDs. The Store assigns per-Run sequence and UTC time; same ID plus same content replays the original event, while changed content is a stable conflict.
 - Event data and tool data accept bounded standard JSON only: finite numbers, string keys, at most 64,000 encoded bytes, bounded depth and bounded node count. Stores copy nested data on write and every return.
 - Heartbeats are transport events and never consume a business event sequence. Consumers rely on unique increasing sequence values; they do not sort by timestamps.
+- Durable SSE is isolated below `/api/durable/runs/{run_id}/events`. It authenticates the same owner scope as the Run, treats `after` as an exclusive EventStore sequence cursor, replays Store history before waiting, and emits heartbeat comments without a business sequence. A live notifier may coalesce wakeups but must not retain event payloads or be the source of truth; close only after a terminal Run has no unread stored events.
 - `UsageRecord` describes exactly one model call. Unknown cost remains `None`; persisted currency uses `Decimal`, never a float conversion.
 - Side-effecting `ToolExecution` records require an idempotency digest at creation. Raw arguments and raw results are not retained; safe summaries and digests are bounded.
 - Logs use `safe_summary()` or an explicit allowlist. `repr=False` is defense in depth and does not authorize `dataclasses.asdict()` on records containing content.
