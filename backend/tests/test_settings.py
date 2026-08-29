@@ -33,6 +33,11 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(2_000, settings.budget.max_output_tokens)
         self.assertEqual(Decimal("0.25"), settings.budget.max_cost_usd)
         self.assertEqual(2, settings.budget.max_model_retries)
+        self.assertEqual(100, settings.budget.model_retry_initial_delay_ms)
+        self.assertEqual(2_000, settings.budget.model_retry_max_delay_ms)
+        self.assertEqual(1, settings.budget.max_tool_retries)
+        self.assertEqual(100, settings.budget.tool_retry_initial_delay_ms)
+        self.assertEqual(1_000, settings.budget.tool_retry_max_delay_ms)
         self.assertEqual("offline", settings.embedding.provider)
         self.assertIsNone(settings.embedding.model)
         self.assertIsNone(settings.embedding.revision)
@@ -388,6 +393,11 @@ class SettingsTest(unittest.TestCase):
             "AI_AGENT_MAX_OUTPUT_TOKENS": ("0", "32001", "many"),
             "AI_AGENT_MAX_COST_USD": ("0", "10.01", "nan", "inf", "many"),
             "AI_AGENT_MAX_MODEL_RETRIES": ("-1", "6", "many"),
+            "AI_AGENT_MODEL_RETRY_INITIAL_DELAY_MS": ("-1", "10001", "many"),
+            "AI_AGENT_MODEL_RETRY_MAX_DELAY_MS": ("-1", "30001", "many"),
+            "AI_AGENT_MAX_TOOL_RETRIES": ("-1", "4", "many"),
+            "AI_AGENT_TOOL_RETRY_INITIAL_DELAY_MS": ("-1", "10001", "many"),
+            "AI_AGENT_TOOL_RETRY_MAX_DELAY_MS": ("-1", "30001", "many"),
         }
 
         for name, values in cases.items():
@@ -403,6 +413,25 @@ class SettingsTest(unittest.TestCase):
                     "AI_AGENT_MODEL_TIMEOUT_MS": "1001",
                 }
             )
+        for environment in (
+            {
+                "AI_AGENT_MODEL_RETRY_INITIAL_DELAY_MS": "201",
+                "AI_AGENT_MODEL_RETRY_MAX_DELAY_MS": "200",
+            },
+            {
+                "AI_AGENT_TOOL_RETRY_INITIAL_DELAY_MS": "201",
+                "AI_AGENT_TOOL_RETRY_MAX_DELAY_MS": "200",
+            },
+            {
+                "AI_AGENT_RUN_TIMEOUT_MS": "1000",
+                "AI_AGENT_MODEL_TIMEOUT_MS": "1000",
+                "AI_AGENT_MODEL_RETRY_MAX_DELAY_MS": "1000",
+                "AI_AGENT_TOOL_RETRY_MAX_DELAY_MS": "999",
+            },
+        ):
+            with self.subTest(environment=environment):
+                with self.assertRaises(SettingsError):
+                    Settings.from_environment(environment)
 
     def test_custom_budget_boundaries_are_parsed(self) -> None:
         settings = Settings.from_environment(
@@ -415,6 +444,11 @@ class SettingsTest(unittest.TestCase):
                 "AI_AGENT_MAX_OUTPUT_TOKENS": "32000",
                 "AI_AGENT_MAX_COST_USD": "10",
                 "AI_AGENT_MAX_MODEL_RETRIES": "0",
+                "AI_AGENT_MODEL_RETRY_INITIAL_DELAY_MS": "0",
+                "AI_AGENT_MODEL_RETRY_MAX_DELAY_MS": "0",
+                "AI_AGENT_MAX_TOOL_RETRIES": "3",
+                "AI_AGENT_TOOL_RETRY_INITIAL_DELAY_MS": "0",
+                "AI_AGENT_TOOL_RETRY_MAX_DELAY_MS": "0",
             }
         )
 
@@ -426,6 +460,11 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(32_000, settings.budget.max_output_tokens)
         self.assertEqual(Decimal("10"), settings.budget.max_cost_usd)
         self.assertEqual(0, settings.budget.max_model_retries)
+        self.assertEqual(0, settings.budget.model_retry_initial_delay_ms)
+        self.assertEqual(0, settings.budget.model_retry_max_delay_ms)
+        self.assertEqual(3, settings.budget.max_tool_retries)
+        self.assertEqual(0, settings.budget.tool_retry_initial_delay_ms)
+        self.assertEqual(0, settings.budget.tool_retry_max_delay_ms)
 
     def test_provider_identifiers_reject_control_characters_and_long_values(
         self,
@@ -495,6 +534,11 @@ class SettingsTest(unittest.TestCase):
             content,
         )
         self.assertIn("\nAI_AGENT_EMBEDDING_MAX_RETRIES=2\n", content)
+        self.assertIn("\nAI_AGENT_MODEL_RETRY_INITIAL_DELAY_MS=100\n", content)
+        self.assertIn("\nAI_AGENT_MODEL_RETRY_MAX_DELAY_MS=2000\n", content)
+        self.assertIn("\nAI_AGENT_MAX_TOOL_RETRIES=1\n", content)
+        self.assertIn("\nAI_AGENT_TOOL_RETRY_INITIAL_DELAY_MS=100\n", content)
+        self.assertIn("\nAI_AGENT_TOOL_RETRY_MAX_DELAY_MS=1000\n", content)
 
 
 if __name__ == "__main__":

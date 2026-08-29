@@ -8,6 +8,13 @@ from backend.app.agent.cancellation import CancellationToken, RunCancelled
 from backend.app.agent.runtime import _validate_prompt_context
 from backend.app.domain import AgentEvent, AgentRunResult, Message
 from backend.app.models import ChatModel, RetryableModelError
+from backend.app.reliability import (
+    ExponentialBackoff,
+    RetryOperation,
+    RetrySafety,
+    decide_retry,
+    stable_run_failure,
+)
 from backend.app.tools import ToolExecutionContext, ToolRegistry
 
 
@@ -25,12 +32,19 @@ class ManualAgentLoop:
         clock: Clock = perf_counter,
         cancellation_token: CancellationToken | None = None,
         max_model_retries: int = 2,
+        model_retry_initial_delay_ms: int = 0,
+        model_retry_max_delay_ms: int = 0,
+        max_tool_retries: int = 0,
+        tool_retry_initial_delay_ms: int = 0,
+        tool_retry_max_delay_ms: int = 0,
         prompt_context: str | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
         if max_model_retries < 0:
             raise ValueError("max_model_retries must not be negative")
+        if max_tool_retries < 0:
+            raise ValueError("max_tool_retries must not be negative")
         _validate_prompt_context(prompt_context)
         self._model = model
         self._tools = tools
@@ -39,6 +53,15 @@ class ManualAgentLoop:
         self._clock = clock
         self._cancellation_token = cancellation_token or CancellationToken()
         self._max_model_retries = max_model_retries
+        self._model_backoff = ExponentialBackoff(
+            model_retry_initial_delay_ms,
+            model_retry_max_delay_ms,
+        )
+        self._max_tool_retries = max_tool_retries
+        self._tool_backoff = ExponentialBackoff(
+            tool_retry_initial_delay_ms,
+            tool_retry_max_delay_ms,
+        )
         self._prompt_context = prompt_context
 
     def run(self, user_input: str) -> AgentRunResult:
@@ -63,7 +86,22 @@ class ManualAgentLoop:
                     )
                 except RetryableModelError:
                     model_duration_ms = _elapsed_ms(model_started_at, self._clock())
-                    if retry_attempt >= self._max_model_retries:
+                    retry_number = retry_attempt + 1
+                    retry = decide_retry(
+                        stable_run_failure("provider_unavailable", step=step),
+                        safety=RetrySafety(
+                            operation=RetryOperation.MODEL,
+                            idempotent=True,
+                            replay_safe=True,
+                        ),
+                        retry_number=retry_number,
+                        max_retries=self._max_model_retries,
+                        backoff=self._model_backoff,
+                        remaining_budget_ms=(
+                            self._cancellation_token.remaining_ms
+                        ),
+                    )
+                    if not retry.retry:
                         return _failed_result(
                             messages,
                             events,
@@ -77,19 +115,20 @@ class ManualAgentLoop:
                             type="model.retrying",
                             step=step,
                             data={
-                                "attempt": retry_attempt + 1,
+                                "attempt": retry_number,
+                                "delay_ms": retry.delay_ms,
                                 "model_duration_ms": model_duration_ms,
                             },
                         )
                     )
-                    try:
-                        self._cancellation_token.raise_if_cancelled()
-                    except RunCancelled as error:
+                    if self._cancellation_token.wait_for_cancellation(
+                        retry.delay_ms / 1_000
+                    ):
                         return _cancelled_result(
                             messages,
                             events,
                             step,
-                            error.reason,
+                            self._cancellation_token.reason or "run_cancelled",
                         )
                     continue
                 except RuntimeError:
@@ -151,13 +190,37 @@ class ManualAgentLoop:
                 )
             )
             tool_started_at = self._clock()
-            tool_result = self._tools.execute(
+            tool_result = self._tools.execute_with_retry(
                 tool_call.name,
                 tool_call.arguments,
                 context=self._execution_context,
                 call_id=tool_call.id,
+                max_retries=self._max_tool_retries,
+                backoff=self._tool_backoff,
+                cancellation=self._cancellation_token,
             )
             tool_duration_ms = _elapsed_ms(tool_started_at, self._clock())
+            for retry_attempt, (delay_ms, error_code) in enumerate(
+                zip(
+                    tool_result.retry_delays_ms,
+                    tool_result.retry_error_codes,
+                    strict=True,
+                ),
+                start=1,
+            ):
+                events.append(
+                    AgentEvent(
+                        type="tool.retrying",
+                        step=step,
+                        data={
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "attempt": retry_attempt,
+                            "delay_ms": delay_ms,
+                            "error_code": error_code,
+                        },
+                    )
+                )
             result_payload = {
                 "ok": tool_result.ok,
                 "value": tool_result.value,

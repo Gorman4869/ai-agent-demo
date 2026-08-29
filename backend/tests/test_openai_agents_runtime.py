@@ -167,6 +167,11 @@ class OpenAIAgentsRuntimeTest(unittest.IsolatedAsyncioTestCase):
             2,
             call["run_config"].model_settings.retry.max_retries,
         )
+        retry_backoff = call["run_config"].model_settings.retry.backoff
+        self.assertEqual(0.1, retry_backoff.initial_delay)
+        self.assertEqual(2.0, retry_backoff.max_delay)
+        self.assertEqual(2, retry_backoff.multiplier)
+        self.assertFalse(retry_backoff.jitter)
         self.assertEqual(1, models.entered)
         self.assertEqual(1, models.exited)
 
@@ -875,7 +880,7 @@ class OpenAIAgentsRuntimeTest(unittest.IsolatedAsyncioTestCase):
             ),
             (ModelBehaviorError(secret), "provider_invalid_response", "provider", False),
             (ModelRefusalError(secret), "model_refused", "provider", False),
-            (ToolTimeoutError("secret-tool", 1), "tool_timeout", "tool", False),
+            (ToolTimeoutError("secret-tool", 1), "tool_timeout", "tool", True),
             (UserError(secret), "agents_sdk_configuration_error", "runtime", False),
             (
                 InputGuardrailTripwireTriggered(
@@ -1085,6 +1090,51 @@ class OpenAIAgentsRuntimeCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
 
 class OpenAIAgentsToolAdapterTest(unittest.IsolatedAsyncioTestCase):
+    async def test_read_only_sdk_tool_uses_the_shared_retry_policy(self) -> None:
+        calls = 0
+
+        def flaky_lookup(_arguments: dict[str, Any]) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("transient local fixture")
+            return "recovered"
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="lookup",
+                description="Read one deterministic value.",
+                input_schema={"type": "object", "properties": {}},
+                handler=flaky_lookup,
+            )
+        )
+        run_context = OpenAIAgentsRunContext(
+            run_id="run-retry",
+            execution_context=ToolExecutionContext(principal_id="owner"),
+            cancellation_token=CancellationToken(),
+        )
+        tool = build_sdk_tools(
+            registry,
+            run_context=run_context,
+            max_tool_retries=1,
+            retry_initial_delay_ms=0,
+            retry_max_delay_ms=0,
+        )[0]
+
+        output = await tool.on_invoke_tool(
+            ToolContext(
+                context=run_context,
+                tool_name=tool.name,
+                tool_call_id="call-retry",
+                tool_arguments="{}",
+            ),
+            "{}",
+        )
+
+        self.assertEqual({"ok": True, "value": "recovered"}, json.loads(output))
+        self.assertEqual(2, calls)
+
     async def test_builds_strict_sdk_tool_and_keeps_only_safe_custom_data(
         self,
     ) -> None:

@@ -181,6 +181,59 @@ class ManualAgentLoopTest(unittest.TestCase):
         self.assertEqual(3, model.attempts)
         self.assertEqual(2, _event_types(result).count("model.retrying"))
 
+    def test_retries_read_only_tool_and_emits_bounded_backoff_event(self) -> None:
+        calls = 0
+
+        def flaky_lookup(_arguments: dict[str, object]) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("transient local fixture")
+            return "recovered"
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="lookup",
+                description="Read one deterministic value.",
+                input_schema={"type": "object", "properties": {}},
+                handler=flaky_lookup,
+            )
+        )
+        model = MockModel(
+            [
+                ModelDecision(
+                    tool_call=ToolCall(
+                        id="call-retry",
+                        name="lookup",
+                        arguments={},
+                    )
+                ),
+                ModelDecision(final_answer="recovered"),
+            ]
+        )
+
+        result = ManualAgentLoop(
+            model,
+            registry,
+            max_tool_retries=1,
+            tool_retry_initial_delay_ms=0,
+            tool_retry_max_delay_ms=0,
+        ).run("retry one read-only tool")
+
+        self.assertEqual("completed", result.status)
+        self.assertEqual(2, calls)
+        retry = next(
+            event for event in result.events if event.type == "tool.retrying"
+        )
+        self.assertEqual(1, retry.data["attempt"])
+        self.assertEqual(0, retry.data["delay_ms"])
+        self.assertEqual("tool_io_error", retry.data["error_code"])
+        self.assertEqual(
+            ["tool.started", "tool.retrying", "tool.completed"],
+            [event.type for event in result.events if event.type.startswith("tool.")],
+        )
+
     def test_cancellation_after_model_decision_prevents_tool_execution(self) -> None:
         """取消是协作式的，且在工具边界之前进行检查（§10）。
 

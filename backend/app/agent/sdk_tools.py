@@ -12,6 +12,7 @@ from agents.tool import FunctionToolCustomDataContext
 from agents.tool_context import ToolContext
 
 from backend.app.agent.cancellation import CancellationToken
+from backend.app.reliability import ExponentialBackoff
 from backend.app.tools import (
     ToolDefinition,
     ToolExecutionContext,
@@ -48,6 +49,9 @@ def build_sdk_tools(
     registry: ToolRegistry,
     *,
     run_context: OpenAIAgentsRunContext,
+    max_tool_retries: int = 0,
+    retry_initial_delay_ms: int = 0,
+    retry_max_delay_ms: int = 0,
 ) -> tuple[FunctionTool, ...]:
     """Build one isolated set of SDK tools from the shared domain registry."""
 
@@ -55,6 +59,16 @@ def build_sdk_tools(
         raise ValueError("registry has an invalid type")
     if not isinstance(run_context, OpenAIAgentsRunContext):
         raise ValueError("run_context has an invalid type")
+    if (
+        not isinstance(max_tool_retries, int)
+        or isinstance(max_tool_retries, bool)
+        or max_tool_retries < 0
+    ):
+        raise ValueError("max_tool_retries must be a non-negative integer")
+    backoff = ExponentialBackoff(
+        retry_initial_delay_ms,
+        retry_max_delay_ms,
+    )
     isolated_registry = ToolRegistry()
     definitions: list[ToolDefinition] = []
     for definition in registry.definitions(
@@ -66,7 +80,13 @@ def build_sdk_tools(
         isolated_registry.register(snapshot)
         definitions.append(snapshot)
     return tuple(
-        _build_sdk_tool(isolated_registry, definition, run_context)
+        _build_sdk_tool(
+            isolated_registry,
+            definition,
+            run_context,
+            max_tool_retries=max_tool_retries,
+            backoff=backoff,
+        )
         for definition in definitions
     )
 
@@ -128,6 +148,9 @@ def _build_sdk_tool(
     registry: ToolRegistry,
     definition: ToolDefinition,
     run_context: OpenAIAgentsRunContext,
+    *,
+    max_tool_retries: int,
+    backoff: ExponentialBackoff,
 ) -> FunctionTool:
     schema = copy.deepcopy(definition.input_schema)
     properties = schema.get("properties", {})
@@ -165,11 +188,14 @@ def _build_sdk_tool(
             )
         try:
             result = await asyncio.to_thread(
-                registry.execute,
+                registry.execute_with_retry,
                 definition.name,
                 arguments,
                 context=run_context.execution_context,
                 call_id=call_id,
+                max_retries=max_tool_retries,
+                backoff=backoff,
+                cancellation=run_context.cancellation_token,
             )
         except Exception:
             result = ToolResult(ok=False, error_code="tool_execution_failed")

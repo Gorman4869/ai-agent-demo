@@ -528,6 +528,28 @@ def _tool_spans(
     spans: list[TraceSpan] = []
     open_tools: dict[str, StoredRunEvent] = {}
     for event in events:
+        if event.type == "tool.retrying":
+            name = _safe_optional_label(event.data.get("name")) or "tool"
+            spans.append(
+                _span(
+                    run_id=run_id,
+                    parent_id=parent_id,
+                    layer=TraceLayer.TOOL,
+                    name=f"tool.{name}",
+                    status=TraceStatus.RETRYING,
+                    step=event.step,
+                    start_event=event,
+                    finish_event=event,
+                    explicit_duration=_safe_duration(event.data.get("delay_ms")),
+                    error_code=(
+                        _safe_optional_label(event.data.get("error_code"))
+                        or "tool_retry"
+                    ),
+                    error_category="tool",
+                    attempt=_safe_positive_int(event.data.get("attempt")),
+                )
+            )
+            continue
         if event.type == "tool.started":
             call_id = _safe_optional_label(event.data.get("id"))
             if call_id is not None:
@@ -814,7 +836,11 @@ def _metric_points(
             metrics.append(
                 _metric(
                     run_id=run_id,
-                    name="agent.model.retry",
+                    name=(
+                        "agent.tool.retry"
+                        if span.layer is TraceLayer.TOOL
+                        else "agent.model.retry"
+                    ),
                     value=1.0,
                     unit="count",
                     layer=span.layer,

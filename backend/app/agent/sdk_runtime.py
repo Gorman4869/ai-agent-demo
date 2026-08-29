@@ -12,6 +12,7 @@ import openai
 from agents import (
     Agent,
     FunctionTool,
+    ModelRetryBackoffSettings,
     ModelRetrySettings,
     ModelSettings,
     OpenAIResponsesModel,
@@ -47,6 +48,7 @@ from backend.app.agent.sdk_tools import (
     build_sdk_tools,
 )
 from backend.app.domain.run import RunFailure, RunStatus
+from backend.app.reliability import stable_run_failure
 from backend.app.settings import RunBudgetSettings
 from backend.app.tools import ToolExecutionContext
 
@@ -525,6 +527,16 @@ class OpenAIAgentsRuntime:
                 include_usage=True,
                 retry=ModelRetrySettings(
                     max_retries=self._budget.max_model_retries,
+                    backoff=ModelRetryBackoffSettings(
+                        initial_delay=(
+                            self._budget.model_retry_initial_delay_ms / 1_000
+                        ),
+                        max_delay=(
+                            self._budget.model_retry_max_delay_ms / 1_000
+                        ),
+                        multiplier=2,
+                        jitter=False,
+                    ),
                     policy=retry_policies.provider_suggested(),
                 ),
             ),
@@ -977,19 +989,9 @@ def _failure_from_exception(
     max_turn_failure_code: str,
 ) -> RuntimeResult:
     if isinstance(error, MaxTurnsExceeded):
-        return _failure_result(
-            code=max_turn_failure_code,
-            category="budget",
-            public_message="Agent execution budget was exhausted",
-            step=step,
-        )
+        return _registered_failure_result(max_turn_failure_code, step=step)
     if isinstance(error, ModelBehaviorError):
-        return _failure_result(
-            code="provider_invalid_response",
-            category="provider",
-            public_message="Model provider returned an invalid response",
-            step=step,
-        )
+        return _registered_failure_result("provider_invalid_response", step=step)
     if isinstance(error, ModelRefusalError):
         return _failure_result(
             code="model_refused",
@@ -998,21 +1000,9 @@ def _failure_from_exception(
             step=step,
         )
     if isinstance(error, ToolTimeoutError):
-        return _failure_result(
-            code="tool_timeout",
-            category="tool",
-            public_message="A tool timed out",
-            retryable=False,
-            step=step,
-        )
+        return _registered_failure_result("tool_timeout", step=step)
     if isinstance(error, TimeoutError):
-        return _failure_result(
-            code="provider_timeout",
-            category="timeout",
-            public_message="Model provider timed out",
-            retryable=True,
-            step=step,
-        )
+        return _registered_failure_result("provider_timeout", step=step)
     if isinstance(
         error,
         (
@@ -1036,31 +1026,14 @@ def _failure_from_exception(
             step=step,
         )
     if isinstance(error, openai.APITimeoutError):
-        return _failure_result(
-            code="provider_timeout",
-            category="timeout",
-            public_message="Model provider timed out",
-            retryable=True,
-            step=step,
-        )
+        return _registered_failure_result("provider_timeout", step=step)
     if isinstance(error, openai.RateLimitError):
-        return _failure_result(
-            code="provider_rate_limited",
-            category="provider",
-            public_message="Model provider rate limit was reached",
-            retryable=True,
-            step=step,
-        )
+        return _registered_failure_result("provider_rate_limited", step=step)
     if isinstance(
         error,
         (openai.AuthenticationError, openai.PermissionDeniedError),
     ):
-        return _failure_result(
-            code="provider_auth_failed",
-            category="provider",
-            public_message="Model provider authentication failed",
-            step=step,
-        )
+        return _registered_failure_result("provider_auth_failed", step=step)
     if isinstance(
         error,
         (
@@ -1069,30 +1042,16 @@ def _failure_from_exception(
             openai.UnprocessableEntityError,
         ),
     ):
-        return _failure_result(
-            code="provider_request_rejected",
-            category="provider",
-            public_message="Model provider rejected the request",
-            step=step,
-        )
+        return _registered_failure_result("provider_request_rejected", step=step)
     if isinstance(error, (openai.InternalServerError, openai.APIConnectionError)):
-        return _failure_result(
-            code="provider_unavailable",
-            category="provider",
-            public_message="Model provider is unavailable",
-            retryable=True,
-            step=step,
-        )
+        return _registered_failure_result("provider_unavailable", step=step)
     if isinstance(error, openai.APIStatusError):
-        return _failure_result(
-            code=(
+        return _registered_failure_result(
+            (
                 "provider_unavailable"
                 if error.status_code >= 500
                 else "provider_request_rejected"
             ),
-            category="provider",
-            public_message="Model provider request failed",
-            retryable=error.status_code >= 500,
             step=step,
         )
     if isinstance(error, AgentsException):
@@ -1142,6 +1101,14 @@ def _consumer_failure_result(
         code="agents_sdk_contract_error",
         category="runtime",
         public_message="Agents SDK returned an invalid result",
+        step=step,
+    )
+
+
+def _registered_failure_result(code: str, *, step: int) -> RuntimeResult:
+    return RuntimeResult(
+        status=RunStatus.FAILED,
+        failure=stable_run_failure(code, step=step),
         step=step,
     )
 

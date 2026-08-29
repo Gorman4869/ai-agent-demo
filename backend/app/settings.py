@@ -53,11 +53,28 @@ class RunBudgetSettings(BaseModel):
         allow_inf_nan=False,
     )
     max_model_retries: int = Field(default=2, ge=0, le=5)
+    model_retry_initial_delay_ms: int = Field(default=100, ge=0, le=10_000)
+    model_retry_max_delay_ms: int = Field(default=2_000, ge=0, le=30_000)
+    max_tool_retries: int = Field(default=1, ge=0, le=3)
+    tool_retry_initial_delay_ms: int = Field(default=100, ge=0, le=10_000)
+    tool_retry_max_delay_ms: int = Field(default=1_000, ge=0, le=30_000)
 
     @model_validator(mode="after")
     def validate_timeout_order(self) -> RunBudgetSettings:
         if self.model_timeout_ms > self.run_timeout_ms:
             raise ValueError("model timeout must not exceed the run timeout")
+        if self.model_retry_initial_delay_ms > self.model_retry_max_delay_ms:
+            raise ValueError(
+                "model retry initial delay must not exceed its maximum"
+            )
+        if self.tool_retry_initial_delay_ms > self.tool_retry_max_delay_ms:
+            raise ValueError(
+                "tool retry initial delay must not exceed its maximum"
+            )
+        if self.model_retry_max_delay_ms >= self.run_timeout_ms:
+            raise ValueError("model retry delay must be less than the run timeout")
+        if self.tool_retry_max_delay_ms >= self.run_timeout_ms:
+            raise ValueError("tool retry delay must be less than the run timeout")
         return self
 
 
@@ -447,6 +464,31 @@ class Settings(BaseModel):
                         values,
                         "AI_AGENT_MAX_MODEL_RETRIES",
                         2,
+                    ),
+                    model_retry_initial_delay_ms=_read_int(
+                        values,
+                        "AI_AGENT_MODEL_RETRY_INITIAL_DELAY_MS",
+                        100,
+                    ),
+                    model_retry_max_delay_ms=_read_int(
+                        values,
+                        "AI_AGENT_MODEL_RETRY_MAX_DELAY_MS",
+                        2_000,
+                    ),
+                    max_tool_retries=_read_int(
+                        values,
+                        "AI_AGENT_MAX_TOOL_RETRIES",
+                        1,
+                    ),
+                    tool_retry_initial_delay_ms=_read_int(
+                        values,
+                        "AI_AGENT_TOOL_RETRY_INITIAL_DELAY_MS",
+                        100,
+                    ),
+                    tool_retry_max_delay_ms=_read_int(
+                        values,
+                        "AI_AGENT_TOOL_RETRY_MAX_DELAY_MS",
+                        1_000,
                     ),
                 ),
                 embedding=EmbeddingSettings(

@@ -38,6 +38,7 @@
 ## 6. Business and Error Handling
 
 - Expected tool failures return structured `ToolResult` values.
+- Provider, MCP, tool, Store, timeout and budget failures that participate in retry policy use the content-free catalog in `backend.app.reliability`. `retryable` classifies a transient error; it never authorizes replay by itself. Unknown adapter error codes fail closed.
 - Programmer errors are not silently swallowed.
 - Agent loops enforce an explicit maximum step count.
 - Secrets are read from environment variables and never logged or committed.
@@ -79,6 +80,8 @@
 - Cancellation is cooperative and checked before model/tool boundaries. Synchronous handlers are not described as hard-cancellable.
 - Client disconnect waits only for a short bounded grace period; a background thread may finish afterward and its result must be consumed without exposing raw errors.
 - Only explicitly classified transient model errors receive a bounded retry; side-effect tools are never blindly retried.
+- Shared tool retry is limited to idempotent, replay-safe, non-side-effecting definitions. A side-effecting tool without a trusted persistent idempotency key is never automatically retried, including after timeout or result-unknown failure and even when one approval was consumed.
+- `ToolResult` may carry only stable prior-attempt error codes and bounded retry delays for reviewed progress events. Raw handler or remote exception text never enters retry events.
 
 ## 11. Advanced-Agent Safety
 
@@ -95,6 +98,7 @@
 - Runtime (`manual`, `agents_sdk`, `langgraph`) and model provider (`mock`, `openai`) are separate choices. A key or model name never enables online access by itself.
 - Provider secrets use `SecretStr` and are excluded from normal dumps, representations, safe summaries, errors, and logs.
 - Run, model, tool, MCP, and database timeouts or retries use separately scoped names. Only explicitly classified transient model errors use `max_model_retries`; side effects never inherit that policy.
+- Model and read-only tool retries use bounded exponential backoff. Initial delay must not exceed its maximum, the maximum delay must remain below the Run timeout, and direct compatibility constructors may explicitly choose zero delay without changing production defaults.
 - Token and cost settings are per-run cumulative upper bounds. Request values may narrow server policy but never raise a server-owned limit.
 - `ApplicationContainer` is the composition root, not a service locator. FastAPI routes continue to close over narrow dependencies, and tests may inject explicit adapters.
 - A complete Container and legacy `create_app()` dependency overrides are two alternative assembly paths and must not be mixed.
@@ -118,6 +122,7 @@
 - M13 durable observability promotes valid `scope=run` usage events into an event-sourced ledger and latest cumulative cost summary without adding a second persistence write. PostgreSQL durability comes from the existing EventStore; no adapter may silently create a separate non-atomic usage write path.
 - `UsageRecord` describes exactly one model call. Unknown cost remains `None`; persisted currency uses `Decimal`, never a float conversion.
 - Side-effecting `ToolExecution` records require an idempotency digest at creation. Raw arguments and raw results are not retained; safe summaries and digests are bounded.
+- A generic retry wrapper must not surround Store mutations, lifecycle commits, terminal settlement, or an entire Runtime. Existing stable command IDs, event IDs, compare-and-set, lease and recovery protocols own their replay semantics; a result-unknown Store operation fails closed until its durable winner is read.
 - Logs use `safe_summary()` or an explicit allowlist. `repr=False` is defense in depth and does not authorize `dataclasses.asdict()` on records containing content.
 - In-memory Store locks are single-event-loop and single-process only. The fixed nested order is Run lock before Event lock; code must never acquire them in reverse.
 - The shared Store contract tests are adapter-independent. PostgreSQL fixtures inherit the same contract instead of copying it.
@@ -133,6 +138,7 @@
 - Store locks must be released before model, tool or notifier work. No callback or subscriber await is allowed inside the Run→Event critical section.
 - Runtime and notifier exceptions are converted to stable, safe categories or safe diagnostics. Raw exception text, prompts, tool arguments, tool results and provider payloads do not cross the persistence or logging boundary.
 - ManualRuntime creates a fresh synchronous Loop per Run and executes it in a worker thread. It maps only reviewed event fields, preserves old Loop behavior, and uses cooperative cancellation with a bounded cleanup grace. Code must not claim that a Python worker thread was hard-cancelled.
+- Retry waits use the same Run `CancellationToken`, consume the same deadline, and stop before the next attempt when cancellation wins. `model.retrying` and `tool.retrying` expose only reviewed attempt, delay, identity metadata and stable error code fields.
 - A durable start replay with `created=false` does not execute Runtime again. Multiple coordinators wait for the Store winner; process restart, lease expiry and orphaned-running recovery remain separate persistence concerns.
 - A progress Store failure is fail closed: do not notify or invent a terminal state when commit outcome is unavailable. Leave the durable Run for the recovery service and surface the stable Store error.
 - Default tests inject Manual/Mock or fake Runtime implementations and must not hide SDK or network calls. Online execution remains behind explicit Settings and a separately authorized verification command.
@@ -150,6 +156,7 @@
 - `emit()` awaits the Coordinator Store path. A `StoreError` propagates unchanged and must not be reclassified as a provider/runtime failure, trigger model or tool re-execution, or notify subscribers before durable append succeeds.
 - SDK context usage is currently aggregate, Run-scoped evidence and is emitted as `model.usage` with `scope=run`. It is not a domain `UsageRecord`, because that record represents one model call and the aggregate lacks per-call duration and cost.
 - Unknown cost stays `None` with `cost_source=unknown`; never report zero, guess a value, or hard-code unversioned pricing. `max_turns` is a Run-loop bound and configured output tokens are a per-model-request bound, while model-call and input-token checks are aggregate post-run or approximate. The HTTP client timeout is not a strict whole-workflow wall clock, and `max_cost_usd` is not yet enforced. Code and teaching material must disclose KI-018 instead of claiming hard budget guarantees.
+- Keep the OpenAI HTTP client's internal retries disabled. The SDK `ModelRetrySettings` is the single model retry layer, with explicit bounded backoff and provider-suggested policy; SDK tools remain read-only snapshots and use the shared replay-safe tool policy.
 - Offline construction and fake-Runner contract tests establish only code-complete evidence. Do not claim online verification; M8-T6 owns the separately authorized real-provider streaming and tool-call smoke test.
 
 ## 16. MCP Client Lifecycle and Tool Adapter
@@ -163,7 +170,7 @@
 - Treat discovery metadata as untrusted. Local names, descriptions, roles, risk, side-effect, and approval policy come only from the server-owned `McpToolPolicy`; an unlisted remote tool is neither mapped nor directly callable.
 - Normalize only the reviewed object-schema subset, remove remote prompt text, force `additionalProperties=false`, and reject unknown keywords or structural limits. Bound schemas, arguments, results, pages, cursors, depth, node count, and byte size.
 - Expose mapped tools through the existing shared `ToolDefinition` and `ToolRegistry` so Manual, Agents SDK, and LangGraph retain the same validation and authorization boundary. Cross-Server local-name conflicts fail closed.
-- Each remote call has a separately configured timeout and no automatic retry. Return structured JSON when available, accept only bounded text fallback, and map remote errors without raw result or exception leakage.
+- Each remote call has a separately configured timeout. Return structured JSON when available, accept only bounded text fallback, and map timeout, disconnect, remote failure, invalid response and request rejection to distinct catalog codes without raw result or exception leakage. Any later retry is owned by the shared replay-safe tool policy, never by the MCP transport itself.
 - M9-T3 proves the same Client adapter against the built TypeScript Knowledge Server over real local STDIO. The TypeScript process remains a server-owned catalog entry; tests must exercise initialize, discovery, valid and invalid calls, and close without importing Server functions directly.
 - Local Python and TypeScript STDIO evidence is E3, not remote or production E4. Reconnect, invocation idempotency, production capacity, and Skill behavior remain later work.
 

@@ -3919,3 +3919,68 @@
   离线回归均有可复现证据，达到 `verified`。
 - 下一原子任务为 M13-T2；开始前须重新审计稳定错误、retryable、模型/工具/Run timeout 与
   side-effect 幂等边界，不得把本任务的 Trace 或 ledger 当成重试授权。
+
+## V-20260829-001：M13-T2 稳定错误、安全重试、超时与取消
+
+- 任务：`M13-T2 / verified`
+- 时间：2026-08-29 10:35，Asia/Shanghai
+- 验证目标：统一三种 Runtime 的稳定错误、retryable、指数退避和只读工具重试；继续复用
+  Coordinator 的总 deadline、持久取消和 Store/ToolExecution 恢复协议，并证明无持久幂等键的
+  副作用工具不会自动重试。
+- 验证基线：`892d863`。
+- 任务等级：A 类（共享 Runtime/ToolRegistry 公共契约、取消/副作用与错误安全）。默认
+  offline；没有读取 Key/DSN、调用在线 Provider、外部服务或付费接口，费用为 0。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_settings backend.tests.test_framework_runtimes backend.tests.test_openai_agents_runtime backend.tests.test_langgraph_replanning backend.tests.test_mcp_client_lifecycle backend.tests.test_tool_execution_store_contract backend.tests.test_run_coordinator -q`（恢复基线，沙箱内） | 1 | 127 项收集；本地 MCP 子进程被沙箱改写为 `process_unavailable`，产生 2 failures + 2 errors，其余基线通过。保留环境失败，不作为代码失败结论 |
+| 同一恢复基线命令（经批准沙箱外） | 0 | 127 项全部通过；只启动仓库内本地 MCP fixture，无网络和 Key |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_reliability backend.tests.test_settings backend.tests.test_manual_agent_loop backend.tests.test_runtime_comparison backend.tests.test_openai_agents_runtime backend.tests.test_durable_observability -q` | 0 | 94 项通过；稳定错误目录、退避、Provider 限流/鉴权、三 Runtime 模型/只读工具接线、工具 retry Trace/metric 和 SDK 安全映射通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_mcp_tool_adapter -q`（经批准沙箱外） | 0 | 7 项真实本地 Python MCP STDIO 通过；timeout、remote error、oversized/untrusted response 分别映射稳定码且无内容泄漏 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_run_coordinator backend.tests.test_tool_execution_store_contract backend.tests.test_runtime_contract backend.tests.test_langgraph_replanning backend.tests.test_container -q` | 0 | 100 项通过；Store 故障 fail closed、持久 cancel/complete 竞争、deadline、ToolExecution 结果未知/恢复和默认组合回归通过。lease/notifier warning 来自预置故障用例 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_reliability backend.tests.test_settings -q` | 0 | 最终 33 项通过；新增 remaining deadline、无穷等待拒绝及 retry delay 关系边界通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_manual_agent_loop backend.tests.test_runtime_comparison backend.tests.test_reliability backend.tests.test_settings -q` | 0 | 最终错误目录接线与 `.env.example` 注释修正后 52 项通过 |
+| `./.venv/Scripts/python.exe -B -m unittest discover -s backend/tests -q`（最终，经批准沙箱外） | 0 | 当前工作树完整后端 666 项通过，1 项既有 Windows symlink 能力跳过；本地子进程、MockTransport Provider URL 和全部默认离线回归通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、146 个 Markdown 文件通过；status、ADR、verification、handoff、链接和恢复入口一致 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有 Git 的 LF/CRLF 工作树提示 |
+
+### 决策、实现与安全边界
+
+- `backend.app.reliability` 登记内容无关的 Provider/MCP/Tool/Store/Run/预算错误及 retryable。
+  未登记 adapter code 立即拒绝；raw exception、参数、结果、Key/DSN 不进入失败或 retry 事件。
+- 自动重试须同时通过错误瞬态、次数、持久幂等键、副作用、幂等/可重放、结果未知和剩余
+  deadline 检查。Manual/LangGraph 显式退避，SDK 使用公开 provider-suggested retry policy；
+  OpenAI HTTP client 自身仍为零重试，未形成双重重试层。
+- 共享 ToolRegistry 仅自动重试无副作用工具。副作用工具在真实 handler 抛出结果未知 I/O
+  故障后仍恰好调用一次；一次人工审批未被误当成持久幂等键。Store mutation、终态 commit
+  和整个 Runtime 均未套通用 retry loop。
+- MCP 同步 Tool adapter 不再把 timeout、disconnect、remote error、invalid response 和 request
+  rejection 压成通用失败。瞬态码是否进入下一尝试仍由共享工具 replay-safety gate 决定。
+- `CancellationToken` 的剩余预算和可唤醒等待让模型/工具退避在取消获胜时不开始下一尝试；
+  Coordinator 仍唯一持久化取消和终态 CAS。该结论不等于硬杀 worker thread、transport 或已发
+  远端请求，`KI-017` 保持 open。
+- `tool.retrying` 只持久化 attempt、delay、可信调用/工具元数据和稳定 prior error code；M13-T1
+  投影产生 tool retry span 和 `agent.tool.retry`，不包含参数、结果或异常文本。
+
+### 失败尝试、警告与未验证范围
+
+- 恢复基线在受控沙箱因本地 MCP 子进程权限失败；同一命令和最终全量经批准沙箱外通过。
+  没有修改系统策略、安装依赖、清理用户目录或把首次环境失败改写成成功。
+- 恢复审计发现 M13-T1 已提交为 `892d863`，但动态 status 的最近实现锚点仍为验证基线
+  `3fcc91b`；已登记并关闭 `KI-029`，旧 handoff 不改写。
+- 全量保留既有 Starlette/httpx 弃用提示、故障注入 warning 和一项 Windows symlink 条件跳过。
+  Provider URL 日志来自测试 `MockTransport`，没有真实外部请求。
+- 本任务没有使用本机 PostgreSQL DSN，也没有重跑真实 PostgreSQL integration；数据库故障和
+  持久取消依赖适配器无关 Store/Coordinator/ToolExecution 测试及已验收的 M11 持久协议。
+- 没有实现副作用工具自动重试、硬线程/进程取消、连接结果未知的生产仲裁、逐调用 usage、
+  `max_cost_usd`、统一 CI、Docker/Nginx 或生产故障演练。分别继续由 KI-015 至 KI-018 与
+  M13-T3–T6 跟踪。
+
+### 结论
+
+- M13-T2 的稳定错误、安全退避、只读工具重试、持久取消回归、脱敏观测和副作用零自动重试
+  均有离线自动化证据，达到 `verified`。
+- 下一原子任务为 M13-T3 分层统一验证与 CI；不得在本任务结论中提前宣称 CI、镜像、容器健康、
+  Nginx SSE、生产容量或在线 Provider 已验证。

@@ -926,6 +926,24 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：提供方限流、鉴权失败、MCP 断线、数据库故障、幂等/非幂等工具、取消竞争和预算耗尽。
 - 验收：有副作用工具没有持久幂等键时不自动重试。
 
+#### M13-T2 实现结果（2026-08-29）
+
+- 新增内容无关的稳定错误目录与 fail-closed 决策：`retryable` 只是瞬态分类；次数、剩余
+  deadline、幂等、可重放、副作用、持久幂等键和结果未知共同决定是否进入下一尝试。
+- Manual/LangGraph 模型重试和 Agents SDK 公开 retry settings 使用显式有界指数退避；OpenAI
+  client 自身仍为零重试，避免叠加。生产组合默认模型 2 次、只读工具 1 次重试。
+- 共享 ToolRegistry 仅重试无副作用工具的稳定 timeout/I/O/MCP 瞬态错误。当前主链没有把
+  持久外部结果仲裁证明注入普通工具调用，因此所有副作用工具保持零自动重试，人工批准不被
+  当成持久幂等键。
+- MCP adapter 保留 timeout、disconnect、remote error、invalid response 和 request rejected
+  的不同安全错误码；Store mutation、终态提交和整个 Runtime 不套通用 retry loop，继续复用
+  既有 command/event ID、CAS、lease、recovery 与持久取消赢家协议。
+- 退避等待响应同一个 Run token/deadline；工具退避产生脱敏 `tool.retrying`、tool span 和
+  `agent.tool.retry` metric。同步线程和已经发出的远端请求仍不是硬取消，`KI-017` 保留。
+- 新策略/边界与跨 Runtime 回归通过；完整后端 666 项通过、1 项既有 Windows symlink 条件
+  跳过。验证见 `V-20260829-001`，决策见 `ADR-0035`，工程说明见
+  `docs/m13-reliability.md`。
+
 ### M13-T3：分层统一验证与 CI
 
 - 依赖：M9-T3、M11-T6、M12-T5、M13-T2。

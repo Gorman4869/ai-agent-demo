@@ -183,7 +183,9 @@ def _adapt_legacy_failure(
 
 def _adapt_progress_event(event: AgentEvent) -> RuntimeEvent:
     if event.type == "model.retrying":
-        keys = ("attempt", "model_duration_ms")
+        keys = ("attempt", "delay_ms", "model_duration_ms")
+    elif event.type == "tool.retrying":
+        keys = ("id", "name", "attempt", "delay_ms", "error_code")
     elif event.type == "tool.started":
         keys = ("id", "name", "model_duration_ms")
     elif event.type == "tool.completed":

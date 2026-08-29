@@ -5,12 +5,21 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum, StrEnum
 from threading import Lock
 from typing import Any, Protocol
 from uuid import uuid4
+
+from backend.app.domain.run import RunFailure
+from backend.app.reliability import (
+    ExponentialBackoff,
+    RetryOperation,
+    RetrySafety,
+    decide_retry,
+    failure_spec,
+)
 
 
 ToolHandler = Callable[[dict[str, Any]], Any]
@@ -419,6 +428,24 @@ class ToolDefinition:
         )
 
 
+class ToolHandlerError(RuntimeError):
+    """Stable adapter failure that contains no remote exception details."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        result_unknown: bool = False,
+    ) -> None:
+        spec = failure_spec(code)
+        self.code = spec.code
+        if not isinstance(result_unknown, bool):
+            raise ValueError("result_unknown must be a boolean")
+        self.retryable = spec.retryable
+        self.result_unknown = result_unknown
+        super().__init__(self.code)
+
+
 @dataclass(frozen=True)
 class ToolResult:
     ok: bool
@@ -426,6 +453,55 @@ class ToolResult:
     error_code: str | None = None
     error_message: str | None = None
     error_details: dict[str, Any] | None = None
+    retryable: bool = False
+    result_unknown: bool = False
+    attempts: int = 1
+    retry_delays_ms: tuple[int, ...] = ()
+    retry_error_codes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.ok, bool):
+            raise ValueError("tool result ok must be a boolean")
+        if not isinstance(self.retryable, bool):
+            raise ValueError("tool result retryable must be a boolean")
+        if not isinstance(self.result_unknown, bool):
+            raise ValueError("tool result result_unknown must be a boolean")
+        if (
+            not isinstance(self.attempts, int)
+            or isinstance(self.attempts, bool)
+            or self.attempts < 1
+        ):
+            raise ValueError("tool result attempts must be a positive integer")
+        delays = tuple(self.retry_delays_ms)
+        error_codes = tuple(self.retry_error_codes)
+        if any(
+            not isinstance(delay, int)
+            or isinstance(delay, bool)
+            or delay < 0
+            for delay in delays
+        ):
+            raise ValueError("tool retry delays must be non-negative integers")
+        if len(delays) != self.attempts - 1:
+            raise ValueError("tool retry delays must match the attempt count")
+        if len(error_codes) != len(delays) or any(
+            failure_spec(code).code != code for code in error_codes
+        ):
+            raise ValueError("tool retry error codes must match the retry delays")
+        if self.ok and (
+            self.error_code is not None
+            or self.retryable
+            or self.result_unknown
+        ):
+            raise ValueError("a successful tool result cannot contain a failure")
+        object.__setattr__(self, "retry_delays_ms", delays)
+        object.__setattr__(self, "retry_error_codes", error_codes)
+
+
+class ToolCancellationSignal(Protocol):
+    @property
+    def reason(self) -> str | None: ...
+
+    def wait_for_cancellation(self, timeout_seconds: float) -> bool: ...
 
 
 class ToolRegistry:
@@ -486,11 +562,21 @@ class ToolRegistry:
 
         try:
             return ToolResult(ok=True, value=tool.handler(arguments))
+        except ToolHandlerError as error:
+            return ToolResult(
+                ok=False,
+                error_code=error.code,
+                error_message=f"Tool adapter failed: {tool.name}",
+                retryable=error.retryable,
+                result_unknown=error.result_unknown,
+            )
         except TimeoutError:
             return ToolResult(
                 ok=False,
                 error_code="tool_timeout",
                 error_message=f"Tool timed out: {tool.name}",
+                retryable=True,
+                result_unknown=tool.has_side_effects,
             )
         except PermissionError:
             return ToolResult(
@@ -503,6 +589,8 @@ class ToolRegistry:
                 ok=False,
                 error_code="tool_io_error",
                 error_message=f"Tool I/O error: {tool.name}",
+                retryable=True,
+                result_unknown=tool.has_side_effects,
             )
         except (TypeError, ValueError):
             return ToolResult(
@@ -510,6 +598,93 @@ class ToolRegistry:
                 error_code="tool_execution_failed",
                 error_message=f"Tool execution failed: {tool.name}",
             )
+
+    def execute_with_retry(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        context: ToolExecutionContext | None = None,
+        call_id: str | None = None,
+        max_retries: int = 0,
+        backoff: ExponentialBackoff | None = None,
+        cancellation: ToolCancellationSignal | None = None,
+    ) -> ToolResult:
+        """Retry only replay-safe tools; side effects fail closed."""
+
+        if (
+            not isinstance(max_retries, int)
+            or isinstance(max_retries, bool)
+            or max_retries < 0
+        ):
+            raise ValueError("max_retries must be a non-negative integer")
+        schedule = backoff or ExponentialBackoff(0, 0)
+        tool = self._tools.get(name)
+        if tool is None:
+            return self.execute(
+                name,
+                arguments,
+                context=context,
+                call_id=call_id,
+            )
+
+        delays: list[int] = []
+        retry_error_codes: list[str] = []
+        for attempt in range(1, max_retries + 2):
+            result = self.execute(
+                name,
+                arguments,
+                context=context,
+                call_id=call_id,
+            )
+            if result.ok:
+                return replace(
+                    result,
+                    attempts=attempt,
+                    retry_delays_ms=tuple(delays),
+                    retry_error_codes=tuple(retry_error_codes),
+                )
+            failure = RunFailure(
+                code=result.error_code or "tool_execution_failed",
+                category="tool",
+                public_message="Tool execution failed",
+                retryable=result.retryable,
+            )
+            decision = decide_retry(
+                failure,
+                safety=RetrySafety(
+                    operation=RetryOperation.TOOL,
+                    idempotent=not tool.has_side_effects,
+                    replay_safe=not tool.has_side_effects,
+                    side_effecting=tool.has_side_effects,
+                    persistent_idempotency_key=False,
+                    result_unknown=result.result_unknown,
+                ),
+                retry_number=attempt,
+                max_retries=max_retries,
+                backoff=schedule,
+            )
+            if not decision.retry:
+                return replace(
+                    result,
+                    attempts=attempt,
+                    retry_delays_ms=tuple(delays),
+                    retry_error_codes=tuple(retry_error_codes),
+                )
+            if cancellation is not None and cancellation.wait_for_cancellation(
+                decision.delay_ms / 1_000
+            ):
+                return ToolResult(
+                    ok=False,
+                    error_code="run_cancelled",
+                    error_message="Run cancelled",
+                    attempts=attempt,
+                    retry_delays_ms=tuple(delays),
+                    retry_error_codes=tuple(retry_error_codes),
+                )
+            delays.append(decision.delay_ms)
+            retry_error_codes.append(failure_spec(failure.code).code)
+        raise AssertionError("bounded tool retry loop did not return")
 
 
 def _authorize(

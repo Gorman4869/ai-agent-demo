@@ -23,7 +23,7 @@ from backend.app.integrations.mcp.tools import (
     normalize_call_result,
 )
 from backend.app.settings import McpClientSettings
-from backend.app.tools import ToolDefinition
+from backend.app.tools import ToolDefinition, ToolHandlerError
 
 
 class _SafeStdioLogFilter(logging.Filter):
@@ -547,11 +547,32 @@ class McpClientManager:
             )
         except FutureTimeoutError:
             future.cancel()
-            raise TimeoutError("MCP tool call timed out") from None
+            raise _mcp_tool_handler_error(
+                "mcp_timeout",
+                result_unknown=True,
+            ) from None
         except McpToolInvocationError as error:
             if error.code == "request_timeout":
-                raise TimeoutError("MCP tool call timed out") from None
-            raise ValueError("MCP tool call failed") from None
+                raise _mcp_tool_handler_error(
+                    "mcp_timeout",
+                    result_unknown=True,
+                ) from None
+            if error.code in {
+                "client_closed",
+                "client_not_running",
+                "request_failed",
+            }:
+                raise _mcp_tool_handler_error(
+                    "mcp_disconnected",
+                    result_unknown=error.code != "client_not_running",
+                ) from None
+            if error.code == "remote_tool_error":
+                raise _mcp_tool_handler_error("mcp_remote_error") from None
+            if error.code in {"invalid_response", "untrusted_tool_result"}:
+                raise _mcp_tool_handler_error("mcp_invalid_response") from None
+            if error.code in {"invalid_arguments", "tool_not_allowed"}:
+                raise _mcp_tool_handler_error("mcp_request_rejected") from None
+            raise _mcp_tool_handler_error("mcp_invalid_response") from None
 
     async def _consume_task(self, task: asyncio.Task[object]) -> None:
         try:
@@ -570,3 +591,14 @@ class McpClientManager:
                 raise McpClientConfigurationError(server_id)
             selected.append(config)
         return tuple(selected)
+
+
+def _mcp_tool_handler_error(
+    code: str,
+    *,
+    result_unknown: bool = False,
+) -> ToolHandlerError:
+    return ToolHandlerError(
+        code,
+        result_unknown=result_unknown,
+    )

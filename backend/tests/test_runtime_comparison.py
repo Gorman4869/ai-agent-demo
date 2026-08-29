@@ -5,8 +5,10 @@ import unittest
 from backend.app.agent import CancellationToken
 from backend.app.agent.graph_runtime import LangGraphRuntime
 from backend.app.agent.runtime import RuntimeControl, RuntimeEvent, RuntimeRequest
+from backend.app.domain import ModelDecision, ToolCall
 from backend.app.domain.run import RunStatus
-from backend.app.models import MockModel
+from backend.app.models import MockModel, RetryableModelError
+from backend.app.tools import ToolDefinition, ToolRegistry
 from backend.app.tools.builtin import create_default_registry
 from backend.tests.runtime_comparison_fixtures import (
     INVALID_TYPE_CASE,
@@ -99,6 +101,87 @@ class RuntimeComparisonContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("model_execution_failed", result.failure.code)
         self.assertNotIn(secret, result.failure.public_message)
         self.assertNotIn(secret, repr(result))
+
+    async def test_langgraph_retries_model_and_read_only_tool_with_events(self) -> None:
+        model_calls = 0
+        tool_calls = 0
+
+        class FlakyModel:
+            def decide(self, messages, tools):
+                nonlocal model_calls
+                del messages, tools
+                model_calls += 1
+                if model_calls == 1:
+                    raise RetryableModelError("transient model fixture")
+                if model_calls == 2:
+                    return ModelDecision(
+                        tool_call=ToolCall(
+                            id="call-retry",
+                            name="lookup",
+                            arguments={},
+                        )
+                    )
+                return ModelDecision(final_answer="recovered")
+
+        def create_tools(_request):
+            def flaky_lookup(_arguments: dict[str, object]) -> str:
+                nonlocal tool_calls
+                tool_calls += 1
+                if tool_calls == 1:
+                    raise OSError("transient tool fixture")
+                return "recovered"
+
+            registry = ToolRegistry()
+            registry.register(
+                ToolDefinition(
+                    name="lookup",
+                    description="Read one deterministic value.",
+                    input_schema={"type": "object", "properties": {}},
+                    handler=flaky_lookup,
+                )
+            )
+            return registry
+
+        events: list[RuntimeEvent] = []
+        result = await LangGraphRuntime(
+            model_factory=lambda _request: FlakyModel(),
+            tool_registry_factory=create_tools,
+            max_model_retries=1,
+            model_retry_initial_delay_ms=0,
+            model_retry_max_delay_ms=0,
+            max_tool_retries=1,
+            tool_retry_initial_delay_ms=0,
+            tool_retry_max_delay_ms=0,
+        ).run(
+            RuntimeRequest(run_id="run-retry", input_text="retry"),
+            emit=_collecting_sink(events),
+            control=RuntimeControl(CancellationToken()),
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(3, model_calls)
+        self.assertEqual(2, tool_calls)
+        self.assertEqual(
+            [
+                "model.retrying",
+                "tool.started",
+                "tool.retrying",
+                "tool.completed",
+            ],
+            [event.type for event in events],
+        )
+        self.assertEqual(
+            [0, 0],
+            [
+                event.data["delay_ms"]
+                for event in events
+                if event.type.endswith("retrying")
+            ],
+        )
+        tool_retry = next(
+            event for event in events if event.type == "tool.retrying"
+        )
+        self.assertEqual("tool_io_error", tool_retry.data["error_code"])
 
     async def test_langgraph_event_sink_failure_propagates(self) -> None:
         marker = RuntimeError("event-store-unavailable")

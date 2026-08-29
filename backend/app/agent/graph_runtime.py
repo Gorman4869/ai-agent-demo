@@ -17,6 +17,14 @@ from backend.app.agent.runtime import (
 from backend.app.domain import Message, ModelDecision
 from backend.app.domain.run import RunFailure, RunStatus
 from backend.app.models import ChatModel, RetryableModelError
+from backend.app.reliability import (
+    ExponentialBackoff,
+    RetryOperation,
+    RetrySafety,
+    decide_retry,
+    stable_run_failure,
+    wait_for_retry_delay,
+)
 from backend.app.tools import ToolExecutionContext, ToolRegistry
 
 
@@ -76,6 +84,11 @@ class LangGraphRuntime:
         tool_registry_factory: GraphToolRegistryFactory,
         max_steps: int = 8,
         max_model_retries: int = 2,
+        model_retry_initial_delay_ms: int = 0,
+        model_retry_max_delay_ms: int = 0,
+        max_tool_retries: int = 0,
+        tool_retry_initial_delay_ms: int = 0,
+        tool_retry_max_delay_ms: int = 0,
     ) -> None:
         if (
             not isinstance(max_steps, int)
@@ -89,10 +102,25 @@ class LangGraphRuntime:
             or max_model_retries < 0
         ):
             raise ValueError("max_model_retries must not be negative")
+        if (
+            not isinstance(max_tool_retries, int)
+            or isinstance(max_tool_retries, bool)
+            or max_tool_retries < 0
+        ):
+            raise ValueError("max_tool_retries must not be negative")
         self._model_factory = model_factory
         self._tool_registry_factory = tool_registry_factory
         self._max_steps = max_steps
         self._max_model_retries = max_model_retries
+        self._model_backoff = ExponentialBackoff(
+            model_retry_initial_delay_ms,
+            model_retry_max_delay_ms,
+        )
+        self._max_tool_retries = max_tool_retries
+        self._tool_backoff = ExponentialBackoff(
+            tool_retry_initial_delay_ms,
+            tool_retry_max_delay_ms,
+        )
 
     async def run(
         self,
@@ -179,7 +207,22 @@ class LangGraphRuntime:
                     )
                     break
                 except RetryableModelError:
-                    if retry_attempt >= self._max_model_retries:
+                    retry_number = retry_attempt + 1
+                    retry = decide_retry(
+                        stable_run_failure("provider_unavailable", step=step),
+                        safety=RetrySafety(
+                            operation=RetryOperation.MODEL,
+                            idempotent=True,
+                            replay_safe=True,
+                        ),
+                        retry_number=retry_number,
+                        max_retries=self._max_model_retries,
+                        backoff=self._model_backoff,
+                        remaining_budget_ms=(
+                            control.cancellation_token.remaining_ms
+                        ),
+                    )
+                    if not retry.retry:
                         return {
                             "step": step,
                             "result": _failure_result(
@@ -193,10 +236,16 @@ class LangGraphRuntime:
                         RuntimeEvent(
                             type="model.retrying",
                             step=step,
-                            data={"attempt": retry_attempt + 1},
+                            data={
+                                "attempt": retry_number,
+                                "delay_ms": retry.delay_ms,
+                            },
                         )
                     )
-                    if control.cancellation_token.is_cancelled:
+                    if await wait_for_retry_delay(
+                        retry.delay_ms,
+                        cancellation=control.cancellation_token,
+                    ):
                         return {
                             "step": step,
                             "result": _cancelled_result(control, step=step),
@@ -252,12 +301,36 @@ class LangGraphRuntime:
                 )
             )
             tool_result = await asyncio.to_thread(
-                tools.execute,
+                tools.execute_with_retry,
                 tool_call.name,
                 tool_call.arguments,
                 context=execution_context,
                 call_id=tool_call.id,
+                max_retries=self._max_tool_retries,
+                backoff=self._tool_backoff,
+                cancellation=control.cancellation_token,
             )
+            for retry_attempt, (delay_ms, error_code) in enumerate(
+                zip(
+                    tool_result.retry_delays_ms,
+                    tool_result.retry_error_codes,
+                    strict=True,
+                ),
+                start=1,
+            ):
+                await emit(
+                    RuntimeEvent(
+                        type="tool.retrying",
+                        step=state["step"],
+                        data={
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "attempt": retry_attempt,
+                            "delay_ms": delay_ms,
+                            "error_code": error_code,
+                        },
+                    )
+                )
             event_data: dict[str, object] = {
                 "id": tool_call.id,
                 "name": tool_call.name,

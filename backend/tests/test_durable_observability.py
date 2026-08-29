@@ -117,6 +117,42 @@ class DurableObservabilityScenarioTest(unittest.IsolatedAsyncioTestCase):
             {metric.name for metric in scenario.snapshot.metrics},
         )
 
+    async def test_tool_retry_reports_backoff_without_argument_content(self) -> None:
+        scenario = await _execute_scenario(
+            "tool-retry",
+            events=(
+                RuntimeEvent(
+                    type="tool.retrying",
+                    step=1,
+                    data={
+                        "id": "call-1",
+                        "name": "safe_lookup",
+                        "attempt": 1,
+                        "delay_ms": 125,
+                        "error_code": "tool_io_error",
+                    },
+                ),
+            ),
+            result=RuntimeResult(
+                status=RunStatus.COMPLETED,
+                answer="ok",
+                step=1,
+            ),
+        )
+
+        retry_span = next(
+            span
+            for span in scenario.snapshot.spans
+            if span.status is TraceStatus.RETRYING
+        )
+        self.assertEqual("tool", retry_span.layer.value)
+        self.assertEqual("tool.safe_lookup", retry_span.name)
+        self.assertEqual(125, retry_span.duration_ms)
+        self.assertIn(
+            "agent.tool.retry",
+            {metric.name for metric in scenario.snapshot.metrics},
+        )
+
     async def test_cumulative_usage_snapshots_are_not_summed_twice(self) -> None:
         scenario = await _execute_scenario(
             "usage-snapshots",

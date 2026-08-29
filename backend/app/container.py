@@ -460,6 +460,19 @@ def _create_built_in_runtimes(
             cancellation_token=token,
             max_steps=settings.budget.max_steps,
             max_model_retries=settings.budget.max_model_retries,
+            model_retry_initial_delay_ms=(
+                settings.budget.model_retry_initial_delay_ms
+            ),
+            model_retry_max_delay_ms=(
+                settings.budget.model_retry_max_delay_ms
+            ),
+            max_tool_retries=settings.budget.max_tool_retries,
+            tool_retry_initial_delay_ms=(
+                settings.budget.tool_retry_initial_delay_ms
+            ),
+            tool_retry_max_delay_ms=(
+                settings.budget.tool_retry_max_delay_ms
+            ),
             prompt_context=request.prompt_context,
         )
     )
@@ -595,6 +608,13 @@ def _create_agents_sdk_runtime(settings: Settings) -> AgentRuntime:
             tools=build_sdk_tools(
                 create_default_registry(),
                 run_context=run_context,
+                max_tool_retries=settings.budget.max_tool_retries,
+                retry_initial_delay_ms=(
+                    settings.budget.tool_retry_initial_delay_ms
+                ),
+                retry_max_delay_ms=(
+                    settings.budget.tool_retry_max_delay_ms
+                ),
             ),
             prompt_context=_request.prompt_context,
         )
@@ -623,4 +643,17 @@ def _create_langgraph_runtime(settings: Settings) -> AgentRuntime:
         tool_registry_factory=lambda _request: create_default_registry(),
         max_steps=settings.budget.max_steps,
         max_model_retries=settings.budget.max_model_retries,
+        model_retry_initial_delay_ms=(
+            settings.budget.model_retry_initial_delay_ms
+        ),
+        model_retry_max_delay_ms=(
+            settings.budget.model_retry_max_delay_ms
+        ),
+        max_tool_retries=settings.budget.max_tool_retries,
+        tool_retry_initial_delay_ms=(
+            settings.budget.tool_retry_initial_delay_ms
+        ),
+        tool_retry_max_delay_ms=(
+            settings.budget.tool_retry_max_delay_ms
+        ),
     )

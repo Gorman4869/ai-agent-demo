@@ -206,6 +206,11 @@ def create_learning_agent_loop(
     cancellation_token: CancellationToken | None = None,
     max_steps: int = 8,
     max_model_retries: int = 2,
+    model_retry_initial_delay_ms: int = 0,
+    model_retry_max_delay_ms: int = 0,
+    max_tool_retries: int = 0,
+    tool_retry_initial_delay_ms: int = 0,
+    tool_retry_max_delay_ms: int = 0,
     prompt_context: str | None = None,
 ) -> ManualAgentLoop:
     """Build a fresh offline loop for one Runtime invocation."""
@@ -216,6 +221,11 @@ def create_learning_agent_loop(
         execution_context=execution_context,
         cancellation_token=cancellation_token,
         max_model_retries=max_model_retries,
+        model_retry_initial_delay_ms=model_retry_initial_delay_ms,
+        model_retry_max_delay_ms=model_retry_max_delay_ms,
+        max_tool_retries=max_tool_retries,
+        tool_retry_initial_delay_ms=tool_retry_initial_delay_ms,
+        tool_retry_max_delay_ms=tool_retry_max_delay_ms,
         prompt_context=prompt_context,
     )
 
