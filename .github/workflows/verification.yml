@@ -1,0 +1,152 @@
+name: Layered verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.16.0'
+          package-manager-cache: false
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          ./.venv/Scripts/python.exe -m pip install -r backend/requirements-m2.txt
+      - name: Install offline MCP dependencies
+        working-directory: mcp-servers/knowledge-server
+        run: npm.cmd ci
+      - name: Run offline layer
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile offline
+
+  mcp:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.16.0'
+          package-manager-cache: false
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          ./.venv/Scripts/python.exe -m pip install -r backend/requirements-m2.txt
+      - name: Install MCP dependencies
+        working-directory: mcp-servers/knowledge-server
+        run: npm.cmd ci
+      - name: Run MCP layer
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile mcp
+
+  postgresql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg17
+        env:
+          POSTGRES_DB: ai_agent_integration
+          POSTGRES_USER: ai_agent
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_agent -d ai_agent_integration"
+          --health-interval 1s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      AI_AGENT_TEST_POSTGRES_DSN: postgresql://ai_agent@127.0.0.1:5432/ai_agent_integration?sslmode=disable
+      AI_AGENT_TEST_PGVECTOR_DSN: postgresql://ai_agent@127.0.0.1:5432/ai_agent_integration?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          ./.venv/bin/python -m pip install -r backend/requirements-m2.txt
+      - name: Run PostgreSQL layer
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile postgresql
+
+  frontend:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.16.0'
+          package-manager-cache: false
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm.cmd ci
+      - name: Run frontend layer
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile frontend
+
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.16.0'
+          package-manager-cache: false
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          ./.venv/Scripts/python.exe -m pip install -r backend/requirements-m2.txt
+      - name: Install frontend dependencies and Chromium
+        working-directory: frontend
+        run: |
+          npm.cmd ci
+          npx.cmd playwright install chromium
+      - name: Run E2E layer
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run Docker configuration layer
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile docker
+
+  online-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Confirm online layer is skipped without one-time authorization
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Profile online

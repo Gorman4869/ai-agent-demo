@@ -952,6 +952,23 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 验收：任一门禁失败时脚本不能打印“全部通过”；跳过项必须显式汇总。
 - 关闭目标：KI-008。
 
+#### M13-T3 实现结果（2026-08-30，code complete）
+
+- `scripts/verify.ps1` 固定七层及 `default`、`integration`、`all` profile；显式选择的
+  PostgreSQL/Docker 等 required layer 缺少前置条件时 fail closed，online 缺少本次授权时只
+  显式 `SKIPPED`，不会执行独立在线脚本。
+- 最终汇总逐层输出 `PASSED/FAILED/SKIPPED`。required layer 失败会停止后续执行、保留完整
+  汇总并退出 1；失败路径和有 skip 的路径均不会打印全部通过。
+- `.github/workflows/verification.yml` 拆分 offline、MCP、PostgreSQL、frontend、E2E、Docker
+  和 online-policy job，只给 `contents: read`，不引用仓库 secret，也不传在线授权开关。
+- 本地工作树已通过 offline 670 项（1 项既有 Windows symlink 跳过）、MCP 11 项、真实
+  PostgreSQL/pgvector 120 项、Vue 12 项与 build、Chromium E2E 2 项及两份 Compose 配置；
+  failure/skip/CI policy 入口测试 4 项通过。
+- 远程仓库仍未配置，GitHub runner 尚无实际 workflow run；因此本任务保持 `code_complete`，
+  `KI-008` 继续 mitigated。远程七个 job 有可引用成功记录后才能改为 verified/closed。
+- 决策见 `ADR-0036`，工程入口见 `docs/m13-verification-ci.md`；没有构建镜像、启动服务、
+  验证健康或 Nginx SSE，也没有读取 Key、执行在线调用或进入 M13-T4。
+
 ### M13-T4：Docker/pgvector/Nginx 实际部署验收
 
 - 依赖：M11-T2、M12-T2、M13-T3。

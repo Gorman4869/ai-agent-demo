@@ -57,12 +57,15 @@ Docker（默认 Mock，不需要密钥）：
 docker compose -f deploy/compose.yaml up --build
 ```
 
-M6 代码 Agent 离线 Demo 与最终统一验收：
+M6 代码 Agent 离线 Demo 与默认无 Key/DSN 分层验收：
 
 ```powershell
-.\.venv\Scripts\python.exe -m backend.app.advanced.code_demo
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+./.venv/Scripts/python.exe -m backend.app.advanced.code_demo
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1
 ```
+
+默认 profile 执行 offline、MCP 和 frontend；PostgreSQL、E2E、Docker 与 online 的独立入口、
+前置条件和跳过语义见 [M13 分层验证与 CI](docs/m13-verification-ci.md)。
 
 浏览器访问 `http://127.0.0.1:5173`；后端健康检查为 `http://127.0.0.1:8000/health`。
 

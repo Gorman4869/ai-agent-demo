@@ -40,7 +40,7 @@ M7 不再增加更多框架，而是把前六个阶段的产物组织成一套�
 | --- | --- | --- |
 | `docs/capstone-architecture.md` | 现状、目标架构、容量、可靠性与威胁模型 | 边界与假设明确 |
 | `docs/capstone-demo-script.md` | 12～15 分钟演示顺序与答辩话术 | 正常/失败/安全路径齐全 |
-| `scripts/verify.ps1` | 后端回归、代码 Demo、依赖、前端/MCP 与 Compose 检查 | 任一步失败立即停止 |
+| `scripts/verify.ps1` | 分层后端、MCP、数据库、前端、E2E、Docker 与 online opt-in 检查 | 失败非零、跳过显式汇总 |
 | `docs/progress.md` | 学习者自己的证据与复盘 | 不能由代码通过代替个人掌握 |
 | `docs/assessments.md` | 概念、实操与场景题 | 能解释取舍，不只背术语 |
 
@@ -180,16 +180,18 @@ run_id / 请求 ID：
 在项目根目录运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1
 ```
 
 如果只想在没有 Docker CLI 的环境检查代码：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -SkipCompose
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile offline
 ```
 
-脚本不会安装依赖、启动公网请求或写入密钥。它会依次执行完整后端回归、代码 Agent 离线 Demo、`pip check`、Vue/MCP 构建和可选 Compose 配置检查，任一步失败即停止。
+脚本不会安装依赖、启动未授权公网请求或写入密钥。默认 profile 执行 offline、MCP 和 frontend；
+其他层使用独立 profile。首个 required layer 失败后停止执行并返回非零，但仍打印七层的
+`PASSED`、`FAILED` 或 `SKIPPED` 汇总；没有执行的层不能被描述成通过。
 
 ### 演示
 

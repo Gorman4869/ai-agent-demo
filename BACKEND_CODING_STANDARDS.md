@@ -359,3 +359,12 @@
 - Reports expose only reviewed dataset/retriever labels, case IDs, configured document IDs, metrics, thresholds, local latency scope, and stable failure codes. Queries, evidence terms, excerpts, titles, sources, and unconfigured returned document IDs do not enter report records or normal representations.
 - Local wall-clock latency is a same-process comparison only. Provider usage remains unavailable and estimated cost remains `None`; sparse or deterministic pgvector fixture results are not online semantic quality, tokenizer, billing, or production-capacity evidence.
 - The first M11-T6 slice fixes the shared evaluator and sparse baseline only. Real pgvector comparison must reuse the exact dataset version, digest, annotations, `top_k`, and thresholds before M11-T6 can close; optional reranking may be added only as a separately identified retriever.
+
+## 28. Layered Verification and CI
+
+- The stable verification layers are `offline`, `mcp`, `postgresql`, `frontend`, `e2e`, `docker`, and `online`. The default profile selects only the key-free, DSN-free `offline + mcp + frontend` gate.
+- Every layer appears in the final summary as `PASSED`, `FAILED`, or `SKIPPED` with a stable reason. A required failure must return non-zero and must never reach an all-passed message; unselected or unauthorized work is not success evidence.
+- Explicit `postgresql`, `e2e`, and `docker` profiles fail closed when their DSN, browser, executable, or dependency prerequisite is missing. Only the online layer may skip because one-time authorization is absent.
+- Default CI has read-only repository permissions, references no repository secret, and never supplies online authorization. Its online-policy job proves only the explicit skip path, not Provider compatibility.
+- PostgreSQL CI uses only the workflow-owned localhost trust test service. Docker verification in M13-T3 is configuration-only; image build, service startup, health, migration, Nginx SSE, and restart evidence remain M13-T4.
+- A checked-in workflow and local profile success are not proof that remote CI ran. Until a remote workflow run is recorded, keep M13-T3 `code_complete` and `KI-008` open or mitigated.

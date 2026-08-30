@@ -3984,3 +3984,69 @@
   均有离线自动化证据，达到 `verified`。
 - 下一原子任务为 M13-T3 分层统一验证与 CI；不得在本任务结论中提前宣称 CI、镜像、容器健康、
   Nginx SSE、生产容量或在线 Provider 已验证。
+
+## V-20260830-001：M13-T3 分层验证与 CI 本地 code-complete 证据
+
+- 任务：`M13-T3 / code_complete`
+- 时间：2026-08-30，Asia/Shanghai
+- 验证目标：固定 offline、MCP、PostgreSQL、frontend、E2E、Docker、online opt-in 七层；
+  证明 required layer 失败不会打印全部通过，跳过有显式汇总，默认 CI 不读取仓库密钥。
+- 验证基线：`57f0c8b`。
+- 任务等级：A 类公共验证/CI 合同 + C 类本地 PostgreSQL、Docker、Chromium 和远程 runner。
+  本地真实数据库与浏览器已执行；远程仓库未配置，GitHub runner 未执行。未读取 Key/用户
+  `.env`，未调用在线 Provider，费用 0。
+- 环境：Python `3.12.10`，Node `22.16.0`，npm `10.9.2`，Docker `29.3.1`，Compose
+  `5.1.1`；PostgreSQL/pgvector 使用 `deploy/compose.integration.yaml` 的 localhost trust
+  测试实例，不是生产数据库。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_reliability backend.tests.test_settings -q` | 0 | 恢复基线 33 项通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_verification_entrypoint -v` | 0 | 4 项通过：PostgreSQL 缺 DSN 必须失败且无全通过文案；online 未授权明确 skip；独立 online 脚本仍拒绝；workflow 七层、只读权限、无 secret/授权开关 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile offline`（沙箱外最终） | 0 | 670 项后端通过、1 项既有 Windows symlink 能力跳过；代码 Agent Demo 和 `pip check` 通过；汇总为 offline passed、其余显式 skipped |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（沙箱外最终默认门） | 0 | default 实际顺序执行 offline、MCP、frontend；670 项/1 skip、代码 Agent、依赖、MCP 11 项、Vue 12 项与 build 全部通过；最终明确汇总 3 passed、4 skipped、0 failed |
+| 同脚本 `-Profile mcp`（沙箱外最终） | 0 | TypeScript build 与本地 STDIO 11 项通过；无网络或远程 MCP |
+| 同脚本 `-Profile postgresql`（仅子进程注入本机 integration DSN） | 0 | PostgreSQL Store + pgvector 共 120 项通过；既有不可达数据库负向用例保留预期 connection timeout；未读取或输出 DSN |
+| 同脚本 `-Profile frontend`（沙箱外最终） | 0 | Vitest 2 文件/12 项通过，Vue production build 通过，19 modules transformed |
+| 同脚本 `-Profile e2e`（沙箱外） | 0 | 真实本地 FastAPI + Vite + Chromium 2 项通过：SSE 断线/刷新恢复与审批拒绝 |
+| 同脚本 `-Profile docker` | 0 | 主 Compose 与 integration Compose 均 `config --quiet` 通过；没有 build/up/health/Nginx |
+| 同脚本 `-Profile online`（无本次授权） | 0 | online 明确 `SKIPPED`，七层均显式汇总；没有执行 `verify-online.ps1`、读取 Key 或发起网络 |
+| PowerShell parser + 当前环境 PyYAML `safe_load` | 0 | `verify.ps1` 无语法错误；workflow YAML 可解析且包含 7 个 job。PyYAML 只用于本地语法检查，不是新增项目依赖 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 最终 handoff 后 52 个稳定任务、149 个 Markdown 文件通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有 Git LF/CRLF 工作树提示 |
+
+### 失败尝试、跳过与警告
+
+- MCP profile 首轮在受控沙箱因拒绝写 `mcp-servers/knowledge-server/build/index.js` 返回
+  `TS5033`/exit 1；脚本正确汇总 MCP `FAILED` 且没有成功文案。同一 profile 经授权在沙箱外
+  11 项通过。
+- frontend profile 首轮在受控沙箱因 Vite 子进程 `spawn EPERM` 返回 exit 1；脚本正确汇总
+  frontend `FAILED`。同一 profile 经授权在沙箱外 12 项和 build 通过；不是 Node engine 问题，
+  当前无需切换 nvm。
+- 前两次长 PostgreSQL 执行的终端桥只交付部分输出，未作为成功证据；改用持续 session polling
+  后同一 profile 明确退出 0、120 项通过并输出最终汇总。
+- 保留既有 Starlette/httpx 弃用提示、asyncio 慢任务诊断、故障注入 warning、数据库不可达
+  负向 timeout 和一项 Windows symlink 条件跳过；没有升级依赖或执行 `npm audit fix`。
+- 七层未被当前单层 profile 选中时都明确显示 `SKIPPED`。online 无本次授权是 policy skip，
+  不是 Provider E4 或 Provider 失败。
+
+### CI 与安全边界
+
+- workflow 只有 `contents: read`，不使用 `pull_request_target`，不引用 `${{ secrets.* }}`，
+  online-policy job 不传 `-AuthorizedOnline`。PostgreSQL job 的 DSN 只指向该 job 的 localhost
+  trust service。
+- Windows job 对齐现有 `.venv/Scripts/python.exe` 和 Playwright 配置；PostgreSQL/Docker job
+  使用 Ubuntu，脚本同时解析 `.venv/bin/python`。Node 固定为已验证的 22.16.0。
+- Docker 层只检查 Compose 配置，不构建镜像、不启动/停止容器、不验证 migration、health、
+  readiness、Nginx SSE 或重启；这些仍属于 M13-T4。
+- 本地命令和静态 workflow policy 是 E3/code-complete 证据，不是 GitHub-hosted runner 实跑。
+  远程 Git/push 需要用户另行授权；在远程七 job 成功记录落盘前不得标记 verified 或关闭
+  `KI-008`。
+
+### 结论
+
+- M13-T3 的脚本、失败/跳过合同、本地七层入口、无密钥 workflow 配置和工程文档已落盘，
+  本地可执行层全部通过，达到 `code_complete`。
+- 下一原子动作不是 M13-T4；应先取得远程 Git/push 授权、实际运行七个 CI job 并记录结果。

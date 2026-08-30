@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-08-29，Asia/Shanghai
+- 更新时间：2026-08-30，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`892d863`
+- 最近已确认实现提交：`57f0c8b`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -54,7 +54,8 @@
 - M11-T6 第二纵切验证基线提交：`f0e4899`；实现提交：`0b4e1d9`；验证记录：`V-20260827-001/002`
 - M12-T4 实现提交：`8610f06`；M12-T5 实现提交：`0f81b0a`；M12-T6 验证基线：`0f81b0a`；验证记录：`V-20260828-013`
 - M13-T1 验证基线：`3fcc91b`；验证记录：`V-20260828-014`
-- M13-T2 验证基线：`892d863`；验证记录：`V-20260829-001`
+- M13-T2 验证基线：`892d863`；实现提交：`57f0c8b`；验证记录：`V-20260829-001`
+- M13-T3 验证基线：`57f0c8b`；验证记录：`V-20260830-001`
 - 远程仓库：未配置
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -62,14 +63,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M13-T2` |
-| 状态 | `verified` |
-| 目标 | 统一稳定错误、retryable、指数退避、次数/时间预算和取消等待，并证明无持久幂等键的副作用工具不会自动重试 |
-| 设计依据 | 实施计划 M13-T2、`ADR-0035`、`docs/m13-reliability.md` |
-| 执行协议 | A 类共享 Runtime/ToolRegistry 公共契约、取消/副作用与错误安全；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | 新增中央稳定错误/安全重试策略；Manual、Agents SDK、LangGraph 采用显式有界退避；共享 Registry 仅重试无副作用工具；MCP 错误细分；退避响应 Run 取消/deadline 并进入脱敏 Trace/metric。未新增依赖、migration 或副作用自动重试 |
-| 验证 | `V-20260829-001`（基线 `892d863`）：策略/设置最终 33 项、三 Runtime 与观测聚焦 94 项、MCP STDIO 7 项、持久取消/Store/ToolExecution 100 项、后端全量 666 项通过且 1 项既有 symlink 跳过 |
-| 下一动作 | M13-T2 已 `verified`。下一任务是 M13-T3 分层统一验证与 CI：先审计现有 `scripts/verify.ps1` 的成功/失败/跳过汇总语义，不提前进入 Docker/Nginx 部署验收 |
+| 任务 ID | `M13-T3` |
+| 状态 | `code_complete` |
+| 目标 | 把 offline、MCP、PostgreSQL、frontend、E2E、Docker 和 online opt-in 固定为不会误报成功的统一验证与 CI 门 |
+| 设计依据 | 实施计划 M13-T3、`ADR-0036`、`docs/m13-verification-ci.md` |
+| 执行协议 | A 类公共验证/CI 合同 + C 类真实数据库、浏览器与远程 runner 证据；见 `docs/continuity/course-delivery-playbook.md` |
+| 当前修改 | `verify.ps1` 增加七层 profile、显式汇总和失败非零；新增只读权限、无仓库 secret 的七 job workflow 与 4 项入口 policy 测试。未安装/升级依赖、未读取 Key/用户 `.env`、未执行在线调用，也未进入 M13-T4 镜像/Nginx |
+| 验证 | `V-20260830-001`（基线 `57f0c8b`）：offline 670 项/1 skip、MCP 11 项、PostgreSQL/pgvector 120 项、Vue 12 项+build、Chromium 2 项、两份 Compose config 与入口 policy 4 项通过；在线无授权明确 skip |
+| 下一动作 | 远程仓库仍未配置。取得用户对远程 Git/push 的单独授权后配置仓库并实际运行七个 CI job；成功记录落盘前 M13-T3 保持 `code_complete`、`KI-008` 保持 mitigated，不进入依赖它的 M13-T4 |
 
 ## 里程碑状态
 
@@ -82,12 +83,12 @@
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；当时保留的进程重启/PostgreSQL/ToolExecution 缺口已由 M11/M12 承接，`KI-004` 现已关闭 |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
-| M13 生产工程闭环 | `in_progress` | M13-T1、M13-T2 `verified`；M13-T3–T4 尚未开始 |
+| M13 生产工程闭环 | `in_progress` | M13-T1、M13-T2 `verified`；M13-T3 本地代码与分层门 `code_complete`、等待远程 CI 实跑；M13-T4 尚未开始 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M13-T2 当前无工程阻塞；稳定错误与重试策略默认离线，副作用工具在没有持久幂等/结果仲裁证明时保持零自动重试。
+- M13-T3 本地工程无代码阻塞；远程 Git 尚未配置，不能在未授权时 push 或执行真实 GitHub Actions，因此当前状态为 `code_complete`。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12 验收，但须由 M13 独立升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 - 远程 Git 地址尚未提供；不阻塞本地提交。
@@ -97,6 +98,9 @@
 - M13-T1 没有实现 OpenTelemetry/vendor exporter、跨服务 propagation、逐调用 Provider usage、版本化价格表或 `max_cost_usd` 硬门；未知费用保持 `null/unknown`，`KI-018` 只降为 mitigated。
 - 单事件缺少可靠成对边界时，细分 span 的 `duration_ms` 保持 `null`；当前不会用 Run 总耗时冒充纯模型或工具耗时。
 - M13-T2 没有重跑真实 PostgreSQL integration；数据库故障与持久取消引用适配器无关 Store/Coordinator/ToolExecution 回归及 M11 已验收持久协议。生产连接结果未知、多进程终态竞争和硬进程中断仍由 `KI-015/KI-016` 跟踪。
+- M13-T3 的本地 profile 已执行真实 localhost integration PostgreSQL/pgvector、Chromium 和
+  Compose 配置，但 `.github/workflows/verification.yml` 尚未在 GitHub-hosted runner 实跑；
+  workflow 文件存在、YAML 可解析和静态无 secret policy 不能冒充远程 CI 成功。
 - M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
 - pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
 - M11-T7 首次外部尝试见 `V-20260827-003`：Key 仅以安全布尔值确认存在；最终 Provider 返回 `embedding_provider_quota_or_rate_limited`，未发生成功向量写入、查询、usage 或费用记录。该错误码不能区分项目配额耗尽与短期限流，须由用户在平台恢复后重新授权；初始 SOCKS client 初始化失败也不是 Provider 兼容证据。
@@ -231,4 +235,4 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-29-m13-t2-reliability-verified.md`，再核对 `V-20260829-001`、`ADR-0035`、`docs/m13-reliability.md` 和实施计划 M13-T2。M13-T2 已 verified；`retryable` 不是重放授权，无持久幂等键的副作用工具继续零自动重试。下一原子任务为 M13-T3；开始前审计现有统一验证脚本的分层、失败和跳过汇总，不提前进入 M13-T4 部署。未经新授权不升级依赖、不读取 Key/DSN、不执行在线/付费调用或配置远程 Git。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与 `docs/continuity/handoffs/2026-08-30-m13-t3-layered-ci-code-complete.md`，再核对 `V-20260830-001`、`ADR-0036`、`docs/m13-verification-ci.md` 和实施计划 M13-T3。M13-T3 本地实现为 code complete，但远程 workflow 未运行，`KI-008` 未关闭；取得用户对远程 Git/push 的单独授权并记录七个 CI job 成功前，不进入依赖它的 M13-T4。未经新授权不升级依赖、不读取 Key/用户 `.env`、不执行在线/付费调用或配置远程 Git。

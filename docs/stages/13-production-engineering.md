@@ -34,20 +34,26 @@
 
 ## 计划验证入口
 
-最终脚本应提供以下清晰 profile；名称进入代码后不得随意漂移：
+脚本提供以下清晰 profile；名称进入代码后不得随意漂移：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -Profile offline
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -Profile integration
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -Profile e2e
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -Profile docker
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile offline
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile mcp
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile integration
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile frontend
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile e2e
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile docker
 ```
 
-在线 profile 单独授权：
+以上命令落盘后统一使用正斜杠路径；`integration` 是 `postgresql` 的稳定别名。在线 profile
+没有本次授权时只显式汇总为 `SKIPPED`，普通 CI 不传入密钥或授权开关：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 -Suite all
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile online
 ```
+
+真实在线调用仍需用户对本次执行重新授权，再显式增加 `-AuthorizedOnline`；不得从旧会话、Key
+存在或 CI secret 推断授权。
 
 ## 可观测性最低字段
 
