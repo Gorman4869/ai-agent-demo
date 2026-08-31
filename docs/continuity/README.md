@@ -8,7 +8,7 @@
 - 已确认设计：`docs/superpowers/specs/2026-07-16-ai-agent-transition-completion-design.md`
 - 实施范围：保留 M0–M7，新增 C0 与 M8–M14
 - Git 分支：`main`
-- 远程仓库：尚未配置
+- 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`
 - 在线模型：默认关闭，付费验证必须显式授权
 - 课程交付模式：课程优先、里程碑验收
 

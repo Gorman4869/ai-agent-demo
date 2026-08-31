@@ -4050,3 +4050,61 @@
 - M13-T3 的脚本、失败/跳过合同、本地七层入口、无密钥 workflow 配置和工程文档已落盘，
   本地可执行层全部通过，达到 `code_complete`。
 - 下一原子动作不是 M13-T4；应先取得远程 Git/push 授权、实际运行七个 CI job 并记录结果。
+
+## V-20260831-001：M13-T3 首次远程 CI 失败与本地修复证据
+
+- 任务：`M13-T3 / code_complete`
+- 时间：2026-08-31，Asia/Shanghai
+- 验证目标：读取首次 GitHub-hosted workflow 的真实失败，修复 offline 干净 runner 准备和
+  PostgreSQL graceful-close 测试时序，不改变生产租约合同。
+- 验证基线：提交 `77492f0`；本记录覆盖该提交上的远程 run 与其后的本地修复 worktree。
+- 任务等级：A 类公共 CI 合同 + C 类 GitHub-hosted runner 和 localhost PostgreSQL。
+- 远程运行：`https://github.com/Gorman4869/ai-agent-demo/actions/runs/33362304137`，run `#1`。
+  未读取仓库 secret、用户 Key 或 `.env`，online-policy 未执行在线 Provider，费用 0。
+
+### 首次远程结果
+
+| job | 结果 | 证据 |
+| --- | --- | --- |
+| MCP、frontend、E2E、Docker、online-policy | success | 五个 job 在 GitHub-hosted runner 完成；online-policy 只验证无授权 skip |
+| offline | failure | `test_catalog_owns_typescript_command_and_tool_policy` 失败；两个 TypeScript STDIO E2E 报错。干净 checkout 只有 `npm ci`，被 Git 忽略的 `build/index.js` 尚未生成 |
+| PostgreSQL | failure | 120 项中 1 项失败：`test_close_waits_for_active_run_before_closing_persistence`；Run 已完成，但期望租约数 0、实际 1 |
+
+### 本地修复
+
+- offline job 在 backend discovery 前显式执行 `npm.cmd run build`；入口 policy 测试把安装、构建
+  和 offline 执行限定在同一个 job，防止本机残留 build 再次掩盖干净 runner 缺口。
+- graceful-close 测试移除 100ms TTL/20ms heartbeat 覆盖，恢复 production composition 默认
+  租约时长。相邻 close-timeout/recovery 测试继续保留短 TTL；生产 `RunLeaseStore.release()`、
+  token/version/expiry 合同和业务代码未改。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_verification_entrypoint -v` | 0 | 4 项通过；新增 offline job 内 build policy 断言 |
+| `npm.cmd run build`（`mcp-servers/knowledge-server`） | 0 | TypeScript MCP `tsc` 构建通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_mcp_client_e2e backend.tests.test_mcp_tool_adapter -v`（沙箱内首轮） | 1 | 11 项中 3 项通过、8 项因子进程 `process_unavailable` 报错；这是受控沙箱拒绝子进程，不计为代码失败 |
+| 同一 MCP 命令（沙箱外） | 0 | 11 项全部通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.postgres_store_integration.PostgresExecutionCompositionProcessTest.test_close_waits_for_active_run_before_closing_persistence -v`（仅子进程注入 localhost integration DSN） | 0 | 失败单项通过，1 项/0.708s |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile postgresql`（仅子进程注入 localhost integration DSN） | 0 | PostgreSQL/pgvector 120 项通过；1 passed、6 skipped、0 failed |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile offline`（沙箱外） | 0 | backend 670 项通过、1 项既有 Windows symlink 条件跳过；代码 Agent Demo 与 `pip check` 通过；1 passed、6 skipped、0 failed |
+
+### 失败、警告与未验证范围
+
+- Docker API 在受控沙箱内被拒绝；同一只读检查在沙箱外确认
+  `ai-agent-demo-integration-postgres-1` healthy，映射 `127.0.0.1:55433`。
+- PostgreSQL 完整门保留既有不可达端口负向用例的 connection timeout；offline 保留
+  Starlette/httpx 弃用提示、故障注入 warning 和 1 项 Windows symlink skip。
+- offline 中 Provider 风格 URL 来自 `MockTransport` 固定测试，没有真实网络调用。
+- 没有运行 `npm ci`、安装/升级依赖、读取 Key/用户 `.env`、执行在线模型、构建生产镜像、
+  启动/停止 Compose 或进入 M13-T4。
+- 本地修复尚未 push，远程 run `#1` 仍是失败事实；没有修复提交上的 GitHub-hosted runner
+  证据，因此 M13-T3 不能标记 `verified`，`KI-008` 不能关闭。
+
+### 结论
+
+- 两个远程失败均已由最小本地修改覆盖，相关定向与完整层回归通过；当前达到本地
+  `code_complete`。
+- 下一原子动作是提交本地修复。用户明确要求暂不 push；取得新的 push 授权后再触发远程复跑，
+  只有七个 job 全绿且 online-policy 明确 skip 才能完成 M13-T3。

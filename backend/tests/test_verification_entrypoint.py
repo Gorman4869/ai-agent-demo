@@ -63,7 +63,12 @@ class VerificationEntrypointTest(unittest.TestCase):
         ):
             self.assertIn(f"-Profile {profile}", content)
         self.assertIn("contents: read", content)
-        self.assertIn("Install offline MCP dependencies", content)
+        offline_job = content[
+            content.index("  offline:") : content.index("\n  mcp:")
+        ]
+        self.assertIn("Install offline MCP dependencies", offline_job)
+        self.assertIn("Build offline MCP server", offline_job)
+        self.assertIn("run: npm.cmd run build", offline_job)
         self.assertNotIn("secrets.", content)
         self.assertNotIn("pull_request_target", content)
         self.assertNotIn("-AuthorizedOnline", content)

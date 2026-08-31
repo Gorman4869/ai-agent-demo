@@ -29,6 +29,9 @@ jobs:
       - name: Install offline MCP dependencies
         working-directory: mcp-servers/knowledge-server
         run: npm.cmd ci
+      - name: Build offline MCP server
+        working-directory: mcp-servers/knowledge-server
+        run: npm.cmd run build
       - name: Run offline layer
         shell: pwsh
         run: ./scripts/verify.ps1 -Profile offline

@@ -1755,8 +1755,6 @@ class PostgresExecutionCompositionProcessTest(
             POSTGRES_DSN,
             runtimes={"manual": runtime},
             coordinator_quiesce_timeout_ms=1_000,
-            lease_ttl_ms=100,
-            lease_heartbeat_interval_ms=20,
             recovery_scan_interval=timedelta(seconds=30),
         )
         run = await _create_composition_run(

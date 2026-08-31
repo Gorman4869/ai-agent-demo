@@ -964,8 +964,11 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 本地工作树已通过 offline 670 项（1 项既有 Windows symlink 跳过）、MCP 11 项、真实
   PostgreSQL/pgvector 120 项、Vue 12 项与 build、Chromium E2E 2 项及两份 Compose 配置；
   failure/skip/CI policy 入口测试 4 项通过。
-- 远程仓库仍未配置，GitHub runner 尚无实际 workflow run；因此本任务保持 `code_complete`，
-  `KI-008` 继续 mitigated。远程七个 job 有可引用成功记录后才能改为 verified/closed。
+- 首次远程 GitHub Actions run `#1` 在提交 `77492f0` 上真实执行：MCP、frontend、E2E、Docker
+  和 online-policy 成功；offline 因干净 runner 缺少 TypeScript MCP build、PostgreSQL 因
+  graceful-close 测试复用 100ms 租约而失败。最小修复已在本地通过相同关键层，等待推送和远程
+  复跑；因此本任务保持 `code_complete`，`KI-008` 继续 mitigated。远程七个 job 有可引用成功
+  记录后才能改为 verified/closed。
 - 决策见 `ADR-0036`，工程入口见 `docs/m13-verification-ci.md`；没有构建镜像、启动服务、
   验证健康或 Nginx SSE，也没有读取 Key、执行在线调用或进入 M13-T4。
 
