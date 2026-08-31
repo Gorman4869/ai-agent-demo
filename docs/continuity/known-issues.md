@@ -12,7 +12,7 @@
 | KI-006 | high | closed | M11 | M11-T6 在未改动 `m11-rag-v1` canonical 摘要、50 条、`top_k=3` 或冻结阈值的前提下，完成真实 pgvector cosine/HNSW 对照；sparse 为 1.0/1.0/1.0，评测专用离线三维课程主题 Embedding 的 pgvector 为 0.98/0.946667/0.98。剩余 1 条漏召回保留在失败分析中；在线 Provider、生产容量与跨进程缓存不属于本问题 | `V-20260809-001/003/004/006`：pgvector/Embedding 工程边界；`V-20260820-011`：固定数据集与 sparse E3；`V-20260827-001`：真实 pgvector 固定对照和阈值通过。在线 E4 由 M11-T7 独立记录 |
 | KI-007 | high | closed | M12 | durable SSE、同 Run citations/usage、Vue durable-only 状态机、服务端取消、有界重连和标签页恢复已完成；M12-T5 又用 12 项单测和真实 Chromium 固定分帧、无效 JSON、重复/缺口、Abort、首次断线续传、刷新与审批恢复 | `V-20260828-009/010/011/012`：后端 durable 主链、前端状态机和真实浏览器恢复均通过 |
 | KI-008 | high | closed | M12–M13 | M13-T3 已把 offline、MCP、PostgreSQL、frontend、E2E、Docker 和 online opt-in 汇总为 fail-closed profile 与七个无仓库 secret 的 CI job；首次远程 run `#1` 的 offline/PostgreSQL 失败被保留并完成最小修复，修复提交 `38fd696` 上的 run `#2` 随后七个 job 全部成功。online-policy 只验证未授权 skip，不是 Provider 调用 | `V-20260830-001`：本地分层门；`V-20260831-001`：远程失败与本地修复；`V-20260831-002`：GitHub Actions run `#2` 七个 job 全绿 |
-| KI-009 | medium | open | M13 | Compose 仅配置通过，镜像和容器健康未验证 | Docker 构建、健康和 Nginx SSE 验证通过 |
+| KI-009 | medium | closed | M13 | M13-T4 已提供独立 password-authenticated pgvector 部署 Compose、运行时 secret 文件、显式 migration/seed、健康顺序和隔离验收脚本；实际构建 backend/frontend 镜像，四服务健康，120 项 PostgreSQL/pgvector 集成、Nginx durable SSE、backend restart 恢复及精确资源清理通过 | `V-20260831-003`：最终随机 project 完整通过，清理后只剩既有 55433 integration 容器 healthy |
 | KI-010 | high | open | M14 | 浏览器审批未绑定完整 URL/计划，且缺少私网、DNS 与重定向防护 | 真实浏览器安全和 SSRF 测试通过 |
 | KI-011 | high | open | M13–M14 | 代码 Agent 在截断前完整缓冲输出，超时未证明清理进程树 | 有界流式输出和进程树测试通过 |
 | KI-012 | medium | closed | C0 | M1 文档零依赖命令、硬编码 Python 路径、测试数量与当前实现漂移 | `V-20260716-001`：删除硬编码路径和固定测试数；禁用 `site-packages` 后 7 项测试与 Demo 通过 |

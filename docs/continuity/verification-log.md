@@ -4155,3 +4155,58 @@
 - 本次没有构建生产镜像、启动服务、执行 migration/seed、检查健康、验证 Nginx SSE、生产容量
   或在线 Provider。上述范围仍属于 M13-T4 或独立在线授权，不因 CI 全绿而自动成立。
 - 下一原子任务为 M13-T4；先只读恢复现有部署产物，再确定最小实际部署纵切。
+
+## V-20260831-003：M13-T4 Docker/pgvector/Nginx 实际部署验收
+
+- 任务：`M13-T4 / verified`
+- 时间：2026-08-31，Asia/Shanghai
+- 验证目标：实际构建并启动 password-authenticated pgvector、显式 seed、FastAPI 与 Nginx，
+  验证 migration、数据库集成、durable SSE、backend restart 恢复和验证资源清理。
+- 验证基线：`15fdf2b6ae7d20127f31b705d566fa8876a1122f`；本记录覆盖其后的 M13-T4
+  未提交 worktree，提交 ID 在下一条连续性记录补记。
+- 任务等级：A 类 Settings/部署公共合同 + C 类真实 Docker、pgvector、Nginx 与 Windows host。
+- 授权边界：用户明确允许本次 Docker 验收。首次从 registry 获取固定基础镜像，并在镜像内安装
+  现有 requirements/lockfile；未修改依赖或 lockfile。没有读取用户 `.env`、Provider Key，未调用
+  在线模型，Provider 费用 0。
+
+### 最终实际结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| PowerShell parser 检查 `scripts/verify-deployment.ps1` | 0 | 脚本无语法错误 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_deployment_contract backend.tests.test_deployment_seed backend.tests.test_settings -q` | 0 | 33 项通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-deployment.ps1`（最终 project `ai-agent-demo-m13-31796-2e35bbd1`） | 0 | build/up、四服务顺序、migration/seed、数据库、SSE、restart recovery 和 cleanup 全部通过 |
+| 部署脚本内 `backend.tests.postgres_store_integration backend.tests.pgvector_integration -q` | 0 | 120 项通过，使用两个独立测试库，未清理部署库 |
+| 数据库 SQL 断言 | 0 | app migrations=6、knowledge migrations=1、course seed=1、vector extension=1 |
+| Nginx durable Run/SSE | 0 | `/api/durable/runs` 创建成功，`text/event-stream` 含 started→completed 正序事件 |
+| backend restart/recovery | 0 | 对同一 backend 容器执行 restart，backend 与 Nginx 恢复 healthy，同一 Run 仍为 completed |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（沙箱外） | 0 | offline/MCP/frontend 三层通过；backend 681 项/1 skip，MCP 11 项，Vue 12 项和 build 通过 |
+| Docker 资源只读复核 | 0 | 无 `ai-agent-demo-m13-*` 容器、卷、网络；既有 integration 容器在 55433 healthy |
+
+### 失败、修复与警告
+
+- 首次真实运行镜像已 build，但本机 Compose 只支持 file secret，拒绝
+  `secrets.environment`；project 完整清理后改为仓库外临时 secret 文件。
+- 第二次 seed 成功，backend 因镜像未包含根目录 `skills/` 报 `SkillCatalogError: invalid_root`；
+  Dockerfile 最小补入该只读目录。
+- 第三次四服务均 healthy，但 `/ui-health` 的换行被 PowerShell 误判；对纯文本 Trim 后通过。
+- 初版 restart 后的 `compose up --wait` 会 recreate backend/seed；最终版本取消第二次 up，只轮询
+  restart 后健康，避免把 recreate 冒充 restart。
+- 最终版本首次运行时，120 项中一个 recovery 子进程因 psycopg transaction rollback stderr 与
+  connection timeout 失败；相同最终脚本重跑 120 项全部通过。该非确定性失败保留，重复出现时
+  继续由 `KI-016` 跟踪，不能以最终成功删除失败事实。
+- 完整默认门的沙箱内首轮以后端 681 项中的 35 个 Windows temp ACL error 和 2 个 MCP 子进程
+  断言失败退出 1；相同命令获沙箱外权限后完整退出 0。
+- 最终数据库门仍输出既有不可达连接 `pool-255 connection timeout expired` 和
+  Starlette/httpx deprecation warning；unittest 最终为 120 项 OK。镜像首次 `npm ci` 继续报告
+  `KI-027` 的两项既有 advisory，未运行 `npm audit fix`。
+
+### 结论与边界
+
+- M13-T4 的镜像、secret file、migration/seed、健康、真实数据库、Nginx SSE、同容器 restart
+  恢复和资源清理都有可复现证据，达到 `verified`；`KI-009` 关闭。
+- 构建后的 backend/frontend 本地镜像保留；本次随机 project 的容器、网络、卷和临时 secret
+  文件已清理，M11 55433 integration 未受影响。
+- 本结论不包含 TLS、备份恢复、高可用、外部 secret manager、生产容量、公网暴露、在线
+  Provider或默认 Context 的持久 pgvector 接线。
+- 下一原子任务为 M13-T5，只读恢复 ControlledCodeAgent 资源和进程树安全边界。

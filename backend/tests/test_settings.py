@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -108,6 +109,57 @@ class SettingsTest(unittest.TestCase):
             },
             settings.safe_summary()["persistence"],
         )
+
+    def test_postgres_reads_dsn_from_an_explicit_runtime_secret_file(self) -> None:
+        dsn = "postgresql://private-user:private-pass@postgres/private-db"
+        secret_path = Path(__file__).resolve()
+        with patch.object(Path, "read_text", return_value=f"{dsn}\n"):
+            settings = Settings.from_environment(
+                {
+                    "AI_AGENT_PERSISTENCE": "postgres",
+                    "AI_AGENT_POSTGRES_DSN_FILE": str(secret_path),
+                }
+            )
+
+        self.assertEqual(
+            dsn,
+            settings.persistence.postgres_dsn.get_secret_value(),
+        )
+        self.assertNotIn(dsn, repr(settings))
+        self.assertNotIn(dsn, settings.model_dump_json())
+        self.assertNotIn(dsn, str(settings.safe_summary()))
+
+    def test_postgres_secret_file_source_fails_closed_without_leaking(self) -> None:
+        missing_path = str(Path(__file__).resolve())
+        environments = (
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN": (
+                    "postgresql://course@postgres/agent_test"
+                ),
+                "AI_AGENT_POSTGRES_DSN_FILE": missing_path,
+            },
+            {
+                "AI_AGENT_PERSISTENCE": "postgres",
+                "AI_AGENT_POSTGRES_DSN_FILE": "relative-secret",
+            },
+        )
+
+        for environment in environments:
+            with self.subTest(environment=environment):
+                with self.assertRaises(SettingsError) as raised:
+                    Settings.from_environment(environment)
+                self.assertNotIn(missing_path, str(raised.exception))
+
+        with patch.object(Path, "read_text", side_effect=OSError):
+            with self.assertRaises(SettingsError) as raised:
+                Settings.from_environment(
+                    {
+                        "AI_AGENT_PERSISTENCE": "postgres",
+                        "AI_AGENT_POSTGRES_DSN_FILE": missing_path,
+                    }
+                )
+        self.assertNotIn(missing_path, str(raised.exception))
 
     def test_mcp_server_selectors_and_timeout_are_parsed(self) -> None:
         settings = Settings.from_environment(
@@ -521,6 +573,7 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("\nAI_AGENT_MCP_REQUEST_TIMEOUT_MS=5000\n", content)
         self.assertIn("\nAI_AGENT_PERSISTENCE=memory\n", content)
         self.assertIn("\nAI_AGENT_POSTGRES_DSN=\n", content)
+        self.assertIn("\nAI_AGENT_POSTGRES_DSN_FILE=\n", content)
         self.assertIn("\nOPENAI_API_KEY=\n", content)
         self.assertIn("\nOPENAI_MODEL=\n", content)
         self.assertIn("\nAI_AGENT_EMBEDDING_PROVIDER=offline\n", content)

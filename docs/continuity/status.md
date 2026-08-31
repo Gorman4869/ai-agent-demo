@@ -58,6 +58,7 @@
 - M13-T3 验证基线：`57f0c8b`；实现提交：`77492f0`；验证记录：`V-20260830-001`
 - M13-T3 首次远程 CI 基线：`77492f0`；失败修复验证：`V-20260831-001`
 - M13-T3 CI 修复提交：`38fd696`；远程成功验证：`V-20260831-002`
+- M13-T4 验证基线：`15fdf2b`；验证记录：`V-20260831-003`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -65,14 +66,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M13-T4` |
+| 任务 ID | `M13-T5` |
 | 状态 | `planned` |
-| 目标 | 实际构建 Docker 镜像、启动 Compose 服务、执行 migration/seed 与健康检查，并通过 Nginx 验证 durable SSE |
-| 设计依据 | 实施计划 M13-T4；前置门 M13-T3、`ADR-0036` 与 `docs/m13-verification-ci.md` |
-| 执行协议 | A 类部署公共合同 + C 类真实 Docker/pgvector/Nginx 环境；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M13-T3 修复提交 `38fd696` 已推送，远程 run `#2` 七个 job 全绿；`V-20260831-002` 已记录，`KI-008` 已关闭。M13-T4 尚未修改代码、构建镜像或启动/停止服务 |
-| 验证 | 前置任务 M13-T3 已 `verified`：本地分层门见 `V-20260830-001/20260831-001`，GitHub-hosted 七 job 成功见 `V-20260831-002` |
-| 下一动作 | 只读检查现有 Dockerfile、Compose integration profile、migration/seed、health 与 Nginx/SSE 配置，确定 M13-T4 的最小实际部署纵切和状态变更边界 |
+| 目标 | 为受控代码 Agent 增加有界流式 stdout/stderr、子进程树清理、固定环境、资源预算和审计结果 |
+| 设计依据 | 实施计划 M13-T5；`KI-011`、`KI-016`、`KI-017` 与现有 ControlledCodeAgent 合同 |
+| 执行协议 | A 类进程/审计公共合同 + C 类 Windows/Linux 子进程故障验证；见 `docs/continuity/course-delivery-playbook.md` |
+| 当前修改 | M13-T4 已以 `V-20260831-003` verified：镜像、secret、migration/seed、四服务健康、120 项数据库集成、Nginx SSE、同 backend 容器 restart 恢复和精确清理均通过；`KI-009` 已关闭 |
+| 验证 | M13-T4 最终真实 project `ai-agent-demo-m13-31796-2e35bbd1` 完整通过；完整默认门后端 681 项（1 skip）、MCP 11 项、Vue 12 项/build 通过，清理后既有 55433 integration 仍 healthy |
+| 下一动作 | 只读恢复 ControlledCodeAgent 的进程启动、输出缓冲、timeout/cancel、环境 allowlist、审计和 Windows 进程树边界，确定 M13-T5 最小纵切 |
 
 ## 里程碑状态
 
@@ -85,15 +86,15 @@
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；当时保留的进程重启/PostgreSQL/ToolExecution 缺口已由 M11/M12 承接，`KI-004` 现已关闭 |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
-| M13 生产工程闭环 | `in_progress` | M13-T1、M13-T2、M13-T3 `verified`，`KI-008` 已关闭；M13-T4 为下一任务，尚未开始实际部署验收 |
+| M13 生产工程闭环 | `in_progress` | M13-T1–M13-T4 `verified`，`KI-008/KI-009` 已关闭；M13-T5 为下一任务，代码 Agent 流式输出和进程树安全尚未验收 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M13-T4 尚未开始，当前没有已确认的代码阻塞；Docker Engine、镜像构建、服务健康、migration 和 Nginx SSE 仍需按任务实际验证。
+- M13-T5 尚未开始，当前没有已确认的代码阻塞；`KI-011` 的完整输出缓冲和进程树清理仍需按任务实际验证。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12 验收，但须由 M13 独立升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
-- M13-T3 连续性闭环将形成新的本地文档提交；该新提交未经单独授权不会 push。
+- M13-T4 连续性闭环将形成新的本地提交；该提交与已有本地文档提交均未经单独授权不会 push。
 
 ## 未验证范围
 
@@ -103,7 +104,13 @@
 - M13-T3 的首次 GitHub-hosted run `#1` 已真实执行但 offline/PostgreSQL 失败；修复提交
   `38fd696` 上的 run `#2` 七个 job 全部成功。该结果只证明当前 workflow 的分层 runner 门、
   localhost PostgreSQL、浏览器 E2E 与 Compose 配置检查，不证明生产镜像、服务健康、migration、
-  Nginx SSE 或在线 Provider；这些边界继续由 M13-T4 和独立在线授权承接。
+  Nginx SSE 或在线 Provider；前五项现已由下述 `V-20260831-003` 补齐，在线 Provider仍保持
+  独立授权边界。
+- M13-T4 最终真实部署见 `V-20260831-003`：固定镜像实际 build，password-authenticated
+  pgvector、显式 seed、backend 和 Nginx 均满足健康/完成顺序；120 项数据库集成、Nginx
+  started→completed SSE 和同 backend 容器 restart 后 Run 恢复通过。该结论仍不包含 TLS、备份、
+  高可用、外部 secret manager、生产容量、公网入口、在线 Provider或默认 Context 的持久
+  pgvector 接线。
 - M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
 - pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
 - M11-T7 首次外部尝试见 `V-20260827-003`：Key 仅以安全布尔值确认存在；最终 Provider 返回 `embedding_provider_quota_or_rate_limited`，未发生成功向量写入、查询、usage 或费用记录。该错误码不能区分项目配额耗尽与短期限流，须由用户在平台恢复后重新授权；初始 SOCKS client 初始化失败也不是 Provider 兼容证据。
@@ -238,8 +245,8 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T3 verified handoff，
-再核对 `V-20260831-002`、`ADR-0036`、远程 run `#2` 和实施计划 M13-T4。M13-T3 已 verified，
-`KI-008` 已关闭；下一原子动作是只读恢复现有 Docker/Compose/migration/health/Nginx SSE 边界，
-不得把 M13-T3 的 Compose 配置检查当成 M13-T4 实际部署证据。未经新授权不升级依赖、不读取
-Key/用户 `.env`、不执行在线/付费调用或 push 新的连续性提交。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T4 verified handoff，
+再核对 `V-20260831-003`、`ADR-0037` 和实施计划 M13-T5。M13-T4 已 verified，`KI-009` 已关闭；
+下一原子动作是只读恢复 ControlledCodeAgent 的输出、timeout/cancel、固定环境、资源预算、审计和
+Windows 进程树边界，不得把当前完整缓冲或单进程 timeout 描述成有界流式/整树清理。未经新授权
+不升级依赖、不读取 Key/用户 `.env`、不执行在线/付费调用或 push 新的连续性提交。

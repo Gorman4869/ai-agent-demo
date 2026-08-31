@@ -981,6 +981,29 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 约束：Docker Engine 不可用时状态保持 `code_complete`，不能写 `verified`。
 - 关闭目标：KI-009。
 
+#### M13-T4 实现结果（2026-08-31，verified）
+
+- 新增独立 `deploy/compose.deployment.yaml`：固定 pgvector 版本、password/DSN runtime secret
+  文件、持久卷、显式 one-shot knowledge migration/seed、backend/frontend 健康顺序、localhost
+  端口和受限容器权限；M11 的 trust/tmpfs integration Compose 保持不变。
+- Settings 支持与直接 DSN 互斥的绝对 `AI_AGENT_POSTGRES_DSN_FILE`，读取失败和 seed CLI 只输出
+  无内容稳定错误。`deployment_seed` 固定 offline 三维课程 Embedding，复用版本化 pgvector
+  migration 与幂等 server-owned seed；FastAPI 启动仍不隐式 seed。
+- backend 镜像补入默认 Runtime 启动必需的只读 `skills/`；Nginx 保持 buffering/cache off。
+  `scripts/verify-deployment.ps1` 生成仓库外临时 secret 文件和唯一 project，实际 build/up、健康、
+  两套 migration/seed/vector、独立测试库、SSE started→completed、同 backend 容器 restart 后 Run
+  恢复，并只清理本次容器/网络/卷。
+- 真实验收最终在 project `ai-agent-demo-m13-31796-2e35bbd1` 通过：PostgreSQL/pgvector 120 项
+  通过，Nginx SSE 与 restart recovery 通过；清理复核没有 M13 容器、卷或网络，既有
+  `ai-agent-demo-integration-postgres-1` 继续在 `127.0.0.1:55433` healthy。
+- 前序失败均保留：Compose `secrets.environment` 不兼容、镜像漏复制 `skills/`、PowerShell
+  纯文本健康换行误判，以及一次旧 recovery 子进程 psycopg stderr/timeout 非确定性失败。最终
+  相同 120 项复跑通过；完整默认门在沙箱外以后端 681 项（1 项既有 symlink skip）、MCP 11 项、
+  Vue 12 项和 production build 通过。
+- 决策见 `ADR-0037`，工程入口见 `docs/m13-deployment.md`，验证见 `V-20260831-003`。本任务不含
+  TLS、备份、高可用、外部 secret manager、生产容量、默认 Context 的 pgvector 接线或在线
+  Provider；M13-T4 达到 `verified`，`KI-009` 关闭。
+
 ### M13-T5：代码 Agent 资源与进程安全
 
 - 依赖：M13-T2。

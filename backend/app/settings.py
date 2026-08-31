@@ -5,6 +5,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from decimal import Decimal
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -401,6 +402,11 @@ class Settings(BaseModel):
     ) -> Settings:
         values = os.environ if environment is None else environment
         try:
+            persistence_backend = _read_name(
+                values,
+                "AI_AGENT_PERSISTENCE",
+                "memory",
+            )
             settings = cls(
                 runtime=_read_name(values, "AI_AGENT_RUNTIME", "manual"),
                 model_provider=_read_name(
@@ -548,14 +554,10 @@ class Settings(BaseModel):
                     ),
                 ),
                 persistence=PersistenceSettings(
-                    backend=_read_name(
+                    backend=persistence_backend,
+                    postgres_dsn=_read_postgres_dsn(
                         values,
-                        "AI_AGENT_PERSISTENCE",
-                        "memory",
-                    ),
-                    postgres_dsn=_read_optional_secret(
-                        values,
-                        "AI_AGENT_POSTGRES_DSN",
+                        enabled=persistence_backend == "postgres",
                     ),
                 ),
             )
@@ -641,6 +643,32 @@ def _read_optional_secret(
 ) -> SecretStr | None:
     value = _read_optional_text(environment, name)
     return SecretStr(value) if value is not None else None
+
+
+def _read_postgres_dsn(
+    environment: Mapping[str, str],
+    *,
+    enabled: bool,
+) -> SecretStr | None:
+    direct = _read_optional_secret(environment, "AI_AGENT_POSTGRES_DSN")
+    secret_path = _read_optional_text(environment, "AI_AGENT_POSTGRES_DSN_FILE")
+    if direct is not None and secret_path is not None:
+        raise SettingsError(
+            "configure only one PostgreSQL DSN source"
+        )
+    if secret_path is None or not enabled:
+        return direct
+    path = Path(secret_path)
+    if not path.is_absolute():
+        raise SettingsError("AI_AGENT_POSTGRES_DSN_FILE must be an absolute path")
+    try:
+        value = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        raise SettingsError("AI_AGENT_POSTGRES_DSN_FILE could not be read") from None
+    normalized = value.strip()
+    if not normalized:
+        raise SettingsError("AI_AGENT_POSTGRES_DSN_FILE must not be empty")
+    return SecretStr(normalized)
 
 
 def _normalize_optional_secret_value(value: object, name: str) -> object:
