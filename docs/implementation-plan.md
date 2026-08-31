@@ -1010,6 +1010,16 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：流式有界 stdout/stderr、子进程树清理、固定环境、资源预算和审计结果。
 - 测试：无限输出、超时子进程、嵌套进程、取消、命令拒绝、路径逃逸和 Windows junction 能力说明。
 - 关闭目标：KI-011 的代码执行部分。
+- 实现结果：标准库 `process_runner` 持续排空 stdout/stderr，只保留有界前缀；Windows 使用
+  kill-on-close Job Object，Linux 使用独立 process group，并对进程数、进程树内存和 CPU 做
+  有界采样。timeout、取消、超限、监控失败和正常 parent 退出均收口树清理，结果以安全元数据
+  进入 audit。
+- 验证结果：Windows 与无网络/只读一次性 Linux 容器中的同一 20 项合同均通过（各有 1 项
+  平台能力 skip）；完整 offline 门后端 691 项通过、1 项既有 symlink skip，Demo 与依赖检查
+  通过。决策见 `ADR-0038`，证据见 `V-20260831-005`；M13-T5 达到 `verified`，`KI-011` 关闭。
+- 边界：10ms 资源采样不是 cgroup/seccomp/VM；Windows Job assignment 不是 suspended-create
+  原子绑定，Harness 也不提供默认禁网。完整 executable/argv 继续由服务端审核，恶意代码需要
+  预隔离 worker/container；`KI-016/KI-017` 的 durable 故障和通用同步线程取消仍未关闭。
 
 ### M13-T6：基础压测与故障演练
 

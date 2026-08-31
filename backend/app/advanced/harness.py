@@ -72,6 +72,10 @@ class SafetyBudget:
     def output_bytes(self) -> int:
         return self._output_bytes
 
+    @property
+    def remaining_output_bytes(self) -> int:
+        return self._limits.max_output_bytes - self._output_bytes
+
 
 def content_digest(content: bytes | str) -> str:
     payload = content.encode("utf-8") if isinstance(content, str) else content

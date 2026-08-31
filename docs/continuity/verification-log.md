@@ -4235,3 +4235,56 @@
 - 分支还包含未 push 的 M13-T3 文档提交 `15fdf2b`；本轮没有 push，远程仍停在 `38fd696`。
 - 本锚点文档形成后需再次运行连续性检查并创建本地纯文档提交；该新文档提交的 HEAD 由后续
   会话按 Git 事实恢复，不修改 `cd0f11a` 的实现身份。
+
+## V-20260831-005：M13-T5 代码 Agent 资源与进程树安全验证
+
+- 任务：`M13-T5 / verified`
+- 时间：2026-08-31，Asia/Shanghai
+- 验证目标：把 `ControlledCodeAgent` 从完整输出缓冲/直接子进程 timeout 改为有界持续排空、
+  固定环境、取消感知、进程树清理、CPU/内存/进程数预算和无内容审计，并在 Windows/Linux
+  真实进程上验证。
+- 验证基线：`4c029bb500cf96b1e7647a5c7f9f4631d33cf538`；本记录覆盖其后的 M13-T5
+  未提交 worktree，提交 ID 由下一条连续性记录补记。
+- 任务等级：A 类进程/审计公共安全合同 + C 类 Windows/Linux 子进程故障验证。
+- 环境：Windows host Python 3.12.10；Docker Client/Server 29.3.1；Linux 使用既有本地
+  `ai-agent-demo-backend:local` 镜像，没有 pull。
+- 授权边界：Linux 验证经本次明确授权创建 `--rm`、`--network none`、只读根文件系统、仓库
+  只读挂载的一次性容器。未读取 Key、用户 `.env` 或 DSN，未调用在线 Provider，费用 0；
+  未安装/升级依赖、未切换 Node、未 push。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_code_agent -v`（沙箱内首轮） | 1 | 7 项均在 `TemporaryDirectory` setup 被 Windows Temp ACL 拒绝，未进入业务断言 |
+| 同一命令（沙箱外、修改既有合同后） | 0 | 7 项通过，1 项既有 Windows symlink 能力跳过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_code_agent backend.tests.test_code_agent_process -v`（首轮） | 1 | 16 项中 15 通过、1 个 junction 测试因 cleanup 重复删除报错；生产断言已通过，随后只修测试夹具清理顺序 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_advanced_harness backend.tests.test_code_agent backend.tests.test_code_agent_process -v`（Windows 最终） | 0 | 20 项通过、1 项既有 symlink 能力跳过；真实 junction 用例通过 |
+| `docker run --rm --network none --read-only ... ai-agent-demo-backend:local python -B -m unittest ... -v` | 0 | 同一 20 项在 Linux 通过；仅 Windows junction 用例按平台跳过，容器自动删除 |
+| `./.venv/Scripts/python.exe -B -m backend.app.advanced.code_demo` | 0 | 既有调用方式成功；check 审计为 `windows_job/exited/tree_cleaned=true` |
+| AST 只读解析四个改动 Python 文件 | 0 | `AST OK`；此前 `py_compile` 仅在写 `__pycache__` 时被沙箱 ACL 拒绝，模块已由测试真实导入执行 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1 -Profile offline`（沙箱外） | 0 | backend 691 项通过、1 项既有 symlink skip；Code Agent Demo 与 `pip check` 通过；offline 1 passed、6 skipped、0 failed |
+
+### 覆盖结果
+
+- stdout/stderr reader 持续排空 8 MiB 洪泛并只保留 1,024 bytes；无限输出在运行级 64 bytes
+  capture 耗尽后仍按 timeout 分类，未发生 pipe deadlock。
+- timeout 与运行中取消都清理嵌套 Python 子进程；延迟 marker 未出现。动作前取消不启动命令且
+  不消费 action budget。
+- Windows Job 与 Linux process group 都实际触发 process-count、tree-memory 和 CPU 预算，稳定
+  返回 `command_resource_exceeded` 与具体资源类别；cleanup 结果进入审计。
+- 固定空环境、未知命令拒绝、`../`/symlink/junction 路径逃逸、精确写审批和累计 byte/action
+  预算的既有合同保持通过。
+- 完整 offline 日志里的 OpenAI/DashScope 风格 URL 均来自既有 `MockTransport` 固定测试，不是
+  网络请求或在线兼容证据。
+
+### 结论与边界
+
+- M13-T5 的代码、测试、Windows/Linux 实进程和完整 offline 回归均满足计划，达到
+  `verified`；`KI-011` 关闭。决策见 `ADR-0038`。
+- `KI-016` 仍跟踪 durable HTTP/数据库生产故障和硬进程中断；`KI-017` 仍跟踪普通同步工具
+  thread/executor。受控代码命令的进程隔离不能冒充两者已全部解决。
+- 资源预算按 10ms 应用级采样，可能短暂超限；Windows Job assignment 不是 suspended-create
+  原子绑定。当前没有 cgroup/seccomp/VM、workspace 强隔离或默认禁网，服务端必须继续审核完整
+  executable/argv；恶意 executable 需要预隔离 worker/container。
+- 下一任务为 M13-T6；先恢复现有压测、故障注入、观测指标和部署脚本边界，再确定最小场景集。

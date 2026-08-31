@@ -25,6 +25,7 @@ from backend.app.advanced.harness import (
     SafetyLimits,
     content_digest,
 )
+from backend.app.advanced.process_runner import ProcessResourceLimits
 from backend.app.advanced.multimodal import (
     MultimodalInspection,
     OfflineMultimodalAgent,
@@ -49,6 +50,7 @@ __all__ = [
     "MultimodalInspection",
     "OfflineMultimodalAgent",
     "PolicyViolation",
+    "ProcessResourceLimits",
     "PngLimits",
     "PngMetadata",
     "ReadAction",

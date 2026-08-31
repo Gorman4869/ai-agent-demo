@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import os
-import subprocess
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -13,6 +12,12 @@ from backend.app.advanced.harness import (
     SafetyBudget,
     SafetyLimits,
     content_digest,
+)
+from backend.app.advanced.process_runner import (
+    CancellationSignal,
+    ProcessResourceLimits,
+    ProcessStartError,
+    run_bounded_process,
 )
 
 
@@ -61,6 +66,7 @@ class CommandSpec:
     timeout_seconds: float = 5.0
     max_output_bytes: int = 16_384
     environment: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+    resources: ProcessResourceLimits = field(default_factory=ProcessResourceLimits)
 
     def __post_init__(self) -> None:
         _validate_name(self.name, "command name")
@@ -102,6 +108,8 @@ class CommandSpec:
             if normalized_key in environment_names:
                 raise ValueError("command environment keys must be unique")
             environment_names.add(normalized_key)
+        if not isinstance(self.resources, ProcessResourceLimits):
+            raise ValueError("command resources have an invalid type")
         object.__setattr__(self, "argv", argv)
         object.__setattr__(self, "environment", environment)
 
@@ -132,6 +140,11 @@ class ActionOutcome:
     return_code: int | None = None
     truncated: bool = False
     error_code: str | None = None
+    observed_output_bytes: int = 0
+    termination_reason: str | None = None
+    resource_limit: str | None = None
+    process_scope: str | None = None
+    process_tree_cleaned: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +158,11 @@ class AuditEntry:
     digest: str | None
     byte_count: int
     error_code: str | None = None
+    observed_output_bytes: int = 0
+    termination_reason: str | None = None
+    resource_limit: str | None = None
+    process_scope: str | None = None
+    process_tree_cleaned: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -212,6 +230,7 @@ class ControlledCodeAgent:
         actions: Sequence[CodeAction],
         *,
         context: CodeExecutionContext,
+        cancellation: CancellationSignal | None = None,
     ) -> CodeRunResult:
         """Run actions in order and stop at the first rejected or failed action."""
         self._validate_context(context)
@@ -220,10 +239,18 @@ class ControlledCodeAgent:
         audit: list[AuditEntry] = []
 
         for sequence, action in enumerate(actions, start=1):
-            try:
-                outcome = self._execute(action, context=context, budget=budget)
-            except PolicyViolation as error:
-                outcome = _rejected_outcome(action, error.code)
+            if cancellation is not None and cancellation.is_cancelled:
+                outcome = _rejected_outcome(action, "run_cancelled")
+            else:
+                try:
+                    outcome = self._execute(
+                        action,
+                        context=context,
+                        budget=budget,
+                        cancellation=cancellation,
+                    )
+                except PolicyViolation as error:
+                    outcome = _rejected_outcome(action, error.code)
             outcomes.append(outcome)
             audit.append(
                 AuditEntry(
@@ -234,6 +261,11 @@ class ControlledCodeAgent:
                     digest=outcome.digest,
                     byte_count=outcome.byte_count,
                     error_code=outcome.error_code,
+                    observed_output_bytes=outcome.observed_output_bytes,
+                    termination_reason=outcome.termination_reason,
+                    resource_limit=outcome.resource_limit,
+                    process_scope=outcome.process_scope,
+                    process_tree_cleaned=outcome.process_tree_cleaned,
                 )
             )
             if outcome.status != "succeeded":
@@ -258,13 +290,18 @@ class ControlledCodeAgent:
         *,
         context: CodeExecutionContext,
         budget: SafetyBudget,
+        cancellation: CancellationSignal | None,
     ) -> ActionOutcome:
         if isinstance(action, ReadAction):
             return self._read(action, budget=budget)
         if isinstance(action, WriteAction):
             return self._write(action, context=context, budget=budget)
         if isinstance(action, CheckAction):
-            return self._check(action, budget=budget)
+            return self._check(
+                action,
+                budget=budget,
+                cancellation=cancellation,
+            )
         raise PolicyViolation("action_not_allowed", "action type is not allowed")
 
     def _read(self, action: ReadAction, *, budget: SafetyBudget) -> ActionOutcome:
@@ -330,7 +367,13 @@ class ControlledCodeAgent:
             byte_count=len(payload),
         )
 
-    def _check(self, action: CheckAction, *, budget: SafetyBudget) -> ActionOutcome:
+    def _check(
+        self,
+        action: CheckAction,
+        *,
+        budget: SafetyBudget,
+        cancellation: CancellationSignal | None,
+    ) -> ActionOutcome:
         spec = self._commands.get(action.command_name)
         if spec is None:
             raise PolicyViolation(
@@ -338,21 +381,22 @@ class ControlledCodeAgent:
                 "check command is not in the server allowlist",
             )
         budget.consume()
+        run_output_limit = budget.remaining_output_bytes
+        capture_limit = min(
+            spec.max_output_bytes,
+            run_output_limit,
+        )
         try:
-            completed = subprocess.run(
+            completed = run_bounded_process(
                 spec.argv,
                 cwd=self._workspace_root,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-                timeout=spec.timeout_seconds,
-                check=False,
-                env=dict(spec.environment),
+                environment=dict(spec.environment),
+                timeout_seconds=spec.timeout_seconds,
+                max_output_bytes=capture_limit,
+                resources=spec.resources,
+                cancellation=cancellation,
             )
-        except subprocess.TimeoutExpired as error:
-            raise PolicyViolation("command_timeout", "check command timed out") from error
-        except (FileNotFoundError, PermissionError, OSError) as error:
+        except ProcessStartError as error:
             raise PolicyViolation(
                 "command_start_failed",
                 "check command could not be started",
@@ -361,13 +405,43 @@ class ControlledCodeAgent:
         stdout_bytes, stderr_bytes, truncated = _truncate_output(
             completed.stdout,
             completed.stderr,
-            spec.max_output_bytes,
+            capture_limit,
         )
         budget.consume(
             actions=0,
             output_bytes=len(stdout_bytes) + len(stderr_bytes),
         )
-        status = "succeeded" if completed.returncode == 0 else "failed"
+        error_code: str | None
+        if not completed.process_tree_cleaned:
+            status = "failed"
+            error_code = "command_cleanup_failed"
+        elif not completed.output_read_succeeded:
+            status = "failed"
+            error_code = "command_output_failed"
+        elif completed.termination_reason == "cancelled":
+            status = "cancelled"
+            error_code = "command_cancelled"
+        elif completed.termination_reason == "timeout":
+            status = "failed"
+            error_code = "command_timeout"
+        elif completed.termination_reason == "resource_limit":
+            status = "failed"
+            error_code = "command_resource_exceeded"
+        elif completed.termination_reason == "resource_monitor_failed":
+            status = "failed"
+            error_code = "command_resource_monitor_failed"
+        elif (
+            run_output_limit < spec.max_output_bytes
+            and completed.observed_output_bytes > run_output_limit
+        ):
+            status = "failed"
+            error_code = "output_budget_exceeded"
+        elif completed.return_code != 0:
+            status = "failed"
+            error_code = "command_failed"
+        else:
+            status = "succeeded"
+            error_code = None
         return ActionOutcome(
             action_type="check",
             target=spec.name,
@@ -376,9 +450,14 @@ class ControlledCodeAgent:
             byte_count=len(stdout_bytes) + len(stderr_bytes),
             stdout=stdout_bytes.decode("utf-8", errors="replace"),
             stderr=stderr_bytes.decode("utf-8", errors="replace"),
-            return_code=completed.returncode,
-            truncated=truncated,
-            error_code=None if completed.returncode == 0 else "command_failed",
+            return_code=completed.return_code,
+            truncated=truncated or completed.truncated,
+            error_code=error_code,
+            observed_output_bytes=completed.observed_output_bytes,
+            termination_reason=completed.termination_reason,
+            resource_limit=completed.resource_limit,
+            process_scope=completed.process_scope,
+            process_tree_cleaned=completed.process_tree_cleaned,
         )
 
     def _resolve_workspace_path(self, requested_path: str) -> Path:

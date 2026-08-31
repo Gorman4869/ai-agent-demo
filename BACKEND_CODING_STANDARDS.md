@@ -379,3 +379,15 @@
 - Nginx SSE must use HTTP/1.1 with proxy buffering and cache disabled, a bounded long-read timeout, and the backend `X-Accel-Buffering: no` response. A Compose config check is not build, health, streaming, or restart evidence.
 - The deployment verifier owns a unique `ai-agent-demo-m13-*` project. Database integration runs against separate disposable databases in that project, never the deployment database. Cleanup may remove only that exact project's containers, network, and volume and must not remove images or touch the M11 integration project.
 - The M13 deployment remains an offline single-instance boundary. A seeded pgvector database is not evidence that the default Agent Context uses persistent RAG, and local health/restart does not prove TLS, backup, high availability, external secret management, production capacity, or online Provider behavior.
+
+## 30. Controlled Code Process Boundary
+
+- Keep command selection server-owned: callers choose only a registered `CommandSpec.name`; argv, cwd, environment, timeout, output cap, and `ProcessResourceLimits` never come from an action or model output.
+- Drain stdout and stderr concurrently until EOF while retaining only bounded prefixes. Discard bytes beyond the capture limit without stopping pipe reads; a post-process slice of fully buffered output is prohibited.
+- Preserve deterministic combined output by retaining stdout first and using only the remaining command budget for stderr. Track observed bytes separately from retained/returned bytes.
+- The runner accepts a command as managed only after attaching it to an owned tree: Windows uses a kill-on-close Job Object and Linux uses a new session/process group. Failure to establish or monitor that boundary fails closed; do not silently fall back to an unmanaged `Popen`.
+- Enforce server-owned process-count, tree-memory, CPU, wall-clock, command-output, and run-level action/input/output budgets. Resource accounting is a bounded application-level sampling guard, not cgroup, seccomp, VM, filesystem, or network isolation.
+- Check the shared cancellation signal before an action and throughout command execution. Timeout, cancellation, resource exhaustion, monitor failure, and normal parent exit all converge through bounded process-tree cleanup; a direct child `kill()` is not sufficient.
+- Process audit may contain only stable status/error codes, retained and observed byte counts, termination reason, resource category, process-scope label, cleanup result, target, and digest. Raw stdout/stderr, argv, environment, exception text, paths outside the reviewed target, and process handles stay out of audit/log representations.
+- Unsupported operating systems fail with `command_start_failed`. Windows and Linux require separate real-process verification; success on one platform is not evidence for the other.
+- Windows `Popen` exposes the process handle only after process creation, so Job assignment is not an atomic suspended-create boundary. Keep executables and complete argv server-reviewed; hostile executable startup requires a pre-isolated container or worker.
