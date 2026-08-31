@@ -4288,3 +4288,27 @@
   原子绑定。当前没有 cgroup/seccomp/VM、workspace 强隔离或默认禁网，服务端必须继续审核完整
   executable/argv；恶意 executable 需要预隔离 worker/container。
 - 下一任务为 M13-T6；先恢复现有压测、故障注入、观测指标和部署脚本边界，再确定最小场景集。
+
+## V-20260831-006：M13-T5 实现提交锚点与连续性闭环
+
+- 任务：`M13-T5 / verified`
+- 时间：2026-08-31，Asia/Shanghai
+- 验证目标：把 `V-20260831-005` 已验收的精确 M13-T5 worktree 固定为可恢复提交，并确认
+  文件边界、whitespace 和分支状态。
+- 实现提交：`5525a026f8d038bd2d06720b3bcbb3a57cb6f80c`。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: harden controlled code processes"` | 0 | 12 个 M13-T5 代码、测试、ADR、规约和连续性文件提交为 `5525a02` |
+| `git diff HEAD^ HEAD --check` | 0 | 实现提交无 whitespace 错误 |
+| `git show --stat --oneline --summary HEAD` | 0 | 仅含 process runner、Code Agent/预算/导出、进程安全测试及 M13-T5 文档 |
+| `git status -sb`（实现提交后、锚点文档前） | 0 | `main` 比 `origin/main` ahead 4，工作区干净 |
+
+### 结论与边界
+
+- `5525a02` 是 M13-T5 的可恢复实现锚点；Windows/Linux 和完整 offline 证据继续引用
+  `V-20260831-005`，本记录不重复运行进程或容器测试。
+- 本轮没有 push，远程仍停在 `38fd696`；ahead 4 包含既有 M13-T3/T4 文档/实现与本提交。
+- 本锚点文档形成后只需重跑连续性/diff 检查并创建本地纯文档提交；下一任务保持 M13-T6。
