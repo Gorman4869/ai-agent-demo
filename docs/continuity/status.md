@@ -3,7 +3,7 @@
 - 更新时间：2026-08-31，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`38fd696`
+- 最近已确认实现提交：`cd0f11a`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -58,7 +58,7 @@
 - M13-T3 验证基线：`57f0c8b`；实现提交：`77492f0`；验证记录：`V-20260830-001`
 - M13-T3 首次远程 CI 基线：`77492f0`；失败修复验证：`V-20260831-001`
 - M13-T3 CI 修复提交：`38fd696`；远程成功验证：`V-20260831-002`
-- M13-T4 验证基线：`15fdf2b`；验证记录：`V-20260831-003`
+- M13-T4 验证基线：`15fdf2b`；实现提交：`cd0f11a`；验证记录：`V-20260831-003/004`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -71,7 +71,7 @@
 | 目标 | 为受控代码 Agent 增加有界流式 stdout/stderr、子进程树清理、固定环境、资源预算和审计结果 |
 | 设计依据 | 实施计划 M13-T5；`KI-011`、`KI-016`、`KI-017` 与现有 ControlledCodeAgent 合同 |
 | 执行协议 | A 类进程/审计公共合同 + C 类 Windows/Linux 子进程故障验证；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M13-T4 已以 `V-20260831-003` verified：镜像、secret、migration/seed、四服务健康、120 项数据库集成、Nginx SSE、同 backend 容器 restart 恢复和精确清理均通过；`KI-009` 已关闭 |
+| 当前修改 | M13-T4 实现提交 `cd0f11a` 已以 `V-20260831-003/004` verified：镜像、secret、migration/seed、四服务健康、120 项数据库集成、Nginx SSE、同 backend 容器 restart 恢复和精确清理均通过；`KI-009` 已关闭 |
 | 验证 | M13-T4 最终真实 project `ai-agent-demo-m13-31796-2e35bbd1` 完整通过；完整默认门后端 681 项（1 skip）、MCP 11 项、Vue 12 项/build 通过，清理后既有 55433 integration 仍 healthy |
 | 下一动作 | 只读恢复 ControlledCodeAgent 的进程启动、输出缓冲、timeout/cancel、环境 allowlist、审计和 Windows 进程树边界，确定 M13-T5 最小纵切 |
 

@@ -4210,3 +4210,28 @@
 - 本结论不包含 TLS、备份恢复、高可用、外部 secret manager、生产容量、公网暴露、在线
   Provider或默认 Context 的持久 pgvector 接线。
 - 下一原子任务为 M13-T5，只读恢复 ControlledCodeAgent 资源和进程树安全边界。
+
+## V-20260831-004：M13-T4 实现提交锚点与连续性闭环
+
+- 任务：`M13-T4 / verified`
+- 时间：2026-08-31，Asia/Shanghai
+- 验证目标：把 `V-20260831-003` 已验收的精确 M13-T4 worktree 固定为可恢复提交，并确认
+  提交内容与任务文件边界一致。
+- 实现提交：`cd0f11adf06b138487adbd120da1c5174eaf65c6`。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: verify single-instance deployment"` | 0 | 17 个 M13-T4 文件提交为 `cd0f11a` |
+| `git diff HEAD^ HEAD --check` | 0 | 实现提交无 whitespace 错误 |
+| `git show --stat --oneline --summary HEAD` | 0 | 提交只含 Settings/seed、部署 Docker/Compose/脚本、测试和 M13-T4 连续性文件 |
+| `git status -sb`（提交后、锚点文档前） | 0 | `main` 比 `origin/main` ahead 2，工作区干净 |
+
+### 结论与边界
+
+- `cd0f11a` 是 M13-T4 的可恢复实现锚点；实际 Docker/数据库/SSE/restart 证据继续引用
+  `V-20260831-003`，本记录不重复执行有状态验收。
+- 分支还包含未 push 的 M13-T3 文档提交 `15fdf2b`；本轮没有 push，远程仍停在 `38fd696`。
+- 本锚点文档形成后需再次运行连续性检查并创建本地纯文档提交；该新文档提交的 HEAD 由后续
+  会话按 Git 事实恢复，不修改 `cd0f11a` 的实现身份。
