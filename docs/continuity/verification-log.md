@@ -4108,3 +4108,50 @@
   `code_complete`。
 - 下一原子动作是提交本地修复。用户明确要求暂不 push；取得新的 push 授权后再触发远程复跑，
   只有七个 job 全绿且 online-policy 明确 skip 才能完成 M13-T3。
+
+## V-20260831-002：M13-T3 修复提交的远程七层 CI 验证
+
+- 任务：`M13-T3 / verified`
+- 时间：2026-08-31 15:03–15:05，Asia/Shanghai
+- 验证目标：把已通过本地回归的 CI 修复提交推送到 `origin/main`，确认 GitHub-hosted
+  offline、MCP、PostgreSQL、frontend、E2E、Docker 和 online-policy 七个 job 均得到成功结论。
+- 验证提交：`38fd6964d34e68aa55d46f055bf315c831249653`。
+- 任务等级：A 类公共 CI 合同 + C 类 GitHub-hosted runner 与 workflow-owned localhost
+  PostgreSQL。
+- 远程运行：`https://github.com/Gorman4869/ai-agent-demo/actions/runs/33366723422`，run `#2`，
+  push event；状态 `completed`，结论 `success`。
+- 授权边界：用户明确授权只推送提交 `38fd696` 到 `origin/main` 并只读检查 Actions。未重跑、
+  取消或修改 workflow run；未读取仓库 secret、用户 Key 或 `.env`，未执行在线 Provider，费用 0。
+
+### 实际命令与结果
+
+| 命令或查询 | 退出码/结论 | 结果 |
+| --- | ---: | --- |
+| `git push origin 38fd696:refs/heads/main` | 0 | `origin/main` 从 `77492f0` 前进到 `38fd696` |
+| GitHub Actions runs API，按完整 `head_sha` 定位 | 0 | 找到 Layered verification run `#2`，提交与授权目标完全一致 |
+| GitHub Actions run/jobs API，只读轮询 run `33366723422` | success | run 完成；七个 job 均为 `completed/success` |
+| `git status -sb`（推送后、文档闭环前） | 0 | `## main...origin/main`，实现提交已同步且工作区干净 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、151 个 Markdown 文件通过 |
+| `git diff --check` | 0 | 无 whitespace 错误；只有 Git LF/CRLF 工作树提示 |
+
+### 远程结果
+
+| job | 结论 | 完成范围 |
+| --- | --- | --- |
+| offline | success | 干净 Windows runner 的完整离线门，包括先构建 TypeScript MCP 后执行 backend discovery |
+| MCP | success | TypeScript MCP build 与 Python/TypeScript STDIO 集成 |
+| PostgreSQL | success | workflow-owned pgvector PostgreSQL service 上的真实数据库层 |
+| frontend | success | Vitest 与 Vue production build |
+| E2E | success | 本地 FastAPI、Vite 与 Chromium durable Run 场景 |
+| Docker | success | 两份 Compose 配置校验，不含 build/up/health |
+| online-policy | success | 未传在线授权的显式 skip 策略；不是 Provider E4 |
+
+### 结论与边界
+
+- run `#1` 的两个失败和 `V-20260831-001` 保持原样；run `#2` 证明最小修复在干净远程 runner
+  上收敛，没有用本地成功覆盖历史失败。
+- M13-T3 的代码、测试、本地七层门和远程七 job 均具备可引用证据，达到 `verified`；`KI-008`
+  关闭。
+- 本次没有构建生产镜像、启动服务、执行 migration/seed、检查健康、验证 Nginx SSE、生产容量
+  或在线 Provider。上述范围仍属于 M13-T4 或独立在线授权，不因 CI 全绿而自动成立。
+- 下一原子任务为 M13-T4；先只读恢复现有部署产物，再确定最小实际部署纵切。

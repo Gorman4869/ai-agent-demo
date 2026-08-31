@@ -952,7 +952,7 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 验收：任一门禁失败时脚本不能打印“全部通过”；跳过项必须显式汇总。
 - 关闭目标：KI-008。
 
-#### M13-T3 实现结果（2026-08-30，code complete）
+#### M13-T3 实现结果（2026-08-31，verified）
 
 - `scripts/verify.ps1` 固定七层及 `default`、`integration`、`all` profile；显式选择的
   PostgreSQL/Docker 等 required layer 缺少前置条件时 fail closed，online 缺少本次授权时只
@@ -966,9 +966,10 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   failure/skip/CI policy 入口测试 4 项通过。
 - 首次远程 GitHub Actions run `#1` 在提交 `77492f0` 上真实执行：MCP、frontend、E2E、Docker
   和 online-policy 成功；offline 因干净 runner 缺少 TypeScript MCP build、PostgreSQL 因
-  graceful-close 测试复用 100ms 租约而失败。最小修复已在本地通过相同关键层，等待推送和远程
-  复跑；因此本任务保持 `code_complete`，`KI-008` 继续 mitigated。远程七个 job 有可引用成功
-  记录后才能改为 verified/closed。
+  graceful-close 测试复用 100ms 租约而失败。该失败事实保留在 `V-20260831-001`。
+- 最小修复提交 `38fd696` 上的远程 run `#2` 随后完成：offline、MCP、PostgreSQL、frontend、
+  E2E、Docker 和 online-policy 七个 job 全部成功，见 `V-20260831-002`。online-policy 仍只证明
+  未授权 skip，没有读取 Key 或调用 Provider；M13-T3 达到 `verified`，`KI-008` 关闭。
 - 决策见 `ADR-0036`，工程入口见 `docs/m13-verification-ci.md`；没有构建镜像、启动服务、
   验证健康或 Nginx SSE，也没有读取 Key、执行在线调用或进入 M13-T4。
 
