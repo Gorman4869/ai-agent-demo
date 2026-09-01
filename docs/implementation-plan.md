@@ -1027,6 +1027,25 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：并发 Run、慢客户端、数据库断开、模型限流和重启恢复场景；延迟、错误率和资源数据。
 - 验收：容量估算使用实测参数更新，降级和恢复步骤可重复执行。
 
+#### M13-T6 实现结果（2026-09-01，verified）
+
+- 新增标准库 `backend.app.evals.load_fault` 与 CLI：冻结、安全报告覆盖延迟分位、吞吐、错误率、
+  并发峰值和进程 RSS；默认离线实际执行内存 Container 并发、durable SSE 慢客户端和
+  `ManualAgentLoop` 确定性限流重试，localhost 作用域通过 Nginx/FastAPI/PostgreSQL durable HTTP。
+- 部署 verifier 只在唯一 `ai-agent-demo-m13-load-*` project 内停止/启动 PostgreSQL、验证
+  fail-closed 5xx、新 Run 恢复和 backend restart 后旧 Run 可读，并在四个阶段记录点式 Docker
+  资源快照；finally 精确清理本次容器、网络、卷和临时 secret。
+- 相同负载/故障逻辑连续三次以 16 Runs / concurrency 4 完整通过，错误率均为 0；部署吞吐为
+  17.333/s、11.557/s、6.639/s，p95 为 498.490ms、708.766ms、1,542.506ms。数据库恢复窗口
+  分别记录 3、2、3 个明确终态失败，随后新 Run 成功；这固定为本机可重复但波动明显的工作点，
+  不是生产容量/SLA。
+- 相关回归最终 77 项通过，Python AST、PowerShell Parser、diff check 和三次 Docker cleanup
+  通过。决策见 `ADR-0039`，工程入口见 `docs/m13-load-fault.md`，证据见 `V-20260901-001`；
+  M13-T6 达到 `verified`。
+- 边界：限流是 Fake Model；资源是 Probe RSS 与点式 `docker stats`；没有在线 Provider、长时间
+  soak、多机/HA、进行中 Run 的 backend hard-kill、TLS 或公网流量。`KI-015/KI-016/KI-018`
+  因各自剩余范围继续保持 mitigated。
+
 ### M13-T7：M13 跟练与验收
 
 - 依赖：M13-T1 至 M13-T6。

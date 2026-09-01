@@ -15,7 +15,17 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$PostgresPort = 55434,
 
-    [switch]$KeepRunning
+    [switch]$KeepRunning,
+
+    [switch]$LoadFault,
+
+    [switch]$SkipDatabaseRegression,
+
+    [ValidateRange(1, 100)]
+    [int]$LoadFaultRuns = 16,
+
+    [ValidateRange(1, 16)]
+    [int]$LoadFaultConcurrency = 4
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,6 +56,7 @@ $ownedEnvironment = @(
 )
 $previousEnvironment = @{}
 $secretFiles = @()
+$temporaryFiles = @()
 $ownsResources = $false
 
 function Invoke-DockerStep {
@@ -104,10 +115,126 @@ function Wait-HttpHealth {
     throw 'restarted deployment did not become healthy'
 }
 
+function Invoke-DurableRun {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BaseUrl,
+
+        [ValidateRange(1, 120)]
+        [int]$TimeoutSeconds = 30
+    )
+
+    $runCapability = [Guid]::NewGuid().ToString('N')
+    $terminalFailures = 0
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $retryAfterTerminal = $false
+        try {
+            $createdRun = Invoke-RestMethod `
+                -Method Post `
+                -Uri "$BaseUrl/api/durable/runs" `
+                -Headers @{ 'Idempotency-Key' = $runCapability } `
+                -ContentType 'application/json' `
+                -Body '{"message":"2 + 3"}' `
+                -TimeoutSec 5
+            if (
+                -not $createdRun.id -or
+                (
+                    $createdRun.session_capability -and
+                    $createdRun.session_capability -ne $runCapability
+                )
+            ) {
+                throw 'durable Run create response is invalid'
+            }
+            do {
+                $storedRun = Invoke-RestMethod `
+                    -Uri "$BaseUrl/api/durable/runs/$($createdRun.id)" `
+                    -Headers @{ 'X-Session-Token' = $runCapability } `
+                    -TimeoutSec 5
+                if ($storedRun.status -eq 'completed') {
+                    return [pscustomobject]@{
+                        run_id = $createdRun.id
+                        capability = $runCapability
+                        terminal_failures = $terminalFailures
+                    }
+                }
+                if ($storedRun.status -in @('failed', 'cancelled')) {
+                    $terminalFailures += 1
+                    if ($terminalFailures -ge 8) {
+                        break
+                    }
+                    $runCapability = [Guid]::NewGuid().ToString('N')
+                    $retryAfterTerminal = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 50
+            } while ([DateTime]::UtcNow -lt $deadline)
+        }
+        catch {
+            # Reusing this durable idempotency key makes result-unknown safe.
+        }
+        if ($terminalFailures -ge 8) {
+            break
+        }
+        if ($retryAfterTerminal) {
+            Start-Sleep -Seconds 1
+            continue
+        }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'durable Run did not recover before the bounded deadline'
+}
+
+function Get-ProjectResourceSnapshot {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Phase
+    )
+
+    $containerIds = @(
+        & docker @composeArguments ps --quiet postgres backend frontend
+    )
+    if ($LASTEXITCODE -ne 0 -or $containerIds.Count -ne 3) {
+        throw 'deployment resource ownership inspection failed'
+    }
+    $statsArguments = @(
+        'stats',
+        '--no-stream',
+        '--format',
+        '{{json .}}'
+    ) + $containerIds
+    $statsLines = @(& docker @statsArguments)
+    if ($LASTEXITCODE -ne 0 -or $statsLines.Count -ne 3) {
+        throw 'deployment resource snapshot failed'
+    }
+    $containers = @(
+        foreach ($line in $statsLines) {
+            $item = $line | ConvertFrom-Json
+            [pscustomobject]@{
+                name = $item.Name
+                cpu_percent = $item.CPUPerc
+                memory_usage = $item.MemUsage
+                memory_percent = $item.MemPerc
+                pids = $item.PIDs
+            }
+        }
+    )
+    return [pscustomobject]@{
+        phase = $Phase
+        containers = $containers
+    }
+}
+
 try {
     $pythonPath = Join-Path $projectRoot '.venv/Scripts/python.exe'
     if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
         throw 'project virtualenv Python is unavailable'
+    }
+    if ($LoadFaultConcurrency -gt $LoadFaultRuns) {
+        throw 'LoadFaultConcurrency must not exceed LoadFaultRuns'
+    }
+    if ($SkipDatabaseRegression -and -not $LoadFault) {
+        throw 'SkipDatabaseRegression is allowed only for the M13-T6 load/fault path'
     }
 
     foreach ($name in $ownedEnvironment) {
@@ -205,48 +332,53 @@ try {
         throw 'pgvector extension is unavailable'
     }
 
-    Invoke-DockerStep -Name 'Create PostgreSQL Store integration database' -Arguments (
-        $composeArguments + @(
-            'exec',
-            '--no-TTY',
-            'postgres',
-            'createdb',
-            '--username',
-            'ai_agent',
-            'ai_agent_store_test'
+    if (-not $SkipDatabaseRegression) {
+        Invoke-DockerStep -Name 'Create PostgreSQL Store integration database' -Arguments (
+            $composeArguments + @(
+                'exec',
+                '--no-TTY',
+                'postgres',
+                'createdb',
+                '--username',
+                'ai_agent',
+                'ai_agent_store_test'
+            )
         )
-    )
-    Invoke-DockerStep -Name 'Create pgvector integration database' -Arguments (
-        $composeArguments + @(
-            'exec',
-            '--no-TTY',
-            'postgres',
-            'createdb',
-            '--username',
-            'ai_agent',
-            'ai_agent_pgvector_test'
+        Invoke-DockerStep -Name 'Create pgvector integration database' -Arguments (
+            $composeArguments + @(
+                'exec',
+                '--no-TTY',
+                'postgres',
+                'createdb',
+                '--username',
+                'ai_agent',
+                'ai_agent_pgvector_test'
+            )
         )
-    )
-    $hostDsnPrefix = (
-        "postgresql://ai_agent:$password@127.0.0.1:$PostgresPort/"
-    )
-    [Environment]::SetEnvironmentVariable(
-        $testPostgresDsnName,
-        $hostDsnPrefix + 'ai_agent_store_test?sslmode=disable',
-        'Process'
-    )
-    [Environment]::SetEnvironmentVariable(
-        $testPgVectorDsnName,
-        $hostDsnPrefix + 'ai_agent_pgvector_test?sslmode=disable',
-        'Process'
-    )
-    Write-Host '[deployment] Run PostgreSQL and pgvector integration tests'
-    & $pythonPath -B -m unittest `
-        backend.tests.postgres_store_integration `
-        backend.tests.pgvector_integration `
-        -q
-    if ($LASTEXITCODE -ne 0) {
-        throw 'database integration tests failed'
+        $hostDsnPrefix = (
+            "postgresql://ai_agent:$password@127.0.0.1:$PostgresPort/"
+        )
+        [Environment]::SetEnvironmentVariable(
+            $testPostgresDsnName,
+            $hostDsnPrefix + 'ai_agent_store_test?sslmode=disable',
+            'Process'
+        )
+        [Environment]::SetEnvironmentVariable(
+            $testPgVectorDsnName,
+            $hostDsnPrefix + 'ai_agent_pgvector_test?sslmode=disable',
+            'Process'
+        )
+        Write-Host '[deployment] Run PostgreSQL and pgvector integration tests'
+        & $pythonPath -B -m unittest `
+            backend.tests.postgres_store_integration `
+            backend.tests.pgvector_integration `
+            -q
+        if ($LASTEXITCODE -ne 0) {
+            throw 'database integration tests failed'
+        }
+    }
+    else {
+        Write-Host '[deployment] Skip repeated M13-T4 database regression for M13-T6'
     }
 
     $capability = [Guid]::NewGuid().ToString('N')
@@ -300,11 +432,147 @@ try {
         throw 'durable Run did not survive the backend restart'
     }
 
+    if ($LoadFault) {
+        $resourceSnapshots = @(
+            Get-ProjectResourceSnapshot -Phase 'before_load'
+        )
+        $probeStderr = [System.IO.Path]::GetTempFileName()
+        $temporaryFiles += $probeStderr
+        $probeArguments = @(
+            '-B',
+            '-m',
+            'backend.app.load_fault_probe',
+            '--base-url',
+            $frontendBaseUrl,
+            '--runs',
+            $LoadFaultRuns.ToString(),
+            '--concurrency',
+            $LoadFaultConcurrency.ToString()
+        )
+        Write-Host '[deployment] Run bounded M13-T6 load scenarios'
+        $probeOutput = @(& $pythonPath @probeArguments 2> $probeStderr)
+        $probeExitCode = $LASTEXITCODE
+        $probeError = (Get-Content $probeStderr | Out-String).Trim()
+        if ($probeError) {
+            Write-Warning 'load probe produced bounded stderr output'
+        }
+        $probeLine = $probeOutput | Select-Object -Last 1
+        if (-not $probeLine) {
+            throw 'load probe did not produce a safe report'
+        }
+        try {
+            $probeReport = $probeLine | ConvertFrom-Json
+        }
+        catch {
+            throw 'load probe produced an invalid safe report'
+        }
+        if (
+            $probeExitCode -ne 0 -or
+            $probeReport.passed -ne $true
+        ) {
+            Write-Warning 'load probe safe failure report follows'
+            $probeReport | ConvertTo-Json -Depth 12 -Compress
+            throw 'load probe acceptance failed'
+        }
+        $resourceSnapshots += Get-ProjectResourceSnapshot -Phase 'after_load'
+
+        Invoke-DockerStep -Name 'Stop owned PostgreSQL service' -Arguments (
+            $composeArguments + @('stop', '--timeout', '15', 'postgres')
+        )
+        $outageCapability = [Guid]::NewGuid().ToString('N')
+        $outageStatus = 0
+        try {
+            $outageResponse = Invoke-RestMethod `
+                -Method Post `
+                -Uri "$frontendBaseUrl/api/durable/runs" `
+                -Headers @{ 'Idempotency-Key' = $outageCapability } `
+                -ContentType 'application/json' `
+                -Body '{"message":"2 + 3"}' `
+                -TimeoutSec 8
+            if ($outageResponse.id) {
+                $outageStatus = 202
+            }
+        }
+        catch {
+            if ($_.Exception.Response) {
+                $outageStatus = [int]$_.Exception.Response.StatusCode
+            }
+        }
+        if ($outageStatus -gt 0 -and $outageStatus -lt 500) {
+            throw 'database outage did not produce a bounded degraded response'
+        }
+        $databaseOutageResult = if ($outageStatus -eq 0) {
+            'connection_failed'
+        }
+        else {
+            'http_5xx'
+        }
+
+        Invoke-DockerStep -Name 'Start owned PostgreSQL service' -Arguments (
+            $composeArguments + @('start', 'postgres')
+        )
+        Wait-HttpHealth -Uri "$backendBaseUrl/health"
+        Wait-HttpHealth -Uri "$frontendBaseUrl/health"
+        $recoveredRun = Invoke-DurableRun `
+            -BaseUrl $frontendBaseUrl `
+            -TimeoutSeconds 60
+        $resourceSnapshots += Get-ProjectResourceSnapshot `
+            -Phase 'after_database_recovery'
+
+        Invoke-DockerStep -Name 'Restart owned backend service' -Arguments (
+            $composeArguments + @('restart', 'backend')
+        )
+        Wait-HttpHealth -Uri "$backendBaseUrl/health"
+        Wait-HttpHealth -Uri "$frontendBaseUrl/health"
+        $recoveredAgain = Invoke-RestMethod `
+            -Uri "$frontendBaseUrl/api/durable/runs/$runId" `
+            -Headers @{ 'X-Session-Token' = $capability } `
+            -TimeoutSec 10
+        if (
+            $recoveredAgain.id -ne $runId -or
+            $recoveredAgain.status -ne 'completed'
+        ) {
+            throw 'durable Run did not survive the M13-T6 backend restart'
+        }
+        $resourceSnapshots += Get-ProjectResourceSnapshot `
+            -Phase 'after_backend_restart'
+
+        $loadFaultSummary = [ordered]@{
+            suite = 'M13-T6'
+            passed = $true
+            project = $ProjectName
+            load_probe = $probeReport
+            database_outage = [ordered]@{
+                degraded = $true
+                result = $databaseOutageResult
+                recovered = [bool]$recoveredRun.run_id
+                terminal_failures_before_recovery = (
+                    $recoveredRun.terminal_failures
+                )
+            }
+            backend_restart = [ordered]@{
+                recovered = $true
+            }
+            resource_snapshots = $resourceSnapshots
+        }
+    }
+
     Write-Host '[deployment] PASSED'
     Write-Host "[deployment] project=$ProjectName"
     Write-Host '[deployment] migrations=6 knowledge_migrations=1 seed=1'
-    Write-Host '[deployment] database_integration=passed nginx_sse=passed'
+    if ($SkipDatabaseRegression) {
+        Write-Host (
+            '[deployment] database_integration=skipped_reused_m13_t4 ' +
+            'nginx_sse=passed'
+        )
+    }
+    else {
+        Write-Host '[deployment] database_integration=passed nginx_sse=passed'
+    }
     Write-Host '[deployment] restart_recovery=passed'
+    if ($LoadFault) {
+        $loadFaultSummary | ConvertTo-Json -Depth 12 -Compress
+    }
 }
 catch {
     if ($ownsResources) {
@@ -335,6 +603,11 @@ finally {
         )
     }
     foreach ($path in $secretFiles) {
+        if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            Remove-Item -LiteralPath $path -Force
+        }
+    }
+    foreach ($path in $temporaryFiles) {
         if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
             Remove-Item -LiteralPath $path -Force
         }

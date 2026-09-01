@@ -391,3 +391,16 @@
 - Process audit may contain only stable status/error codes, retained and observed byte counts, termination reason, resource category, process-scope label, cleanup result, target, and digest. Raw stdout/stderr, argv, environment, exception text, paths outside the reviewed target, and process handles stay out of audit/log representations.
 - Unsupported operating systems fail with `command_start_failed`. Windows and Linux require separate real-process verification; success on one platform is not evidence for the other.
 - Windows `Popen` exposes the process handle only after process creation, so Job assignment is not an atomic suspended-create boundary. Keep executables and complete argv server-reviewed; hostile executable startup requires a pre-isolated container or worker.
+
+## 31. Bounded Load and Fault Evidence
+
+- Keep the default load/fault evaluator offline, deterministic, key-free, and independent of Docker or Provider availability. Put real localhost deployment work behind an explicit CLI argument and a separate evidence scope.
+- Bound run count, concurrency, delays, timeouts, sampling intervals, terminal retries, output, diagnostics, and cleanup. Do not expose an unbounded load-generator surface through model/action input.
+- Measurement reports may retain scenario labels, stable error codes, counts, latency summaries, throughput, in-flight peaks, RSS, and reviewed numeric measurements. Never retain prompts, answers, capabilities, response bodies, exception text, DSNs, Keys, or secret paths.
+- Unknown operation failures map to a content-free stable code. Caller cancellation still propagates from the generic async measurer; one operation timeout is recorded without leaking the underlying task content.
+- Local deployment probes accept only explicit loopback HTTP origins with a port. Reject credentials, paths, queries, fragments, HTTPS assumptions, and remote hosts unless a later reviewed task defines a different security boundary.
+- A database outage for durable PostgreSQL execution must fail closed as connection failure or HTTP 5xx. Never count an in-memory fallback as successful recovery.
+- Preserve idempotency across result-unknown create attempts. A replay may return the previously committed Run without reissuing its capability; use the caller-held capability to reconcile it. Only a confirmed `failed` or `cancelled` terminal state permits a new idempotency key, and that recovery loop remains count- and deadline-bounded.
+- Fault scripts own one exact Compose project and may stop/start/restart only services in that project. Cleanup removes only its containers, network, volume, and temporary files; never remove images or touch integration projects.
+- `docker stats --no-stream` is a point snapshot, and process RSS belongs to the measuring process. Label both accurately; neither is peak server resource evidence.
+- Record repeated short-run operating points as observations, not production capacity or SLA. Provider rate-limit fakes, localhost latency, single-instance restart, and short samples cannot prove online Provider behavior, high availability, multi-process arbitration, soak stability, or maximum throughput.

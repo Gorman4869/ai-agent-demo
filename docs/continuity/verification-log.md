@@ -4312,3 +4312,88 @@
   `V-20260831-005`，本记录不重复运行进程或容器测试。
 - 本轮没有 push，远程仍停在 `38fd696`；ahead 4 包含既有 M13-T3/T4 文档/实现与本提交。
 - 本锚点文档形成后只需重跑连续性/diff 检查并创建本地纯文档提交；下一任务保持 M13-T6。
+
+## V-20260901-001：M13-T6 基础压测与故障演练验证
+
+- 任务：`M13-T6 / verified`
+- 时间：2026-09-01，Asia/Shanghai；容器日志使用 UTC，显示 2026-08-31。
+- 验证目标：为并发 Run、慢客户端、数据库断开、模型限流和 backend restart 建立有界、可重复、
+  安全报告的负载/故障入口，并给出真实延迟、错误率和资源观测。
+- 验证基线：`b87ecda741e1ec12aa23f6216f452936398f1435`；本记录覆盖其后的 M13-T6
+  未提交 worktree，提交 ID 由下一条连续性记录补记。
+- 任务等级：A 类测量/幂等/部署脚本公共合同 + C 类真实 Docker、PostgreSQL 断连与进程重启。
+- 授权边界：每次真实演练均经用户允许；最终用户又明确要求独立复跑。仅创建唯一
+  `ai-agent-demo-m13-load-*` project，未读取用户 `.env`、Provider Key，未调用在线模型，费用 0；
+  未安装/升级依赖、未切换 Node、未 push。
+
+### 自动化与静态验证
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_load_fault_script backend.tests.test_deployment_contract -q` | 0 | 最终 10 项通过；脚本边界、secret 生命周期、结果未知重放与终态换键合同通过 |
+| 77 项 load/fault、deployment、persistent SSE、Coordinator/quiesce/recovery 相关回归（首轮） | 1 | 76 项通过；既有 10ms pre-runtime 调度边界用例一次期望 runtime calls=0、实际 1 |
+| 该 10ms 用例单独复跑 | 0 | 1 项通过；生产代码未因该失败修改 |
+| 同一 77 项相关回归完整复跑 | 0 | 77 项全部通过；保留既有 Starlette deprecation 与故障注入 warning |
+| 4 个新增/修改 Python 文件 AST 只读解析 | 0 | `AST OK` |
+| `verify-deployment.ps1`、`verify-load-fault.ps1` PowerShell Parser | 0 | 两个脚本无语法错误 |
+| `git diff --check` | 0 | 无 whitespace 错误；仅既有 LF/CRLF 工作树提示 |
+
+### 最终真实演练与容量观测
+
+| 范围 | 第一次通过 | 用户要求的独立复跑 | 最终标签修正后 |
+| --- | --- | --- | --- |
+| project | `ai-agent-demo-m13-load-27004-965dc5b6` | `ai-agent-demo-m13-load-24680-5bfa353e` | `ai-agent-demo-m13-load-9868-044f0484` |
+| deployed load | 16/16、concurrency 4、0% error | 16/16、concurrency 4、0% error | 16/16、concurrency 4、0% error |
+| throughput | 17.333 Run/s | 11.557 Run/s | 6.639 Run/s |
+| p50 / p95 / max | 148.315 / 498.490 / 498.490 ms | 219.651 / 708.766 / 708.766 ms | 354.138 / 1,542.506 / 1,542.506 ms |
+| Probe RSS delta | 10,481,664 bytes | 10,936,320 bytes | 11,292,672 bytes |
+| slow client | pause 100ms；Run completion 0.904ms | pause 100ms；Run completion 1.904ms | pause 100ms；Run completion 2.290ms |
+| Fake model rate limit | calls=2、retry events=1、恢复 | calls=2、retry events=1、恢复 | calls=2、retry events=1、恢复 |
+| PostgreSQL outage | HTTP 5xx；恢复前 3 个明确 terminal failure；随后 Run 完成 | HTTP 5xx；恢复前 2 个明确 terminal failure；随后 Run 完成 | HTTP 5xx；恢复前 3 个明确 terminal failure；随后 Run 完成 |
+| backend restart | 旧 completed Run 可读 | 旧 completed Run 可读 | 旧 completed Run 可读 |
+| cleanup | 容器、网络、卷删除；只读复核无残留 | 容器、网络、卷删除；只读复核无残留 | 容器、网络、卷删除；输出确认完整删除 |
+
+三次 `after_load` 点快照中，backend 内存为 97.91/97.75/97.89 MiB，frontend 为
+7.668/7.598/7.641 MiB，PostgreSQL 为 49.58/49.15/51.11 MiB。CPU 为
+`docker stats --no-stream` 的时点值，不是峰值，未用于
+容量上限。当前只确认 16/4 是该机器、单实例、Mock Runtime、短样本下的可重复无错误工作点；
+保守观测吞吐约 6.6 Run/s、p95 不高于约 1.55s；三轮波动明显，不外推生产。
+
+### 失败尝试、修复与证据
+
+1. 首次把 Compose 预检放在 secret 环境创建前，报缺少 `AI_AGENT_DEPLOY_POSTGRES_DSN_FILE`，未
+   创建资源；改为在 M13-T4 verifier 同一 secret 生命周期内执行。
+2. 第二次重复跑 M13-T4 的 120 项数据库回归，命中既有 `pool-255 connection timeout`，120 项
+   1 error；project 完整清理。新增 `SkipDatabaseRegression`，且只允许与 LoadFault 同时使用；
+   migration/seed/health/SSE/baseline restart 仍执行。
+3. 第三次负载已执行，空 stderr 对 null 调用 `Trim()` 失败；改为 `Out-String` 后 trim。
+4. 第四次 32/8 报告路径把退出码检查放在安全 JSON 解析前，失败报告未保留；调整为先解析/输出。
+   该配置没有可引用成功报告，因此不进入容量结论。
+5. 第五次 16/4 的离线和部署负载报告均 passed，但 `Start-Process.ExitCode` 刷新被误判；改为同步
+   子进程和 `$LASTEXITCODE`。该次 deployed 仍观测 16/16、18.147/s、p95 540.516ms，但因后续
+   故障步骤未完成，不作为完整演练容量锚点。
+6. 第六次 PostgreSQL 已停止，Windows curl JSON quoting 使请求先返回 422；改用
+   `Invoke-RestMethod`，只接受无响应或 5xx，project 完整清理。
+7. 第七次实际得到数据库拒绝并恢复容器健康，但 create 已提交、响应失败后，同键 replay 不再
+   下发 capability，verifier 误判并在 60s 后失败；允许 null replay、仍拒绝不匹配 capability。
+8. 第八次已能同键 GET 原 Run，但它是明确 terminal failure；继续同键只能反复读取失败。最终
+   区分 result-unknown 与已知终态：前者必须同键，后者才换键，最多 8 次并记录计数。
+9. 修正后的第一次完整演练退出 0；随后按用户“重新跑”要求的第二次也退出 0。提交前复审又
+   发现 LoadFault 路径沿用 M13-T4 的 `database_integration=passed` 标签，虽然本轮已明确跳过
+   重复的 120 项回归；改为 `skipped_reused_m13_t4`，并把 verifier 默认负载对齐 16/4。
+10. 标签修正后的最终脚本第三次退出 0，输出准确区分 database regression skip 与 Nginx SSE
+    passed。三次均执行 PostgreSQL outage/recovery、backend restart、资源报告和精确 cleanup。
+
+所有失败 project 都进入 verifier `finally`，只删除本次容器、网络、卷和临时文件；未删除镜像，
+未影响 `ai-agent-demo-integration`。历史失败没有被最终成功覆盖或删除。
+
+### 结论与边界
+
+- M13-T6 的代码、测试、三次真实演练、资源报告和清理满足计划，达到 `verified`；决策见
+  `ADR-0039`，入口见 `docs/m13-load-fault.md`。
+- `KI-015` 新增真实 result-unknown 重放证据，但多进程终态竞争/跨域一致性仍缺；`KI-016` 已补
+  PostgreSQL 生产故障注入，但进行中 Run 的 backend hard-kill 仍缺；两者保持 mitigated。
+- Fake Model 限流不关闭 `KI-018`。没有真实 Provider rate limit、逐调用 usage、版本化价格、
+  硬成本门、Token/费用或底层 transport 取消证据。
+- 没有运行完整 offline 七层门、远程 CI、soak、阶梯增压、HA、TLS、公网入口或在线 Provider。
+  M13-T6 不是里程碑最终验收；下一任务为 M13-T7 学习交付。

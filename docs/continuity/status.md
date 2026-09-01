@@ -1,6 +1,6 @@
 # 当前实施状态
 
-- 更新时间：2026-08-31，Asia/Shanghai
+- 更新时间：2026-09-01，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
 - 最近已确认实现提交：`5525a02`
@@ -60,6 +60,7 @@
 - M13-T3 CI 修复提交：`38fd696`；远程成功验证：`V-20260831-002`
 - M13-T4 验证基线：`15fdf2b`；实现提交：`cd0f11a`；验证记录：`V-20260831-003/004`
 - M13-T5 验证基线：`4c029bb`；实现提交：`5525a02`；验证记录：`V-20260831-005/006`
+- M13-T6 验证基线：`b87ecda`；验证记录：`V-20260901-001`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -67,14 +68,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M13-T6` |
+| 任务 ID | `M13-T7` |
 | 状态 | `planned` |
-| 目标 | 为并发 Run、慢客户端、数据库断开、模型限流和重启恢复建立可复现压测/故障演练与容量证据 |
-| 设计依据 | 实施计划 M13-T6；M13-T1 至 M13-T5 已验证边界；`KI-015`、`KI-016`、`KI-018` |
-| 执行协议 | A 类并发/故障公共合同 + C 类真实数据库、进程与部署故障验证；见 `docs/continuity/course-delivery-playbook.md` |
-| 当前修改 | M13-T5 已以 `V-20260831-005` verified：有界 stdout/stderr、固定环境、取消、Windows Job/Linux process group 树清理、CPU/内存/进程数预算和安全审计通过；`KI-011` 已关闭 |
-| 验证 | Windows/Linux 同一 20 项进程合同通过（各 1 项平台 skip）；完整 offline 门后端 691 项通过、1 项既有 symlink skip，Code Agent Demo 与依赖检查通过 |
-| 下一动作 | 只读恢复现有 load/eval/observability、RunCoordinator、PostgreSQL 故障注入与部署脚本，列出 M13-T6 最小可测场景和资源指标，不直接运行有状态压测 |
+| 目标 | 汇总 M13-T1–T6 为生产工程跟练、故障手册、观测速查、考核与费曼任务 |
+| 设计依据 | 实施计划 M13-T7；M13-T1 至 M13-T6 已验证边界；`docs/continuity/course-delivery-playbook.md` |
+| 执行协议 | B 类里程碑学习交付；复用已验证代码与证据，不为教程新增生产能力或在线调用 |
+| 当前修改 | M13-T6 已以 `V-20260901-001` verified：离线/localhost 负载、慢 SSE、确定性限流、PostgreSQL stop/start、结果未知幂等恢复、backend restart 和资源快照通过；16/4 工作点连续三次 0% 错误 |
+| 验证 | 相关回归最终 77 项通过；三次唯一 Docker project 完整退出 0 并清理；未读取 Key/用户 `.env`，未执行在线 Provider |
+| 下一动作 | 只读恢复 playbook、现有阶段文档结构及 M13-T1–T6 证据，冻结 M13-T7 的章节、题目、故障手册和 30 项映射，不先修改学习者 `docs/progress.md` |
 
 ## 里程碑状态
 
@@ -87,21 +88,21 @@
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；当时保留的进程重启/PostgreSQL/ToolExecution 缺口已由 M11/M12 承接，`KI-004` 现已关闭 |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
-| M13 生产工程闭环 | `in_progress` | M13-T1–M13-T5 `verified`，`KI-008/KI-009/KI-011` 已关闭；M13-T6 为下一任务，容量与生产故障演练尚未验收 |
+| M13 生产工程闭环 | `in_progress` | M13-T1–M13-T6 `verified`，`KI-008/KI-009/KI-011` 已关闭；M13-T7 跟练与验收为下一任务 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M13-T6 尚未开始，当前没有已确认的代码阻塞；真实并发、慢客户端、数据库断开、模型限流和重启演练需先冻结有界场景与清理范围。
+- M13-T7 尚未开始，当前没有已确认的代码阻塞；它是学习交付，不应借机扩大为在线 Provider、生产 HA 或新基础设施实现。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12 验收，但须由 M13 独立升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
-- M13-T5 连续性闭环将形成新的本地提交；本地 M13-T3/T4/T5 提交未经单独授权不会 push。
+- M13-T6 连续性闭环将形成新的本地提交；本地 M13-T3/T4/T5/T6 提交未经单独授权不会 push。
 
 ## 未验证范围
 
 - M13-T1 没有实现 OpenTelemetry/vendor exporter、跨服务 propagation、逐调用 Provider usage、版本化价格表或 `max_cost_usd` 硬门；未知费用保持 `null/unknown`，`KI-018` 只降为 mitigated。
 - 单事件缺少可靠成对边界时，细分 span 的 `duration_ms` 保持 `null`；当前不会用 Run 总耗时冒充纯模型或工具耗时。
-- M13-T2 没有重跑真实 PostgreSQL integration；数据库故障与持久取消引用适配器无关 Store/Coordinator/ToolExecution 回归及 M11 已验收持久协议。生产连接结果未知、多进程终态竞争和硬进程中断仍由 `KI-015/KI-016` 跟踪。
+- M13-T2 当时没有重跑真实 PostgreSQL integration；M13-T4/T6 后续已补真实数据库、backend restart 和 PostgreSQL stop/start。M13-T6 捕获了 create 已提交但响应失败的结果未知窗口，并按同键重放恢复；多进程终态竞争、跨 Store 一致性和进行中 Run 的 backend hard-kill 仍由 `KI-015/KI-016` 跟踪。
 - M13-T3 的首次 GitHub-hosted run `#1` 已真实执行但 offline/PostgreSQL 失败；修复提交
   `38fd696` 上的 run `#2` 七个 job 全部成功。该结果只证明当前 workflow 的分层 runner 门、
   localhost PostgreSQL、浏览器 E2E 与 Compose 配置检查，不证明生产镜像、服务健康、migration、
@@ -116,6 +117,13 @@
   覆盖 8 MiB/无限输出、timeout、取消、嵌套进程、CPU/内存/进程数预算和 junction/symlink
   边界；完整 offline 后端 691 项通过、1 skip。它仍是应用级 10ms 采样 Harness，不是
   cgroup/seccomp/VM、恶意 executable、默认禁网或普通同步工具 thread 硬取消证据。
+- M13-T6 见 `V-20260901-001`：相同负载/故障逻辑连续三次以 16 Runs / concurrency 4 完整通过，
+  部署错误率均为 0，吞吐 17.333/s、11.557/s、6.639/s，p95 498.490ms、708.766ms、
+  1,542.506ms；数据库停机均 fail closed 为 5xx，恢复前分别有 3、2、3 个明确 terminal failure，
+  随后新 Run 成功，backend
+  restart 后旧 Run 可读，随机 project 资源完整清理。该结果只是一台 Windows Docker Desktop
+  主机、Mock Runtime、单实例和短样本的可重复工作点；Fake 限流、Probe RSS 与点式 Docker
+  stats 不能证明线上 Provider、生产容量、峰值资源、HA、soak 或进行中 Run hard-kill。
 - M11-T6 第一/第二纵切见 `V-20260820-011/012/013` 与 `V-20260827-001`：`m11-rag-v1` canonical 内容摘要为 `3581d5fe65fb35cde0315d46d8e88f9a811221e8ed7a3d1f9963243221291b2b`，50 条、top_k=3 和阈值 0.9/0.8/0.9 未变。sparse 为 Recall@3/MRR/依据正确率 1.0/1.0/1.0；真实 pgvector 为 0.98/0.946667/0.98，仍保留 1 条漏召回及稳定失败码。
 - pgvector 结果只证明固定课程集上的真实 PostgreSQL vector(3)、cosine/HNSW 检索与显式 eval-only 课程主题 Embedding；它不证明开放域语义质量、生产容量/延迟、在线模型回答质量、Provider Token/usage、费用或持久/跨进程缓存。在线 Embedding 必须由 M11-T7 在单次授权下另行验证。
 - M11-T7 首次外部尝试见 `V-20260827-003`：Key 仅以安全布尔值确认存在；最终 Provider 返回 `embedding_provider_quota_or_rate_limited`，未发生成功向量写入、查询、usage 或费用记录。该错误码不能区分项目配额耗尽与短期限流，须由用户在平台恢复后重新授权；初始 SOCKS client 初始化失败也不是 Provider 兼容证据。
@@ -246,12 +254,12 @@
 - 没有用户新的单次授权，因此没有读取真实 Key、运行带 `-Authorized` 的脚本、访问模型服务或产生费用；Provider strict schema、真实 streaming、工具调用、usage、模型质量、费用和资源清理仍无 E4 证据。
 - `KI-018` 的逐调用硬成本门、版本化定价源与持久 usage/cost 账本仍未实现；本次 operator-supplied 费用估算不得描述成账单事实。
 - M8 课程和离线工程已 `code_complete`，但没有真实在线 E4，不能标记 `accepted`；学习者个人自测与费曼勾选仍只写 `docs/progress.md`。
-- M13-T2 已补稳定错误目录、显式指数退避、次数/remaining deadline gate、只读工具重试和取消等待；`KI-016` 的硬进程中断、`KI-017` 的同步线程硬取消及 `KI-018` 的逐调用 usage/版本化定价/硬成本门仍未关闭。
+- M13-T2 已补稳定错误目录、显式指数退避、次数/remaining deadline gate、只读工具重试和取消等待；M13-T6 的 Fake 限流只证明该合同。`KI-016` 的进行中 durable Run hard-kill、`KI-017` 的同步线程硬取消及 `KI-018` 的逐调用 usage/版本化定价/硬成本门仍未关闭。
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T5 verified handoff，
-再核对 `V-20260831-005`、`ADR-0038` 和实施计划 M13-T6。M13-T5 已 verified，`KI-011` 已关闭；
-下一原子动作是只读恢复现有 load/eval/observability、RunCoordinator、PostgreSQL 故障注入与部署
-脚本，先冻结并发、慢客户端、数据库断开、模型限流和重启恢复的有界场景、指标和清理范围。
-未经新授权不运行有状态压测、不升级依赖、不读取 Key/用户 `.env`、不执行在线/付费调用或 push。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T6 verified handoff，
+再核对 `V-20260901-001`、`ADR-0039`、`docs/m13-load-fault.md` 和实施计划 M13-T7。M13-T6 已
+verified；下一原子动作是只读恢复现有阶段文档结构和 M13-T1–T6 证据，冻结 M13-T7 跟练、故障
+手册、观测速查、考核、费曼任务与 30 项映射。未经新授权不运行在线 Provider、不升级依赖、
+不读取 Key/用户 `.env`、不修改学习者 `docs/progress.md` 或 push。
