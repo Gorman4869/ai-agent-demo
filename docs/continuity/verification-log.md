@@ -4422,3 +4422,47 @@
 - 本轮没有 push，远程仍停在 `38fd696`；ahead 6 包含既有 M13-T3/T4/T5 文档/实现与本提交。
 - 本锚点文档形成后只需重跑连续性/diff 检查并创建一个本地验证/交接提交；下一任务保持
   M13-T7，不再为刚生成的文档提交创建第三个 hash 回填提交。
+
+## V-20260901-003：M13-T7 生产工程跟练与里程碑验收
+
+- 任务：`M13-T7 / verified`
+- 时间：2026-09-01 09:53，Asia/Shanghai
+- 验证目标：把 M13-T1 至 M13-T6 的已验证工程能力整理为前端开发者可执行的七次跟练、未知
+  故障响应手册、观测速查、概念/实操/场景考核、费曼复述和 30 项大纲映射，并执行里程碑默认门。
+- 验证基线：`68ea1bb7ef68bcfde22c87b9cebfa3444d4e1997`。
+- 任务等级：B 类里程碑学习交付；默认 offline。没有读取 Key/用户 `.env`、调用在线 Provider、
+  启动 Docker、有状态数据库演练、升级依赖、修改 `docs/progress.md` 或 push，费用为 0。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1`（课程产物后） | 0 | 52 个稳定任务、161 个 Markdown 文件的状态、任务、链接和恢复规则通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（沙箱内首轮） | 1 | backend 收集/运行 703 项，但 Windows sandbox 拒绝用户 Temp 目录，造成 54 个环境错误；MCP 子进程不可用派生 2 个失败，后续 required layer 按合同停止，不作为代码通过证据 |
+| 同一默认门（沙箱外首次） | 1 | Temp/进程权限恢复后 backend 703 项仅余 TypeScript MCP E2E 一项 `startup_timeout`，另有 1 项既有 Windows symlink 条件跳过；后续层按合同停止，失败事实保留 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_mcp_client_e2e.McpTypescriptServerE2ETest.test_calls_known_and_unknown_concepts_through_registry -v`（沙箱外） | 0 | 唯一失败用例 1 项通过，0.281s；确认前次为本地子进程启动抖动，未修改代码或放宽 timeout |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（沙箱外最终） | 0 | offline 后端 703 项通过、1 项既有 Windows symlink 条件跳过；Code Agent Demo、`pip check`、MCP TypeScript build/STDIO 11 项、Vue 12 项和 production build 均通过；汇总 3 passed、4 skipped、0 failed |
+| `git diff --check` | 0 | 课程、映射和连续性文件无 whitespace 错误；仅有 Git LF/CRLF 工作树提示 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1`（最终 handoff 后） | 0 | 52 个稳定任务、162 个 Markdown 文件通过；M13 verified、M14-T1 planned 与最新恢复入口一致 |
+
+### 课程产物与自审
+
+- `docs/stages/13-production-engineering.md` 形成目标/边界、系统图、20% 关键知识、五级能力阶梯、
+  七次跟练、生产故障算法、证据分级、100 分题库与红线、费曼复述、30 项映射和最终清单。
+- `docs/m13-incident-handbook.md` 固定七步事故流程、决策树、六道重试门、十类故障卡、恢复五证、
+  验证层选择、事故模板和禁止动作；`docs/m13-observability-cheat-sheet.md` 提供一页排障入口。
+- `build-learning-plan` 的项目化、五级路线、20% 关键知识、工作映射、可观察通关、三类题和费曼
+  模板用于约束课程结构；没有据此扩张新业务实现或覆盖学习者个人进度。
+- 自审发现 Stage 首稿把实际 package 写成不存在的 `backend/app/observability.py`，已改为真实
+  `backend/app/observability/durable.py`。所有 Markdown 链接和其余代码/脚本入口存在。
+
+### 失败、边界与结论
+
+- 沙箱内 Temp ACL 失败与沙箱外一次 MCP `startup_timeout` 都保留；最终成功不能删除前序事实。
+  测试日志中的 OpenAI/DashScope URL 来自本地 `MockTransport` 合同，不是网络 Provider 调用。
+- 本轮不重跑 M13-T4/T6 的有状态 Docker 部署和故障演练；真实镜像、PostgreSQL、Nginx SSE、
+  restart 和三轮 16/4 工作点继续引用 `V-20260831-003` 与 `V-20260901-001`，不伪造新证据。
+- 没有新架构决策，因此不新增 ADR。`KI-015/KI-016/KI-017/KI-018/KI-027` 没有新的关闭证据，
+  状态保持不变；学习者尚未实际完成题库和费曼，工程 `verified` 不代替个人勾选。
+- M13-T1 至 M13-T7 的代码、测试、远程 CI、单实例部署、故障演练和课程材料均有对应证据；
+  M13 达到工程 `verified`。下一任务为 `M14-T1 / planned`，不在本轮提前实现。

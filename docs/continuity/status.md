@@ -61,6 +61,7 @@
 - M13-T4 验证基线：`15fdf2b`；实现提交：`cd0f11a`；验证记录：`V-20260831-003/004`
 - M13-T5 验证基线：`4c029bb`；实现提交：`5525a02`；验证记录：`V-20260831-005/006`
 - M13-T6 验证基线：`b87ecda`；实现提交：`753786e`；验证记录：`V-20260901-001/002`
+- M13-T7 验证基线：`68ea1bb`；验证记录：`V-20260901-003`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -68,14 +69,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M13-T7` |
+| 任务 ID | `M14-T1` |
 | 状态 | `planned` |
-| 目标 | 汇总 M13-T1–T6 为生产工程跟练、故障手册、观测速查、考核与费曼任务 |
-| 设计依据 | 实施计划 M13-T7；M13-T1 至 M13-T6 已验证边界；`docs/continuity/course-delivery-playbook.md` |
-| 执行协议 | B 类里程碑学习交付；复用已验证代码与证据，不为教程新增生产能力或在线调用 |
-| 当前修改 | M13-T6 已以 `V-20260901-001` verified：离线/localhost 负载、慢 SSE、确定性限流、PostgreSQL stop/start、结果未知幂等恢复、backend restart 和资源快照通过；16/4 工作点连续三次 0% 错误 |
-| 验证 | 相关回归最终 77 项通过；三次唯一 Docker project 完整退出 0 并清理；未读取 Key/用户 `.env`，未执行在线 Provider |
-| 下一动作 | 只读恢复 playbook、现有阶段文档结构及 M13-T1–T6 证据，冻结 M13-T7 的章节、题目、故障手册和 30 项映射，不先修改学习者 `docs/progress.md` |
+| 目标 | 在受控测试站点实现真实 Browser Adapter、DOM/截图观察和有界导航/点击/输入动作 |
+| 设计依据 | 实施计划 M14-T1；M13 已验证的错误、观测、部署和进程安全边界；M14 stage |
+| 执行协议 | 先只读恢复和威胁建模；保持离线 planner 对照，不接真实个人登录态，不提前进入 SSRF/完整审批 T2 |
+| 当前修改 | M13-T7 已以 `V-20260901-003` verified：七次跟练、故障手册、观测速查、考核、费曼和 30 项映射落盘；默认门最终 offline/MCP/frontend 通过 |
+| 验证 | 后端 703 项通过、1 项既有 symlink 条件跳过；MCP 11 项、Vue 12 项与生产构建通过；未读取 Key、未运行在线 Provider/Docker、未修改 `docs/progress.md` |
+| 下一动作 | 按恢复顺序读取 M14-T1、现有浏览器离线 planner/安全实验和相关 ADR/测试，先冻结真实浏览器 adapter 的受控站点、动作、失败和审批边界 |
 
 ## 里程碑状态
 
@@ -88,15 +89,15 @@
 | M10 LangGraph 持久工作流 | `verified` | M10-T1–M10-T6 verified；checkpoint、服务端审批 resume、结构化重规划、真实 manager-as-tools/单 Agent 对照、10 场景故障矩阵、课程材料与完整离线门均有证据；当时保留的进程重启/PostgreSQL/ToolExecution 缺口已由 M11/M12 承接，`KI-004` 现已关闭 |
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
-| M13 生产工程闭环 | `in_progress` | M13-T1–M13-T6 `verified`，`KI-008/KI-009/KI-011` 已关闭；M13-T7 跟练与验收为下一任务 |
+| M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
 | M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
 
 ## 当前阻塞
 
-- M13-T7 尚未开始，当前没有已确认的代码阻塞；它是学习交付，不应借机扩大为在线 Provider、生产 HA 或新基础设施实现。
-- npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，不阻塞 M12 验收，但须由 M13 独立升级任务处理。
+- M14-T1 尚未开始，当前没有已确认的代码阻塞；真实浏览器必须限制在受控测试站点，不使用真实个人登录态，也不提前把 M14-T2 的 SSRF/完整审批边界简化掉。
+- npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
-- M13-T6 连续性闭环将形成新的本地提交；本地 M13-T3/T4/T5/T6 提交未经单独授权不会 push。
+- M13-T7 将形成一个本地课程/验证提交；本地 M13-T3 至 M13-T7 提交未经单独授权不会 push。
 
 ## 未验证范围
 
@@ -258,8 +259,8 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T6 verified handoff，
-再核对 `V-20260901-001`、`ADR-0039`、`docs/m13-load-fault.md` 和实施计划 M13-T7。M13-T6 已
-verified；下一原子动作是只读恢复现有阶段文档结构和 M13-T1–T6 证据，冻结 M13-T7 跟练、故障
-手册、观测速查、考核、费曼任务与 30 项映射。未经新授权不运行在线 Provider、不升级依赖、
-不读取 Key/用户 `.env`、不修改学习者 `docs/progress.md` 或 push。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T7 verified handoff，
+再核对 `V-20260901-003`、`docs/stages/13-production-engineering.md`、M13 故障手册/速查和实施计划
+M14-T1。M13 已 verified；下一原子动作是只读审计 M14 现有离线 browser planner、受控站点、
+动作/观察协议和测试边界，不使用真实个人登录态，不提前进入 M14-T2 SSRF/完整审批，不读取
+Key/用户 `.env`、不升级依赖、不修改学习者 `docs/progress.md` 或 push。

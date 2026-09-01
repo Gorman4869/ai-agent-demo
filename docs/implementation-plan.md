@@ -1052,6 +1052,23 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：`docs/stages/13-production-engineering.md`、故障手册、观测速查、考核和费曼任务。
 - 验收：学习者能从一次未知故障开始，用 Trace、日志和指标定位并恢复服务。
 
+#### M13-T7 实现结果（2026-09-01，verified）
+
+- Stage 13 已整理为面向前端开发者的七次跟练：Run 可观测、稳定错误/六道重试门、七层验证、
+  单实例部署、代码进程安全、固定负载/故障演练和未知故障综合验收；每次均给出真实代码入口、
+  精确命令、工作映射、产出、通关标准和常见错误。
+- 新增 `docs/m13-incident-handbook.md`，固定止损、定界、定位、仲裁、恢复、验证和复盘七步，
+  覆盖 Provider、MCP/工具、结果未知、PostgreSQL、Nginx SSE、CI、代码进程和成本故障卡，以及
+  新 Run、旧 Run、健康依赖、持久终态和精确清理五类恢复证据。
+- 新增 `docs/m13-observability-cheat-sheet.md`，汇总 log/metric/trace/snapshot/EventStore、最小
+  排查链、常用 span、六道重试门、usage/cost、敏感边界和高频故障；Stage 同时补五级能力阶梯、
+  20% 关键知识、概念/实操/场景题、80 分红线、费曼复述和 30 项映射。
+- 课程只复用 `M13-T1` 至 `M13-T6` 已验证能力和边界，没有修改业务代码、依赖、构建配置、
+  `docs/progress.md` 或 accepted ADR，也没有读取 Key、执行在线 Provider、Docker 演练或 push。
+- 里程碑默认门最终通过：offline 后端 703 项通过、1 项既有 Windows symlink 条件跳过；MCP
+  11 项、Vue 12 项和生产构建通过。首次沙箱 Temp/MCP 子进程失败和一次沙箱外 MCP 启动超时
+  均保留，唯一用例定向通过后完整门复跑退出 0。验证见 `V-20260901-003`。
+
 ## M14：真实浏览器、多模态与最终作品集
 
 ### M14-T1：真实 Browser Adapter 与受控动作
