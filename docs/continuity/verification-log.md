@@ -4466,3 +4466,52 @@
   状态保持不变；学习者尚未实际完成题库和费曼，工程 `verified` 不代替个人勾选。
 - M13-T1 至 M13-T7 的代码、测试、远程 CI、单实例部署、故障演练和课程材料均有对应证据；
   M13 达到工程 `verified`。下一任务为 `M14-T1 / planned`，不在本轮提前实现。
+
+## V-20260901-004：M14-T1 受控真实 Browser Adapter 验证
+
+- 任务：`M14-T1 / verified`
+- 时间：2026-09-01，Asia/Shanghai
+- 验证目标：在保留离线 Browser planner 的前提下，用真实 Playwright Chromium 执行受控
+  fixture 的导航、DOM 读取、输入、提交和截图，并证明页面漂移、元素消失、跨域、弹窗/新窗口
+  和下载均 fail closed。
+- 验证基线：`4df0341`；本记录覆盖其后的 M14-T1 未提交 worktree，提交 ID 由后续恢复记录补记。
+- 任务等级：A 类浏览器安全/审批公共合同 + C 类本地真实 Chromium；证据为离线 E3。
+- 授权与数据边界：使用仓库既有 Node 22.16.0、`@playwright/test` 和已安装 Chromium；没有安装
+  或升级依赖、切换 Node、访问公网、读取 Key/用户 `.env`、加载个人 browser profile/Cookie、
+  启动 Docker/PostgreSQL、修改 `docs/progress.md`、调用 Provider、产生费用或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `node --check frontend/scripts/controlled-browser-driver.mjs` | 0 | 固定 Playwright bridge 语法通过；Node 为 22.16.0，无需 nvm 切换 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_driver -v`（沙箱内两次尝试） | 1 | 每次 12 项先通过，3 项在业务断言前因 Windows sandbox 拒绝临时目录而 error；第二次改到仓库临时目录仍被同一 ACL 拒绝，生成的 3 个测试临时目录随后按精确路径清理；该结果不作为代码失败或成功证据 |
+| 同一 15 项定向命令（沙箱外） | 0 | 15 项全部通过；页面摘要、driver 注入、fixture、响应边界、repr 脱敏和 Provider 环境剥离通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.browser_driver_integration -v`（首次真实 Chromium） | 0 | 3 项通过，11.483s；真实 DOM/输入/提交/PNG 与全部计划失败矩阵通过 |
+| Advanced Harness、Browser Agent/Driver、Code Agent、Multimodal 相关 30 项 | 0 | 30 项通过、1 项既有 Windows symlink 能力条件跳过；Node 语法检查同轮通过 |
+| 同一真实 Chromium 集成最终复跑 | 0 | 3 项通过，6.723s；最终 bridge 加固后仍通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_driver backend.tests.browser_driver_integration -v` | 0 | 最终 18 项合并复跑全部通过，6.608s |
+| `git diff --check`（连续性文档前） | 0 | 代码、测试、ADR、规约和 M14 文档无 whitespace 错误；只有既有 LF/CRLF 工作树提示 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1`（status/handoff 后） | 0 | 52 个稳定任务、165 个 Markdown 文件通过；M14-T1 verified、M14-T2 planned、V/ADR/KI/恢复入口一致 |
+| `git diff --check`（status/handoff 后） | 0 | 最终工作树无 whitespace 错误；只有既有 LF/CRLF 工作树提示 |
+
+### 实现、自审与边界
+
+- `PlaywrightBrowserDriver` 通过 M13 有界进程边界启动固定 Node 脚本；请求/响应使用权限受限临时
+  文件，子进程只收到最小环境 allowlist，stdout/stderr 必须为空，JSON、URL/origin、文本、稳定
+  element ID、PNG 签名/大小和摘要由 Python 再校验。
+- 每次创建全新 Chromium context；route 只 fulfill `BrowserFixtureSite` 精确登记的 HTTPS 文档，
+  其他请求全部中止。证据来自真实 Playwright DOM/事件/截图，不是 import、模拟浏览器或公网 E4。
+- DOM 动作必须携带前次页面摘要，稳定 `data-agent-id` 必须存在、可见且唯一。click/type/submit
+  仍消费精确单次审批；typed value、页面文本、URL、HTML、截图和子进程原始错误不进入 repr/稳定错误。
+- 聚焦自审补了空 stdout/stderr、浏览器不可用稳定错误、标题/元素 ID/截图响应边界和 fixture mapping
+  校验。未修改已接受 ADR；新增 `ADR-0040` 固定跨语言 fixture-only driver 边界。
+- `KI-010` 保持 open：当前审批仍未绑定规范化完整 URL 与整个 plan digest，也没有 DNS/IP/private/
+  metadata/redirect 复核或上传下载策略。M14-T2 继续处理，不能用本次无公网 fixture 证据关闭。
+- 按原子任务风险运行定向和真实浏览器回归，没有触发依赖、锁文件、构建配置、HTTP API 或前端
+  产品接口变化，因此未重复完整 703+ offline、MCP、Vue build、Docker 或在线门。
+
+### 结论
+
+M14-T1 的真实调用链、代表性失败、安全边界、工作说明和可复现命令满足计划，达到
+`verified`。下一任务为 `M14-T2 / planned`，只补 Browser SSRF 与完整审批绑定，不提前进入视觉。

@@ -62,6 +62,7 @@
 - M13-T5 验证基线：`4c029bb`；实现提交：`5525a02`；验证记录：`V-20260831-005/006`
 - M13-T6 验证基线：`b87ecda`；实现提交：`753786e`；验证记录：`V-20260901-001/002`
 - M13-T7 验证基线：`68ea1bb`；验证记录：`V-20260901-003`
+- M14-T1 验证基线：`4df0341`；验证记录：`V-20260901-004`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -69,14 +70,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M14-T1` |
+| 任务 ID | `M14-T2` |
 | 状态 | `planned` |
-| 目标 | 在受控测试站点实现真实 Browser Adapter、DOM/截图观察和有界导航/点击/输入动作 |
-| 设计依据 | 实施计划 M14-T1；M13 已验证的错误、观测、部署和进程安全边界；M14 stage |
-| 执行协议 | 先只读恢复和威胁建模；保持离线 planner 对照，不接真实个人登录态，不提前进入 SSRF/完整审批 T2 |
-| 当前修改 | M13-T7 已以 `V-20260901-003` verified：七次跟练、故障手册、观测速查、考核、费曼和 30 项映射落盘；默认门最终 offline/MCP/frontend 通过 |
-| 验证 | 后端 703 项通过、1 项既有 symlink 条件跳过；MCP 11 项、Vue 12 项与生产构建通过；未读取 Key、未运行在线 Provider/Docker、未修改 `docs/progress.md` |
-| 下一动作 | 按恢复顺序读取 M14-T1、现有浏览器离线 planner/安全实验和相关 ADR/测试，先冻结真实浏览器 adapter 的受控站点、动作、失败和审批边界 |
+| 目标 | 为 Browser Agent 增加完整 URL/plan digest 审批与 DNS/IP/redirect SSRF 防护，并固定上传下载策略 |
+| 设计依据 | 实施计划 M14-T2；`ADR-0040` 的 fixture-only 边界；`KI-010` |
+| 执行协议 | 先只读恢复 M14-T1 真实 driver 与审批参数；逐层冻结 URL、解析后地址和每次 redirect 复核，不接真实个人登录态或提前进入视觉 T3 |
+| 当前修改 | M14-T1 已以 `V-20260901-004` verified：保留离线 planner，新增有界 Playwright bridge、fresh Chromium fixture、DOM/PNG observation、页面摘要和失败矩阵 |
+| 验证 | Browser 专项最终 18 项通过，其中真实 Chromium 3 项；相关 Advanced Agent 30 项通过、1 项既有 symlink 条件跳过；无公网、Key、个人数据、依赖变更或 push |
+| 下一动作 | 读取 `ADR-0040`、`browser_approval_arguments()`、URL canonicalization 和 KI-010，先冻结完整 URL/plan digest、DNS resolver/redirect validator 与上传下载 fail-closed 合同 |
 
 ## 里程碑状态
 
@@ -90,17 +91,20 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `planned` | 依赖 M13 安全、观测和部署门禁 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1 已 verified：真实 Chromium fixture、DOM/截图观察和受控动作通过；T2 SSRF/完整审批至 T8 尚未完成 |
 
 ## 当前阻塞
 
-- M14-T1 尚未开始，当前没有已确认的代码阻塞；真实浏览器必须限制在受控测试站点，不使用真实个人登录态，也不提前把 M14-T2 的 SSRF/完整审批边界简化掉。
+- M14-T2 尚未开始，`KI-010` 是当前明确安全缺口：M14-T1 只证明 fixture-only 真实浏览器，尚不能访问任意公网 URL，也不能把 origin/page digest 审批描述成完整 URL/plan 审批。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
-- M13-T7 将形成一个本地课程/验证提交；本地 M13-T3 至 M13-T7 提交未经单独授权不会 push。
+- M14-T1 将形成一个本地实现/验证提交；未经单独授权不会 push。
 
 ## 未验证范围
 
+- M14-T1 是本地 fixture-only E3：没有真实公网、DNS 解析、私网/metadata 判断、redirect 复核、
+  完整 URL/plan digest 审批、上传下载许可、个人 profile/Cookie、跨平台浏览器或生产隔离证据；
+  `KI-010` 保持 open，由 M14-T2 承接。
 - M13-T1 没有实现 OpenTelemetry/vendor exporter、跨服务 propagation、逐调用 Provider usage、版本化价格表或 `max_cost_usd` 硬门；未知费用保持 `null/unknown`，`KI-018` 只降为 mitigated。
 - 单事件缺少可靠成对边界时，细分 span 的 `duration_ms` 保持 `null`；当前不会用 Run 总耗时冒充纯模型或工具耗时。
 - M13-T2 当时没有重跑真实 PostgreSQL integration；M13-T4/T6 后续已补真实数据库、backend restart 和 PostgreSQL stop/start。M13-T6 捕获了 create 已提交但响应失败的结果未知窗口，并按同键重放恢复；多进程终态竞争、跨 Store 一致性和进行中 Run 的 backend hard-kill 仍由 `KI-015/KI-016` 跟踪。
@@ -259,8 +263,8 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M13-T7 verified handoff，
-再核对 `V-20260901-003`、`docs/stages/13-production-engineering.md`、M13 故障手册/速查和实施计划
-M14-T1。M13 已 verified；下一原子动作是只读审计 M14 现有离线 browser planner、受控站点、
-动作/观察协议和测试边界，不使用真实个人登录态，不提前进入 M14-T2 SSRF/完整审批，不读取
-Key/用户 `.env`、不升级依赖、不修改学习者 `docs/progress.md` 或 push。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T1 verified handoff，
+再核对 `V-20260901-004`、`ADR-0040`、`docs/m14-browser-driver.md`、实施计划 M14-T2 和 `KI-010`。
+M14-T1 已 verified；下一原子动作是只读审计完整 URL/plan digest 审批、URL canonicalization、
+DNS/IP/private/metadata 与每次 redirect 复核边界，不使用真实个人登录态、不提前进入视觉 T3，
+不读取 Key/用户 `.env`、不升级依赖、不修改学习者 `docs/progress.md` 或 push。

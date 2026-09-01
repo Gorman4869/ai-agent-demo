@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from backend.app.advanced.browser_agent import (
     BrowserAction,
@@ -9,6 +11,7 @@ from backend.app.advanced.browser_agent import (
     BrowserPlan,
     browser_approval_arguments,
 )
+from backend.app.advanced.browser_driver import BrowserDriverRun, BrowserObservation
 from backend.app.advanced.harness import PolicyViolation
 from backend.app.tools import InMemoryApprovalStore, ToolExecutionContext
 
@@ -203,6 +206,53 @@ class BrowserAgentTest(unittest.TestCase):
         self.assertEqual("approval_required", raised.exception.code)
         self.assertEqual("exact_call_approval_missing", raised.exception.detail)
 
+    def test_real_driver_path_revalidates_plan_and_binds_page_digest_approval(
+        self,
+    ) -> None:
+        digest = "a" * 64
+        agent = _agent()
+        plan = agent.validate_plan(
+            [
+                {
+                    "id": "nav",
+                    "kind": "navigate",
+                    "url": "https://docs.example.test/",
+                },
+                {
+                    "id": "type-1",
+                    "kind": "type",
+                    "element_id": "search-box",
+                    "value": "agent security",
+                    "expected_page_digest": digest,
+                },
+            ]
+        )
+        approvals = InMemoryApprovalStore()
+        approvals.grant(
+            principal_id="user-1",
+            tool_call_id="type-1",
+            tool_name="browser.type",
+            arguments=browser_approval_arguments(plan.actions[-1]),
+        )
+        driver = _RecordingDriver()
+
+        result = agent.run_with_driver(
+            plan,
+            driver=driver,
+            context=ToolExecutionContext(
+                principal_id="user-1",
+                approval_store=approvals,
+            ),
+        )
+
+        self.assertEqual("playwright", result.driver)
+        self.assertEqual(1, driver.validation_count)
+        self.assertEqual(plan.actions, driver.executed_actions)
+        self.assertEqual(
+            digest,
+            browser_approval_arguments(plan.actions[-1])["expected_page_digest"],
+        )
+
     def test_rejects_scripts_downloads_selectors_and_sensitive_elements(self) -> None:
         agent = _agent()
         cases = (
@@ -304,6 +354,32 @@ def _type_plan(value: str) -> list[dict[str, str]]:
             "value": value,
         },
     ]
+
+
+@dataclass
+class _RecordingDriver:
+    validation_count: int = 0
+    executed_actions: tuple[BrowserAction, ...] = ()
+
+    def validate(self, actions: Sequence[BrowserAction]) -> None:
+        self.validation_count += 1
+
+    def execute(self, actions: Sequence[BrowserAction]) -> BrowserDriverRun:
+        self.executed_actions = tuple(actions)
+        return BrowserDriverRun(
+            actions=(),
+            observation=BrowserObservation(
+                origin="https://docs.example.test",
+                page_digest="a" * 64,
+                visible_element_ids=(),
+                screenshot_sha256="b" * 64,
+                screenshot_bytes=8,
+                url="https://docs.example.test/",
+                title="Fixture",
+                text="",
+                screenshot_png=b"\x89PNG\r\n\x1a\n",
+            ),
+        )
 
 
 if __name__ == "__main__":

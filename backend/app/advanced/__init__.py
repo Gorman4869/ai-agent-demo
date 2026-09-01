@@ -8,6 +8,14 @@ from backend.app.advanced.browser_agent import (
     BrowserRun,
     browser_approval_arguments,
 )
+from backend.app.advanced.browser_driver import (
+    BrowserDriver,
+    BrowserDriverActionResult,
+    BrowserDriverRun,
+    BrowserFixtureSite,
+    BrowserObservation,
+    PlaywrightBrowserDriver,
+)
 from backend.app.advanced.code_agent import (
     ActionOutcome,
     AuditEntry,
@@ -40,6 +48,11 @@ __all__ = [
     "BrowserAction",
     "BrowserActionKind",
     "BrowserAgent",
+    "BrowserDriver",
+    "BrowserDriverActionResult",
+    "BrowserDriverRun",
+    "BrowserFixtureSite",
+    "BrowserObservation",
     "BrowserPlan",
     "BrowserRun",
     "CheckAction",
@@ -50,6 +63,7 @@ __all__ = [
     "MultimodalInspection",
     "OfflineMultimodalAgent",
     "PolicyViolation",
+    "PlaywrightBrowserDriver",
     "ProcessResourceLimits",
     "PngLimits",
     "PngMetadata",

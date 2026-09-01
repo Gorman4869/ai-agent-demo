@@ -57,16 +57,16 @@
 ## 计划验证命令
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_browser_agent_security -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.integration.test_browser_driver -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_vision_runtime -v
-.\.venv\Scripts\python.exe -B -m unittest backend.tests.test_advanced_capstone_evals -v
+./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_driver -v
+./.venv/Scripts/python.exe -B -m unittest backend.tests.browser_driver_integration -v
+./.venv/Scripts/python.exe -B -m unittest backend.tests.test_multimodal_agent -v
+./.venv/Scripts/python.exe -B -m unittest backend.tests.test_advanced_harness -v
 ```
 
 在线计划命令：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 -Suite M14
+powershell -ExecutionPolicy Bypass -File ./scripts/verify-online.ps1 -Suite M14
 ```
 
 ## 作品集必须包含

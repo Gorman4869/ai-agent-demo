@@ -404,3 +404,14 @@
 - Fault scripts own one exact Compose project and may stop/start/restart only services in that project. Cleanup removes only its containers, network, volume, and temporary files; never remove images or touch integration projects.
 - `docker stats --no-stream` is a point snapshot, and process RSS belongs to the measuring process. Label both accurately; neither is peak server resource evidence.
 - Record repeated short-run operating points as observations, not production capacity or SLA. Provider rate-limit fakes, localhost latency, single-instance restart, and short samples cannot prove online Provider behavior, high availability, multi-process arbitration, soak stability, or maximum throughput.
+
+## 32. Controlled Browser Driver Boundary
+
+- Keep model output at the planner layer. Browser actions may name only registered action kinds and stable server-owned element IDs; selectors, JavaScript, executable paths, process arguments, environment values, browser profiles, uploads, and downloads are not model-controlled.
+- Preserve the existing offline `BrowserAgent.run()` as a deterministic safety comparison. Real execution uses an explicitly injected `BrowserDriver` only after the compiled plan is revalidated and all exact side-effect approvals pass.
+- The M14-T1 default real-browser path uses a fresh Chromium context and server-owned `BrowserFixtureSite` documents fulfilled by Playwright routing. It must not load a user profile, cookies, accounts, extensions, personal data, or public network resources.
+- Reuse the bounded process runner for the fixed Node Playwright bridge. Use permission-restricted request/response files, a minimal environment allowlist, bounded wall/output/process/memory/CPU budgets, whole-tree cleanup, and empty stdout/stderr. Never pass Provider credentials to the browser child.
+- Require a lowercase SHA-256 page digest for every real DOM action. Recompute the digest and require the stable element ID to be present, visible, and unique immediately before execution; mismatch or disappearance fails closed.
+- Bound and revalidate returned action results, URL/origin, title/text bytes, visible element IDs, base64 PNG signature/size, and screenshot digest. URL, DOM text, typed values, HTML, screenshots, raw child output, and exception text stay out of repr and stable errors.
+- Cross-origin navigation, unknown fixture documents, popups/new windows, and downloads fail closed. Do not silently follow or retry them.
+- M14-T1 approval binding remains intentionally incomplete: it covers the exact action, origin, element, value digest, and page digest, but not the normalized full URL or entire plan digest. DNS/IP/redirect validation and upload/download policy remain M14-T2 work; do not close `KI-010` from fixture-only evidence.

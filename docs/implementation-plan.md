@@ -1078,6 +1078,19 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 约束：浏览器运行在受控环境；默认使用专用测试站点和无真实个人登录态。
 - 测试：计划与实际页面不一致、元素消失、跨域、弹窗、新窗口和下载均 fail closed。
 
+#### M14-T1 任务验收结果
+
+- 保留原 `BrowserAgent.run()` 离线模拟；新增显式 `run_with_driver()`、页面摘要合同和
+  `PlaywrightBrowserDriver`，通过 M13 有界进程边界调用前端既有 `@playwright/test`，没有新增依赖。
+- 每次真实执行使用全新 Chromium context，route 只返回 `BrowserFixtureSite` 中精确登记的合成
+  HTTPS 文档；真实完成 DOM 读取、输入、提交和 PNG 截图，不加载个人 profile/Cookie 或访问公网。
+- 页面摘要不一致、元素缺失、跨域、弹窗/新窗口和下载均返回稳定 fail-closed 错误；页面正文、
+  typed value、URL 和截图不进入 repr/稳定错误，Provider Key 不进入浏览器子进程环境。
+- 最终 Browser 专项 18 项通过，其中真实 Chromium 3 项覆盖正常路径与完整失败矩阵；相关
+  Advanced Agent 回归 30 项通过、1 项既有 Windows symlink 条件跳过。证据见 `V-20260901-004`。
+- M14-T1 达到 `verified`。本结论是 fixture-only 本地 E3，不包含完整 URL/plan digest 审批、DNS/IP/
+  私网/metadata/redirect 或上传下载策略；`KI-010` 保持 open，由下一任务 M14-T2 承接。
+
 ### M14-T2：Browser SSRF 与完整审批绑定
 
 - 依赖：M14-T1。

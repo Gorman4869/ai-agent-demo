@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import SplitResult, urlsplit
 
 from backend.app.advanced.harness import (
@@ -16,6 +16,9 @@ from backend.app.advanced.harness import (
     content_digest,
 )
 from backend.app.tools.registry import ToolExecutionContext
+
+if TYPE_CHECKING:
+    from backend.app.advanced.browser_driver import BrowserDriver, BrowserDriverRun
 
 
 class BrowserActionKind(str, Enum):
@@ -52,6 +55,7 @@ _SENSITIVE_ELEMENT = re.compile(
 )
 _ACTION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
 _ELEMENT_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}")
+_CONTENT_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,7 @@ class BrowserAction:
     url: str | None = field(default=None, repr=False)
     element_id: str | None = None
     value: str | None = field(default=None, repr=False)
+    expected_page_digest: str | None = None
 
     @property
     def requires_approval(self) -> bool:
@@ -195,6 +200,23 @@ class BrowserAgent:
             final_origin=validated_plan.actions[-1].origin,
         )
 
+    def run_with_driver(
+        self,
+        plan: BrowserPlan,
+        *,
+        driver: BrowserDriver,
+        context: ToolExecutionContext | None = None,
+    ) -> BrowserDriverRun:
+        """Execute a revalidated plan through an explicitly injected driver."""
+
+        validated_plan = self._revalidate_plan(plan)
+        driver.validate(validated_plan.actions)
+        execution_context = context or ToolExecutionContext()
+        for action in validated_plan.actions:
+            if action.requires_approval:
+                _consume_action_approval(action, execution_context)
+        return driver.execute(validated_plan.actions)
+
     def _revalidate_plan(self, plan: BrowserPlan) -> BrowserPlan:
         if not isinstance(plan, BrowserPlan) or plan.policy_digest != self._policy_digest:
             raise PolicyViolation(
@@ -308,6 +330,15 @@ class BrowserAgent:
         value = None
         if kind is BrowserActionKind.TYPE:
             value = _required_string(raw_action.get("value"), "value", allow_empty=True)
+        expected_page_digest = raw_action.get("expected_page_digest")
+        if expected_page_digest is not None and (
+            not isinstance(expected_page_digest, str)
+            or _CONTENT_DIGEST.fullmatch(expected_page_digest) is None
+        ):
+            raise PolicyViolation(
+                "invalid_browser_action",
+                "expected page digest must be a lowercase SHA-256 value",
+            )
         return (
             BrowserAction(
                 action_id,
@@ -315,6 +346,7 @@ class BrowserAgent:
                 current_origin,
                 element_id=element_id,
                 value=value,
+                expected_page_digest=expected_page_digest,
             ),
             current_origin,
         )
@@ -332,6 +364,8 @@ def browser_approval_arguments(action: BrowserAction) -> dict[str, object]:
         value_bytes = action.value.encode("utf-8")
         arguments["value_sha256"] = content_digest(value_bytes)
         arguments["value_bytes"] = len(value_bytes)
+    if action.expected_page_digest is not None:
+        arguments["expected_page_digest"] = action.expected_page_digest
     return arguments
 
 
@@ -364,6 +398,8 @@ def _simulate_action(action: BrowserAction) -> BrowserActionResult:
         value_bytes = action.value.encode("utf-8")
         details["value_sha256"] = content_digest(value_bytes)
         details["value_bytes"] = len(value_bytes)
+    if action.expected_page_digest is not None:
+        details["expected_page_digest"] = action.expected_page_digest
     return BrowserActionResult(
         action_id=action.id,
         kind=action.kind.value,
@@ -389,6 +425,8 @@ def _raw_action_from_compiled(action: BrowserAction) -> dict[str, object]:
         raw_action["element_id"] = action.element_id
         if action.kind is BrowserActionKind.TYPE:
             raw_action["value"] = action.value
+        if action.expected_page_digest is not None:
+            raw_action["expected_page_digest"] = action.expected_page_digest
     return raw_action
 
 
@@ -416,10 +454,10 @@ def _action_fields(
         fields = frozenset({"id", "kind", "url"})
         return fields, fields
     if kind is BrowserActionKind.TYPE:
-        fields = frozenset({"id", "kind", "element_id", "value"})
-        return fields, fields
-    fields = frozenset({"id", "kind", "element_id"})
-    return fields, fields
+        required = frozenset({"id", "kind", "element_id", "value"})
+        return required, required | {"expected_page_digest"}
+    required = frozenset({"id", "kind", "element_id"})
+    return required, required | {"expected_page_digest"}
 
 
 def _parse_allowed_origin(value: str) -> str:
