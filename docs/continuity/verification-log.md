@@ -4515,3 +4515,62 @@
 
 M14-T1 的真实调用链、代表性失败、安全边界、工作说明和可复现命令满足计划，达到
 `verified`。下一任务为 `M14-T2 / planned`，只补 Browser SSRF 与完整审批绑定，不提前进入视觉。
+
+## V-20260901-005：M14-T2 Browser 完整审批与 SSRF 防护验证
+
+- 任务：`M14-T2 / verified`
+- 时间：2026-09-01，Asia/Shanghai
+- 验证目标：让副作用审批绑定规范化完整 URL 与整个 Browser plan digest；对初始 URL、DNS/IP、
+  每个 redirect 和最终 URL fail closed，并固定上传下载策略。
+- 验证基线：`4ddfd68`；本记录覆盖其后的 M14-T2 未提交 worktree，提交 ID 由后续恢复记录补记。
+- 任务等级：A 类浏览器安全/审批公共合同 + C 类本地真实 Chromium；证据为 fixture-only 离线 E3。
+- 授权与数据边界：使用仓库既有 Node 22.16.0、`@playwright/test` 和 Chromium；没有安装/升级
+  依赖、切换 Node、访问公网、读取 Key/用户 `.env`、加载个人 profile/Cookie、调用 Provider、
+  启动 Docker/PostgreSQL、产生费用、修改 `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `node --check frontend/scripts/controlled-browser-driver.mjs` | 0 | 固定 bridge 语法通过；Node 22.16.0，无需 nvm 切换 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_network -v` | 0 | 最终 19 项通过；完整 URL/plan digest、地址分类、DNS rebinding、redirect loop/limit 通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_driver -v`（受限沙箱） | 1 | 3 项先通过，5 项均在业务断言前因 Python 系统临时目录 `WinError 5` error；不作为代码失败或成功证据 |
+| 同一 Driver 8 项命令（沙箱外） | 0 | 8 项全部通过；metadata redirect 和执行边界 DNS rebinding 均在 fake runner 启动前拒绝 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.browser_driver_integration -v`（最终） | 0 | 真实 Chromium 4 项通过，8.728s；正常 DOM/截图、安全 redirect、跨域/popup/upload/download 拒绝通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_network backend.tests.test_browser_driver backend.tests.browser_driver_integration -v` | 0 | 最终 Browser 合并 31 项全部通过，8.597s |
+| Advanced Harness、Browser、Code Agent Process、Multimodal 相关回归 | 0 | 52 项通过、1 项既有 Windows symlink 能力条件跳过，4.289s |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、168 个 Markdown 文件通过；M14-T2 verified、M14-T3 planned、V/ADR/KI/handoff 一致 |
+| `git diff --check` | 0 | 最终工作树无 whitespace 错误；只有既有 LF/CRLF 工作树提示 |
+
+### 失败尝试、修正与架构证据
+
+- 地址分类首轮有 1 项失败：当前 Python 的 `ipaddress` 对 `224.0.0.1` 给出了不能单独作为放行依据
+  的 `is_global` 结果。策略改为同时显式拒绝 multicast、reserved 和 unspecified；最终地址矩阵通过。
+- 最初让 Playwright route 对登记 redirect source 返回合成 302；3 个原有真实 Chromium 用例通过，
+  新 redirect 用例因后续请求未重新进入预期 route 而 timeout。三个最小无公网探针得到同样结果。
+  根据 Playwright route 的 redirect 处理边界，改为 Python 先逐跳完成 URL/DNS/IP/origin/loop/limit
+  验证，Node 再导航最终登记 fixture；页面运行时请求 redirect source 仍以
+  `browser_redirect_unplanned` 拒绝。最终真实 Chromium 4 项通过。
+- `BrowserPlan` 对冻结动作计算 canonical plan digest。审批参数加入当前规范化完整 page URL 的
+  SHA-256/字节数和 plan digest；跨 path/query、动作相同但其他计划步骤不同、伪造 digest 都有
+  独立拒绝证据，URL 和 typed value 原文不进入 repr。
+- `BrowserNetworkPolicy` 每次调用显式 resolver，不跨计划/执行边界缓存；所有 DNS 回答均须为公网，
+  任一 private/link-local/shared/reserved/multicast/unspecified/非法地址都拒绝。每个 redirect 重新
+  规范化和解析，driver validate 与 execute 边界再次验证，DNS rebinding 在进程启动前 fail closed。
+- upload/download 在模型动作层禁止，真实 file chooser/download 事件也拒绝；popup/new window、
+  跨域和未知资源保持 fail closed。未新增“允许文件传输”的隐式分支。
+- 新增 `ADR-0041` 固定 URL/plan approval、resolver/redirect 和 transfer policy。`KI-010` 在本地
+  fixture E3 范围关闭；`SystemBrowserAddressResolver` 只是后续 real-network seam，不是公网证据。
+- 收口后的两次沙箱外 `git add -- <18 个任务文件>` 都在进程创建前因自动权限审查超时而未执行；
+  随后的仓库沙箱内同命令以 `.git/index.lock: Permission denied` 退出 1。只读复核确认没有 staged
+  文件、没有残留 `.git/index.lock`，代码和文档改动完整保留。用户随后明确授权同一 18 文件
+  暂存/本地提交，重试成功并以 `feat: harden browser URL policy` 收口；未 push。
+
+### 未验证范围与结论
+
+- 未运行任意公网 URL、真实公网 DNS/HTTP redirect、TLS/证书/代理一致性、生产 egress、个人登录态、
+  跨平台浏览器、在线模型或费用。当前 Chromium 仍只接收 server-owned fixture 内容。
+- 本任务未改变依赖/锁文件、HTTP API、Vue 产品代码、数据库或部署，因此按风险运行 Browser 与
+  Advanced Agent 相关回归，没有重复完整 703+ offline、MCP、Vue build、Docker 或 online profile。
+- M14-T2 的代码、测试、ADR、工作说明和真实 Chromium fixture 证据满足实施计划，达到
+  `verified`。下一任务为 `M14-T3 / planned`；本轮未实现或验证视觉输入。

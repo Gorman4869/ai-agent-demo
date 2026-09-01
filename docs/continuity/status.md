@@ -62,7 +62,8 @@
 - M13-T5 验证基线：`4c029bb`；实现提交：`5525a02`；验证记录：`V-20260831-005/006`
 - M13-T6 验证基线：`b87ecda`；实现提交：`753786e`；验证记录：`V-20260901-001/002`
 - M13-T7 验证基线：`68ea1bb`；验证记录：`V-20260901-003`
-- M14-T1 验证基线：`4df0341`；验证记录：`V-20260901-004`
+- M14-T1 验证基线：`4df0341`；实现提交：`4ddfd68`；验证记录：`V-20260901-004`
+- M14-T2 验证基线：`4ddfd68`；验证记录：`V-20260901-005`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -70,14 +71,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M14-T2` |
+| 任务 ID | `M14-T3` |
 | 状态 | `planned` |
-| 目标 | 为 Browser Agent 增加完整 URL/plan digest 审批与 DNS/IP/redirect SSRF 防护，并固定上传下载策略 |
-| 设计依据 | 实施计划 M14-T2；`ADR-0040` 的 fixture-only 边界；`KI-010` |
-| 执行协议 | 先只读恢复 M14-T1 真实 driver 与审批参数；逐层冻结 URL、解析后地址和每次 redirect 复核，不接真实个人登录态或提前进入视觉 T3 |
-| 当前修改 | M14-T1 已以 `V-20260901-004` verified：保留离线 planner，新增有界 Playwright bridge、fresh Chromium fixture、DOM/PNG observation、页面摘要和失败矩阵 |
-| 验证 | Browser 专项最终 18 项通过，其中真实 Chromium 3 项；相关 Advanced Agent 30 项通过、1 项既有 symlink 条件跳过；无公网、Key、个人数据、依赖变更或 push |
-| 下一动作 | 读取 `ADR-0040`、`browser_approval_arguments()`、URL canonicalization 和 KI-010，先冻结完整 URL/plan digest、DNS resolver/redirect validator 与上传下载 fail-closed 合同 |
+| 目标 | 复用统一模型配置接入真实视觉输入，同时保持结构化观察、不可信视觉文字、预算和离线回退 |
+| 设计依据 | 实施计划 M14-T3；M8 模型适配边界；既有 `OfflineMultimodalAgent`；`ADR-0041` |
+| 执行协议 | 先只读恢复 M14-T2 与 M8 model adapter；冻结离线 Fake Vision、真实视觉 adapter 和 untrusted observation 合同，不在 T3 执行在线付费调用 |
+| 当前修改 | M14-T2 已以 `V-20260901-005` verified：完整 URL/plan digest 审批、逐跳 DNS/IP/redirect 复核、DNS rebinding 防护与 upload/download fail-closed 已落盘 |
+| 验证 | Browser 合并 31 项通过，其中真实 Chromium 4 项；相关 Advanced Agent 52 项通过、1 项既有 symlink 条件跳过；无公网、Key、个人数据、依赖变更或 push |
+| 下一动作 | 读取 M8 统一模型配置、当前多模态实现/测试和 M14-T3 依赖，先冻结图像输入、结构化视觉观察、提示注入不可信标记与无在线授权回退合同 |
 
 ## 里程碑状态
 
@@ -91,20 +92,21 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1 已 verified：真实 Chromium fixture、DOM/截图观察和受控动作通过；T2 SSRF/完整审批至 T8 尚未完成 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T2 已 verified：真实 Chromium fixture、DOM/截图观察、完整 URL/plan 审批、SSRF/redirect 与传输默认拒绝通过；T3 视觉输入至 T8 尚未完成 |
 
 ## 当前阻塞
 
-- M14-T2 尚未开始，`KI-010` 是当前明确安全缺口：M14-T1 只证明 fixture-only 真实浏览器，尚不能访问任意公网 URL，也不能把 origin/page digest 审批描述成完整 URL/plan 审批。
+- M14-T3 尚未开始；真实视觉 Provider 调用必须留在 M14-T4，并重新取得单次在线授权，不能用 T3 的离线 adapter/fixture 证据冒充线上视觉 E4。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
-- M14-T1 将形成一个本地实现/验证提交；未经单独授权不会 push。
+- M14-T2 将形成一个本地实现/验证提交；未经单独授权不会 push。
 
 ## 未验证范围
 
-- M14-T1 是本地 fixture-only E3：没有真实公网、DNS 解析、私网/metadata 判断、redirect 复核、
-  完整 URL/plan digest 审批、上传下载许可、个人 profile/Cookie、跨平台浏览器或生产隔离证据；
-  `KI-010` 保持 open，由 M14-T2 承接。
+- M14-T2 是本地 fixture-only E3：完整 URL/plan digest、解析后 IP 分类、逐跳 redirect、DNS
+  rebinding 和上传下载拒绝已有确定性/真实 Chromium 证据，但没有访问任意公网、真实公网 DNS/
+  HTTP redirect、TLS/代理、个人 profile/Cookie、跨平台浏览器或生产 egress。`KI-010` 关闭不代表
+  已开放公网浏览器；`SystemBrowserAddressResolver` 仍只是后续真实网络 adapter 的安全 seam。
 - M13-T1 没有实现 OpenTelemetry/vendor exporter、跨服务 propagation、逐调用 Provider usage、版本化价格表或 `max_cost_usd` 硬门；未知费用保持 `null/unknown`，`KI-018` 只降为 mitigated。
 - 单事件缺少可靠成对边界时，细分 span 的 `duration_ms` 保持 `null`；当前不会用 Run 总耗时冒充纯模型或工具耗时。
 - M13-T2 当时没有重跑真实 PostgreSQL integration；M13-T4/T6 后续已补真实数据库、backend restart 和 PostgreSQL stop/start。M13-T6 捕获了 create 已提交但响应失败的结果未知窗口，并按同键重放恢复；多进程终态竞争、跨 Store 一致性和进行中 Run 的 backend hard-kill 仍由 `KI-015/KI-016` 跟踪。
@@ -263,8 +265,8 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T1 verified handoff，
-再核对 `V-20260901-004`、`ADR-0040`、`docs/m14-browser-driver.md`、实施计划 M14-T2 和 `KI-010`。
-M14-T1 已 verified；下一原子动作是只读审计完整 URL/plan digest 审批、URL canonicalization、
-DNS/IP/private/metadata 与每次 redirect 复核边界，不使用真实个人登录态、不提前进入视觉 T3，
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T2 verified handoff，
+再核对 `V-20260901-005`、`ADR-0041`、`docs/m14-browser-security.md`、实施计划 M14-T3 和当前
+multimodal/model adapter。M14-T2 已 verified 并完成本地提交；下一原子动作是只读审计图像输入、
+统一模型配置、结构化视觉观察、untrusted visual text、预算和无在线授权回退边界，不在 T3 执行 Provider 请求，
 不读取 Key/用户 `.env`、不升级依赖、不修改学习者 `docs/progress.md` 或 push。

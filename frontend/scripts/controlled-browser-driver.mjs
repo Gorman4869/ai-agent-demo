@@ -46,6 +46,8 @@ const assertRequest = (request) => {
     typeof request.fixture.origin !== "string" ||
     request.fixture.documents === null ||
     typeof request.fixture.documents !== "object" ||
+    request.fixture.redirects === null ||
+    typeof request.fixture.redirects !== "object" ||
     !Array.isArray(request.actions) ||
     request.limits === null ||
     typeof request.limits !== "object"
@@ -126,6 +128,7 @@ const run = async (request) => {
     fail("browser_driver_invalid_response");
   }
   const documents = new Map(Object.entries(request.fixture.documents));
+  const redirects = new Map(Object.entries(request.fixture.redirects));
   const { action_timeout_ms: actionTimeoutMs, max_screenshot_bytes: maxScreenshotBytes, max_text_bytes: maxTextBytes } = request.limits;
 
   let browser;
@@ -158,8 +161,19 @@ const run = async (request) => {
       await route.abort("blockedbyclient");
       return;
     }
+    if (route.request().resourceType() !== "document") {
+      blockedCode = "browser_fixture_not_found";
+      await route.abort("blockedbyclient");
+      return;
+    }
+    const redirectTarget = redirects.get(requestUrl);
+    if (redirectTarget !== undefined) {
+      blockedCode = "browser_redirect_unplanned";
+      await route.abort("blockedbyclient");
+      return;
+    }
     const document = documents.get(requestUrl);
-    if (route.request().resourceType() !== "document" || document === undefined) {
+    if (document === undefined) {
       blockedCode = "browser_fixture_not_found";
       await route.abort("blockedbyclient");
       return;
@@ -185,6 +199,9 @@ const run = async (request) => {
     eventFailureCode = "browser_download_blocked";
     await download.cancel().catch(() => undefined);
   });
+  page.on("filechooser", () => {
+    eventFailureCode = "browser_upload_blocked";
+  });
 
   const results = [];
   try {
@@ -204,12 +221,20 @@ const run = async (request) => {
 
       try {
         if (action.kind === "navigate") {
-          if (typeof action.url !== "string" || !documents.has(action.url)) {
+          if (
+            typeof action.url !== "string" ||
+            (!documents.has(action.url) && !redirects.has(action.url)) ||
+            typeof action.navigation_url !== "string" ||
+            !documents.has(action.navigation_url)
+          ) {
             fail("browser_fixture_not_found");
           }
-          await page.goto(action.url, { waitUntil: "domcontentloaded" });
+          await page.goto(action.navigation_url, { waitUntil: "domcontentloaded" });
         } else {
           if (currentOrigin(page) !== fixtureOrigin) {
+            fail("browser_page_mismatch");
+          }
+          if (typeof action.page_url !== "string" || page.url() !== action.page_url) {
             fail("browser_page_mismatch");
           }
           if (typeof action.element_id !== "string") {
@@ -271,6 +296,9 @@ const run = async (request) => {
       }
       if (currentOrigin(page) !== fixtureOrigin) {
         fail("browser_cross_origin");
+      }
+      if (action.kind !== "navigate" && page.url() !== action.page_url) {
+        fail("browser_page_mismatch");
       }
       const after = await pageState(page);
       results.push({

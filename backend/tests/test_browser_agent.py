@@ -116,6 +116,7 @@ class BrowserAgentTest(unittest.TestCase):
                     ),
                 ),
                 policy_digest=valid_plan.policy_digest,
+                plan_digest=valid_plan.plan_digest,
             ),
             BrowserPlan(
                 actions=(
@@ -128,6 +129,12 @@ class BrowserAgentTest(unittest.TestCase):
                     ),
                 ),
                 policy_digest=valid_plan.policy_digest,
+                plan_digest=valid_plan.plan_digest,
+            ),
+            BrowserPlan(
+                actions=valid_plan.actions,
+                policy_digest=valid_plan.policy_digest,
+                plan_digest="f" * 64,
             ),
         )
 
@@ -165,7 +172,10 @@ class BrowserAgentTest(unittest.TestCase):
                 principal_id="user-1",
                 tool_call_id=action.id,
                 tool_name=f"browser.{action.kind.value}",
-                arguments=browser_approval_arguments(action),
+                arguments=browser_approval_arguments(
+                    action,
+                    plan_digest=plan.plan_digest,
+                ),
             )
         context = ToolExecutionContext(
             principal_id="user-1",
@@ -191,7 +201,10 @@ class BrowserAgentTest(unittest.TestCase):
             principal_id="user-1",
             tool_call_id=approved_action.id,
             tool_name="browser.type",
-            arguments=browser_approval_arguments(approved_action),
+            arguments=browser_approval_arguments(
+                approved_action,
+                plan_digest=approved_plan.plan_digest,
+            ),
         )
 
         with self.assertRaises(PolicyViolation) as raised:
@@ -205,6 +218,116 @@ class BrowserAgentTest(unittest.TestCase):
 
         self.assertEqual("approval_required", raised.exception.code)
         self.assertEqual("exact_call_approval_missing", raised.exception.detail)
+
+    def test_cross_path_or_plan_approval_cannot_be_reused(self) -> None:
+        agent = _agent()
+        approved_plan = agent.validate_plan(_click_plan("/approved"))
+        changed_plan = agent.validate_plan(_click_plan("/changed"))
+        approvals = InMemoryApprovalStore()
+        approved_action = approved_plan.actions[-1]
+        changed_action = changed_plan.actions[-1]
+        approved_arguments = browser_approval_arguments(
+            approved_action,
+            plan_digest=approved_plan.plan_digest,
+        )
+        changed_arguments = browser_approval_arguments(
+            changed_action,
+            plan_digest=changed_plan.plan_digest,
+        )
+        approvals.grant(
+            principal_id="user-1",
+            tool_call_id=approved_action.id,
+            tool_name="browser.click",
+            arguments=approved_arguments,
+        )
+
+        with self.assertRaises(PolicyViolation) as raised:
+            agent.run(
+                changed_plan,
+                context=ToolExecutionContext(
+                    principal_id="user-1",
+                    approval_store=approvals,
+                ),
+            )
+
+        self.assertNotEqual(
+            approved_arguments["url_sha256"],
+            changed_arguments["url_sha256"],
+        )
+        self.assertNotIn("/approved", repr(approved_arguments))
+        self.assertNotEqual(approved_plan.plan_digest, changed_plan.plan_digest)
+        self.assertEqual("approval_required", raised.exception.code)
+        self.assertEqual("exact_call_approval_missing", raised.exception.detail)
+
+    def test_same_action_in_a_different_plan_cannot_reuse_approval(self) -> None:
+        agent = _agent()
+        approved_actions = _click_plan("/approved")
+        approved_plan = agent.validate_plan(approved_actions)
+        changed_plan = agent.validate_plan(
+            [
+                approved_actions[0],
+                {
+                    "id": "read-before-click",
+                    "kind": "read_text",
+                    "element_id": "article-body",
+                },
+                approved_actions[1],
+            ]
+        )
+        approvals = InMemoryApprovalStore()
+        approved_action = approved_plan.actions[-1]
+        approvals.grant(
+            principal_id="user-1",
+            tool_call_id=approved_action.id,
+            tool_name="browser.click",
+            arguments=browser_approval_arguments(
+                approved_action,
+                plan_digest=approved_plan.plan_digest,
+            ),
+        )
+
+        with self.assertRaises(PolicyViolation) as raised:
+            agent.run(
+                changed_plan,
+                context=ToolExecutionContext(
+                    principal_id="user-1",
+                    approval_store=approvals,
+                ),
+            )
+
+        self.assertEqual(approved_action, changed_plan.actions[-1])
+        self.assertNotEqual(approved_plan.plan_digest, changed_plan.plan_digest)
+        self.assertEqual("approval_required", raised.exception.code)
+        self.assertEqual("exact_call_approval_missing", raised.exception.detail)
+
+    def test_canonicalizes_full_url_and_rejects_fragments(self) -> None:
+        agent = _agent()
+        plan = agent.validate_plan(
+            [
+                {
+                    "id": "nav",
+                    "kind": "navigate",
+                    "url": "HTTPS://DOCS.EXAMPLE.TEST:443/guide?q=agent",
+                }
+            ]
+        )
+
+        self.assertEqual(
+            "https://docs.example.test/guide?q=agent",
+            plan.actions[0].url,
+        )
+        self.assertNotIn("guide?q=agent", repr(plan.actions[0]))
+        with self.assertRaises(PolicyViolation) as raised:
+            agent.validate_plan(
+                [
+                    {
+                        "id": "fragment",
+                        "kind": "navigate",
+                        "url": "https://docs.example.test/#section",
+                    }
+                ]
+            )
+        self.assertEqual("browser_fragment_not_allowed", raised.exception.code)
 
     def test_real_driver_path_revalidates_plan_and_binds_page_digest_approval(
         self,
@@ -232,7 +355,10 @@ class BrowserAgentTest(unittest.TestCase):
             principal_id="user-1",
             tool_call_id="type-1",
             tool_name="browser.type",
-            arguments=browser_approval_arguments(plan.actions[-1]),
+            arguments=browser_approval_arguments(
+                plan.actions[-1],
+                plan_digest=plan.plan_digest,
+            ),
         )
         driver = _RecordingDriver()
 
@@ -250,7 +376,10 @@ class BrowserAgentTest(unittest.TestCase):
         self.assertEqual(plan.actions, driver.executed_actions)
         self.assertEqual(
             digest,
-            browser_approval_arguments(plan.actions[-1])["expected_page_digest"],
+            browser_approval_arguments(
+                plan.actions[-1],
+                plan_digest=plan.plan_digest,
+            )["expected_page_digest"],
         )
 
     def test_rejects_scripts_downloads_selectors_and_sensitive_elements(self) -> None:
@@ -261,6 +390,7 @@ class BrowserAgentTest(unittest.TestCase):
                 "forbidden_browser_action",
             ),
             ([{"id": "download", "kind": "download"}], "forbidden_browser_action"),
+            ([{"id": "upload", "kind": "upload"}], "forbidden_browser_action"),
             (
                 [
                     {
@@ -352,6 +482,21 @@ def _type_plan(value: str) -> list[dict[str, str]]:
             "kind": "type",
             "element_id": "search-box",
             "value": value,
+        },
+    ]
+
+
+def _click_plan(path: str) -> list[dict[str, str]]:
+    return [
+        {
+            "id": "nav",
+            "kind": "navigate",
+            "url": f"https://docs.example.test{path}",
+        },
+        {
+            "id": "click-1",
+            "kind": "click",
+            "element_id": "article-body",
         },
     ]
 

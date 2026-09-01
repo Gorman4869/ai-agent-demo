@@ -13,6 +13,10 @@ from backend.app.advanced.browser_driver import (
     PlaywrightBrowserDriver,
 )
 from backend.app.advanced.harness import PolicyViolation
+from backend.app.advanced.browser_network import (
+    BrowserNetworkPolicy,
+    StaticBrowserAddressResolver,
+)
 from backend.app.tools import InMemoryApprovalStore, ToolExecutionContext
 
 
@@ -35,6 +39,7 @@ _HOME = """<!doctype html>
       <a data-agent-id="cross-link" href="https://outside.example.test/">Cross origin</a>
       <button data-agent-id="popup-button" type="button" onclick="window.open('/popup', '_blank')">Popup</button>
       <a data-agent-id="download-link" download="fixture.txt" href="data:text/plain,fixture">Download</a>
+      <input data-agent-id="file-input" type="file">
     </main>
     <script>
       document.querySelector('[data-agent-id="search-form"]').addEventListener('submit', (event) => {
@@ -55,6 +60,7 @@ _ELEMENT_IDS = (
     "cross-link",
     "popup-button",
     "download-link",
+    "file-input",
     "missing-element",
 )
 
@@ -62,11 +68,19 @@ _ELEMENT_IDS = (
 class PlaywrightBrowserDriverIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.site = BrowserFixtureSite(_ORIGIN, {"/": _HOME, "/popup": _POPUP})
+        cls.site = BrowserFixtureSite(
+            _ORIGIN,
+            {
+                "/": _HOME,
+                "/popup": _POPUP,
+                "/redirect-final": _POPUP,
+            },
+            redirects={"/redirect-start": _ORIGIN + "/redirect-final"},
+        )
 
     def test_real_chromium_reads_types_submits_and_returns_observation(self) -> None:
         agent = _agent()
-        driver = PlaywrightBrowserDriver(self.site)
+        driver = _driver(self.site)
         page_digest = _initial_digest(agent, driver)
         plan = agent.validate_plan(
             [
@@ -111,7 +125,7 @@ class PlaywrightBrowserDriverIntegrationTest(unittest.TestCase):
 
     def test_rejects_changed_page_and_missing_element(self) -> None:
         agent = _agent()
-        driver = PlaywrightBrowserDriver(self.site)
+        driver = _driver(self.site)
         page_digest = _initial_digest(agent, driver)
         cases = (
             (
@@ -150,14 +164,33 @@ class PlaywrightBrowserDriverIntegrationTest(unittest.TestCase):
                     agent.run_with_driver(plan, driver=driver)
                 self.assertEqual(expected_code, raised.exception.code)
 
-    def test_cross_origin_popup_and_download_fail_closed(self) -> None:
+    def test_real_chromium_follows_only_prevalidated_safe_redirect(self) -> None:
         agent = _agent()
-        driver = PlaywrightBrowserDriver(self.site)
+        driver = _driver(self.site)
+        plan = agent.validate_plan(
+            [
+                {
+                    "id": "redirect",
+                    "kind": "navigate",
+                    "url": _ORIGIN + "/redirect-start",
+                }
+            ]
+        )
+
+        result = agent.run_with_driver(plan, driver=driver)
+
+        self.assertEqual(_ORIGIN + "/redirect-final", result.observation.url)
+        self.assertFalse(result.network_access)
+
+    def test_cross_origin_popup_and_transfers_fail_closed(self) -> None:
+        agent = _agent()
+        driver = _driver(self.site)
         page_digest = _initial_digest(agent, driver)
         cases = (
             ("cross-link", "browser_cross_origin"),
             ("popup-button", "browser_popup_blocked"),
             ("download-link", "browser_download_blocked"),
+            ("file-input", "browser_upload_blocked"),
         )
 
         for index, (element_id, expected_code) in enumerate(cases, start=1):
@@ -212,11 +245,25 @@ def _approval_context(plan: BrowserPlan) -> ToolExecutionContext:
             principal_id="integration-user",
             tool_call_id=action.id,
             tool_name=f"browser.{action.kind.value}",
-            arguments=browser_approval_arguments(action),
+            arguments=browser_approval_arguments(
+                action,
+                plan_digest=plan.plan_digest,
+            ),
         )
     return ToolExecutionContext(
         principal_id="integration-user",
         approval_store=approvals,
+    )
+
+
+def _driver(site: BrowserFixtureSite) -> PlaywrightBrowserDriver:
+    return PlaywrightBrowserDriver(
+        site,
+        network_policy=BrowserNetworkPolicy(
+            StaticBrowserAddressResolver(
+                {"browser.fixture.test": ("93.184.216.34",)}
+            )
+        ),
     )
 
 

@@ -57,7 +57,7 @@
 ## 计划验证命令
 
 ```powershell
-./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_driver -v
+./.venv/Scripts/python.exe -B -m unittest backend.tests.test_browser_agent backend.tests.test_browser_network backend.tests.test_browser_driver -v
 ./.venv/Scripts/python.exe -B -m unittest backend.tests.browser_driver_integration -v
 ./.venv/Scripts/python.exe -B -m unittest backend.tests.test_multimodal_agent -v
 ./.venv/Scripts/python.exe -B -m unittest backend.tests.test_advanced_harness -v

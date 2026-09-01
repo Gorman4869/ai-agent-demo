@@ -7,6 +7,7 @@ from backend.app.advanced.browser_agent import (
     BrowserPlan,
     BrowserRun,
     browser_approval_arguments,
+    canonical_browser_url,
 )
 from backend.app.advanced.browser_driver import (
     BrowserDriver,
@@ -15,6 +16,13 @@ from backend.app.advanced.browser_driver import (
     BrowserFixtureSite,
     BrowserObservation,
     PlaywrightBrowserDriver,
+)
+from backend.app.advanced.browser_network import (
+    BrowserAddressResolver,
+    BrowserNetworkDecision,
+    BrowserNetworkPolicy,
+    StaticBrowserAddressResolver,
+    SystemBrowserAddressResolver,
 )
 from backend.app.advanced.code_agent import (
     ActionOutcome,
@@ -47,11 +55,14 @@ __all__ = [
     "AuditEntry",
     "BrowserAction",
     "BrowserActionKind",
+    "BrowserAddressResolver",
     "BrowserAgent",
     "BrowserDriver",
     "BrowserDriverActionResult",
     "BrowserDriverRun",
     "BrowserFixtureSite",
+    "BrowserNetworkDecision",
+    "BrowserNetworkPolicy",
     "BrowserObservation",
     "BrowserPlan",
     "BrowserRun",
@@ -70,8 +81,11 @@ __all__ = [
     "ReadAction",
     "SafetyBudget",
     "SafetyLimits",
+    "StaticBrowserAddressResolver",
+    "SystemBrowserAddressResolver",
     "UntrustedVisualText",
     "WriteAction",
     "browser_approval_arguments",
+    "canonical_browser_url",
     "content_digest",
 ]

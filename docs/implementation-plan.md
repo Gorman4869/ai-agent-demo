@@ -1098,6 +1098,21 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 测试：loopback、私网、链路本地、保留地址、DNS 重绑定模拟、跨路径审批复用和重定向绕过。
 - 关闭目标：KI-010。
 
+实现结果（2026-09-01）：
+
+- `BrowserPlan` 现在冻结规范化完整 page URL 与整份计划 SHA-256；副作用审批同时绑定 URL 摘要、
+  plan digest、动作、元素、参数摘要和页面摘要。跨 path/query 与动作相同但计划不同的审批复用均
+  由独立测试拒绝，URL/输入原文不进入 repr。
+- 新增显式 resolver/`BrowserNetworkPolicy`：初始目标、每个服务端 redirect 和最终 URL 都重新
+  解析并检查全部 IP；loopback、private、link-local、shared、reserved、multicast、unspecified、
+  metadata、混合 DNS 回答、DNS rebinding、redirect loop/limit/跨域均 fail closed。
+- fixture redirect 在 Python 完整预验证后只导航最终登记文档，页面运行时未规划 redirect 仍拒绝；
+  模型 upload/download 动作以及真实 file chooser/download/popup/cross-origin 事件继续默认拒绝。
+- 最终 Browser 合并 31 项通过，其中真实 Chromium 4 项；Advanced Agent 相关回归 52 项通过、
+  1 项既有 Windows symlink 能力条件跳过。证据见 `V-20260901-005` 和 `ADR-0041`。
+- M14-T2 达到 `verified`，`KI-010` 在 fixture-only E3 范围关闭。没有开放任意公网、真实远端
+  redirect、个人登录态或生产 egress；下一任务为 M14-T3，不把本证据描述成公网浏览器 E4。
+
 ### M14-T3：真实视觉输入与多模态推理
 
 - 依赖：M8-T4、M13-T2。

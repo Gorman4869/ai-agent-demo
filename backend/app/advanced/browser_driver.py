@@ -17,8 +17,10 @@ from backend.app.advanced.browser_agent import (
     BrowserAction,
     BrowserActionKind,
     _parse_allowed_origin,
+    canonical_browser_url,
 )
 from backend.app.advanced.harness import PolicyViolation, content_digest
+from backend.app.advanced.browser_network import BrowserNetworkPolicy
 from backend.app.advanced.process_runner import (
     BoundedProcessResult,
     ProcessResourceLimits,
@@ -38,6 +40,7 @@ _ELEMENT_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}")
 _DRIVER_ERROR_DETAILS = MappingProxyType(
     {
         "browser_action_timeout": "browser action exceeded its time budget",
+        "browser_address_not_allowed": "browser target address is not allowed",
         "browser_cross_origin": "browser attempted a cross-origin navigation",
         "browser_download_blocked": "browser download is disabled",
         "browser_driver_invalid_response": (
@@ -51,6 +54,8 @@ _DRIVER_ERROR_DETAILS = MappingProxyType(
         "browser_page_changed": "browser page no longer matches the observation",
         "browser_page_mismatch": "browser page does not match the planned origin",
         "browser_popup_blocked": "browser popup or new window is disabled",
+        "browser_redirect_unplanned": "browser redirect was not prevalidated",
+        "browser_upload_blocked": "browser upload is disabled",
         "browser_screenshot_too_large": "browser screenshot exceeded its size limit",
     }
 )
@@ -81,6 +86,7 @@ class BrowserFixtureSite:
 
     origin: str
     documents: Mapping[str, str] = field(repr=False)
+    redirects: Mapping[str, str] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         canonical_origin = _parse_allowed_origin(self.origin)
@@ -101,9 +107,25 @@ class BrowserFixtureSite:
             total_bytes += document_bytes
             if total_bytes > _MAX_FIXTURE_TOTAL_BYTES:
                 raise ValueError("fixture document total exceeds the allowed range")
-            copied[f"{canonical_origin}{target}"] = document
+            copied[canonical_browser_url(f"{canonical_origin}{target}")] = document
+        if not isinstance(self.redirects, Mapping):
+            raise TypeError("fixture redirects must use a mapping")
+        if len(self.redirects) > _MAX_FIXTURE_DOCUMENTS:
+            raise ValueError("fixture redirects exceed the allowed count")
+        copied_redirects: dict[str, str] = {}
+        for source, target in self.redirects.items():
+            if not isinstance(source, str) or not _is_fixture_target(source):
+                raise ValueError("fixture redirect sources must be local URL paths")
+            if not isinstance(target, str):
+                raise TypeError("fixture redirect targets must be strings")
+            source_url = canonical_browser_url(f"{canonical_origin}{source}")
+            target_url = canonical_browser_url(target)
+            if source_url in copied:
+                raise ValueError("fixture documents and redirects must not overlap")
+            copied_redirects[source_url] = target_url
         object.__setattr__(self, "origin", canonical_origin)
         object.__setattr__(self, "documents", MappingProxyType(copied))
+        object.__setattr__(self, "redirects", MappingProxyType(copied_redirects))
 
 
 @dataclass(frozen=True)
@@ -143,6 +165,7 @@ class PlaywrightBrowserDriver:
         self,
         fixture_site: BrowserFixtureSite,
         *,
+        network_policy: BrowserNetworkPolicy,
         node_executable: str | None = None,
         driver_script: Path | None = None,
         timeout_seconds: float = 30.0,
@@ -176,6 +199,7 @@ class PlaywrightBrowserDriver:
             if not resolved_temporary_root.is_dir():
                 raise ValueError("temporary_root must be a directory")
         self._fixture_site = fixture_site
+        self._network_policy = network_policy
         self._node_executable = node_executable
         self._driver_script = script
         self._timeout_seconds = float(timeout_seconds)
@@ -197,6 +221,7 @@ class PlaywrightBrowserDriver:
                 "browser driver requires validated browser actions",
             )
         current_origin: str | None = None
+        current_page_url: str | None = None
         for action in actions:
             if action.origin != self._fixture_site.origin:
                 raise PolicyViolation(
@@ -204,17 +229,43 @@ class PlaywrightBrowserDriver:
                     "browser action origin does not match the fixture site",
                 )
             if action.kind is BrowserActionKind.NAVIGATE:
-                if action.url not in self._fixture_site.documents:
+                if (
+                    action.url not in self._fixture_site.documents
+                    and action.url not in self._fixture_site.redirects
+                ):
+                    raise PolicyViolation(
+                        "browser_fixture_not_found",
+                        _DRIVER_ERROR_DETAILS["browser_fixture_not_found"],
+                    )
+                decisions = self._network_policy.validate_navigation_chain(
+                    action.url,
+                    self._fixture_site.redirects,
+                )
+                if any(
+                    decision.origin != self._fixture_site.origin
+                    for decision in decisions
+                ):
+                    raise PolicyViolation(
+                        "browser_cross_origin",
+                        _DRIVER_ERROR_DETAILS["browser_cross_origin"],
+                    )
+                current_page_url = decisions[-1].canonical_url
+                if current_page_url not in self._fixture_site.documents:
                     raise PolicyViolation(
                         "browser_fixture_not_found",
                         _DRIVER_ERROR_DETAILS["browser_fixture_not_found"],
                     )
                 current_origin = action.origin
                 continue
-            if current_origin is None:
+            if current_origin is None or current_page_url is None:
                 raise PolicyViolation(
                     "navigation_required",
                     "navigate before executing browser DOM actions",
+                )
+            if action.page_url != current_page_url:
+                raise PolicyViolation(
+                    "browser_page_mismatch",
+                    _DRIVER_ERROR_DETAILS["browser_page_mismatch"],
                 )
             if action.expected_page_digest is None:
                 raise PolicyViolation(
@@ -303,18 +354,21 @@ class PlaywrightBrowserDriver:
             }
             if action.url is not None:
                 encoded["url"] = action.url
+                encoded["navigation_url"] = self._fixture_navigation_url(action.url)
             if action.element_id is not None:
                 encoded["element_id"] = action.element_id
             if action.value is not None:
                 encoded["value"] = action.value
             if action.expected_page_digest is not None:
                 encoded["expected_page_digest"] = action.expected_page_digest
+            encoded["page_url"] = action.page_url
             encoded_actions.append(encoded)
         return {
             "schema_version": 1,
             "fixture": {
                 "origin": self._fixture_site.origin,
                 "documents": dict(self._fixture_site.documents),
+                "redirects": dict(self._fixture_site.redirects),
             },
             "actions": encoded_actions,
             "limits": {
@@ -323,6 +377,19 @@ class PlaywrightBrowserDriver:
                 "max_text_bytes": self._max_text_bytes,
             },
         }
+
+    def _fixture_navigation_url(self, start_url: str) -> str:
+        current_url = start_url
+        seen: set[str] = set()
+        while current_url in self._fixture_site.redirects:
+            if current_url in seen:
+                raise PolicyViolation(
+                    "browser_redirect_loop",
+                    "browser redirect loop is disabled",
+                )
+            seen.add(current_url)
+            current_url = self._fixture_site.redirects[current_url]
+        return current_url
 
     def _read_response(
         self,

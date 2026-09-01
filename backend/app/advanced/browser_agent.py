@@ -30,7 +30,14 @@ class BrowserActionKind(str, Enum):
 
 
 _FORBIDDEN_ACTIONS = frozenset(
-    {"download", "eval", "evaluate", "evaluate_script", "execute_script"}
+    {
+        "download",
+        "eval",
+        "evaluate",
+        "evaluate_script",
+        "execute_script",
+        "upload",
+    }
 )
 _SIDE_EFFECT_ACTIONS = frozenset(
     {BrowserActionKind.CLICK, BrowserActionKind.TYPE, BrowserActionKind.SUBMIT}
@@ -67,6 +74,7 @@ class BrowserAction:
     element_id: str | None = None
     value: str | None = field(default=None, repr=False)
     expected_page_digest: str | None = None
+    page_url: str = field(default="", repr=False)
 
     @property
     def requires_approval(self) -> bool:
@@ -77,6 +85,7 @@ class BrowserAction:
 class BrowserPlan:
     actions: tuple[BrowserAction, ...]
     policy_digest: str
+    plan_digest: str
 
 
 @dataclass(frozen=True)
@@ -165,12 +174,14 @@ class BrowserAgent:
         actions: list[BrowserAction] = []
         action_ids: set[str] = set()
         current_origin: str | None = None
+        current_url: str | None = None
         for raw_action in raw_actions:
             encoded = _encode_raw_action(raw_action)
             budget.consume(input_bytes=len(encoded))
-            action, current_origin = self._validate_action(
+            action, current_origin, current_url = self._validate_action(
                 raw_action,
                 current_origin=current_origin,
+                current_url=current_url,
             )
             if action.id in action_ids:
                 raise PolicyViolation(
@@ -180,7 +191,12 @@ class BrowserAgent:
             action_ids.add(action.id)
             actions.append(action)
 
-        return BrowserPlan(tuple(actions), self._policy_digest)
+        frozen_actions = tuple(actions)
+        return BrowserPlan(
+            frozen_actions,
+            self._policy_digest,
+            _browser_plan_digest(frozen_actions),
+        )
 
     def run(
         self,
@@ -193,7 +209,11 @@ class BrowserAgent:
         results: list[BrowserActionResult] = []
         for action in validated_plan.actions:
             if action.requires_approval:
-                _consume_action_approval(action, execution_context)
+                _consume_action_approval(
+                    action,
+                    plan_digest=validated_plan.plan_digest,
+                    context=execution_context,
+                )
             results.append(_simulate_action(action))
         return BrowserRun(
             actions=tuple(results),
@@ -214,7 +234,11 @@ class BrowserAgent:
         execution_context = context or ToolExecutionContext()
         for action in validated_plan.actions:
             if action.requires_approval:
-                _consume_action_approval(action, execution_context)
+                _consume_action_approval(
+                    action,
+                    plan_digest=validated_plan.plan_digest,
+                    context=execution_context,
+                )
         return driver.execute(validated_plan.actions)
 
     def _revalidate_plan(self, plan: BrowserPlan) -> BrowserPlan:
@@ -251,7 +275,8 @@ class BrowserAgent:
         raw_action: Mapping[str, object],
         *,
         current_origin: str | None,
-    ) -> tuple[BrowserAction, str]:
+        current_url: str | None,
+    ) -> tuple[BrowserAction, str, str]:
         if not isinstance(raw_action, Mapping):
             raise PolicyViolation(
                 "invalid_browser_action",
@@ -302,16 +327,28 @@ class BrowserAgent:
             )
 
         if kind is BrowserActionKind.NAVIGATE:
-            url = _required_string(raw_action.get("url"), "url")
+            url = canonical_browser_url(
+                _required_string(raw_action.get("url"), "url")
+            )
             origin = _origin_for_url(url)
             if origin not in self._allowed_origins:
                 raise PolicyViolation(
                     "origin_not_allowed",
                     "browser URL origin is not allowlisted",
                 )
-            return BrowserAction(action_id, kind, origin, url=url), origin
+            return (
+                BrowserAction(
+                    action_id,
+                    kind,
+                    origin,
+                    url=url,
+                    page_url=url,
+                ),
+                origin,
+                url,
+            )
 
-        if current_origin is None:
+        if current_origin is None or current_url is None:
             raise PolicyViolation(
                 "navigation_required",
                 "navigate to an allowlisted origin before DOM actions",
@@ -347,18 +384,34 @@ class BrowserAgent:
                 element_id=element_id,
                 value=value,
                 expected_page_digest=expected_page_digest,
+                page_url=current_url,
             ),
             current_origin,
+            current_url,
         )
 
 
-def browser_approval_arguments(action: BrowserAction) -> dict[str, object]:
+def browser_approval_arguments(
+    action: BrowserAction,
+    *,
+    plan_digest: str,
+) -> dict[str, object]:
     """Return the canonical, non-secret arguments for an exact approval."""
+
+    if (
+        not isinstance(plan_digest, str)
+        or _CONTENT_DIGEST.fullmatch(plan_digest) is None
+        or not action.page_url
+    ):
+        raise ValueError("browser approval requires a canonical plan and page URL")
 
     arguments: dict[str, object] = {
         "kind": action.kind.value,
         "origin": action.origin,
         "element_id": action.element_id or "",
+        "url_sha256": content_digest(action.page_url),
+        "url_bytes": len(action.page_url.encode("utf-8")),
+        "plan_digest": plan_digest,
     }
     if action.value is not None:
         value_bytes = action.value.encode("utf-8")
@@ -371,6 +424,8 @@ def browser_approval_arguments(action: BrowserAction) -> dict[str, object]:
 
 def _consume_action_approval(
     action: BrowserAction,
+    *,
+    plan_digest: str,
     context: ToolExecutionContext,
 ) -> None:
     if context.approval_store is None:
@@ -382,14 +437,16 @@ def _consume_action_approval(
         principal_id=context.principal_id,
         tool_call_id=action.id,
         tool_name=f"browser.{action.kind.value}",
-        arguments=browser_approval_arguments(action),
+        arguments=browser_approval_arguments(action, plan_digest=plan_digest),
     )
     if not decision.approved:
         raise PolicyViolation("approval_required", decision.reason)
 
 
 def _simulate_action(action: BrowserAction) -> BrowserActionResult:
-    details: dict[str, object] = {}
+    details: dict[str, object] = {
+        "page_url_sha256": content_digest(action.page_url),
+    }
     if action.url is not None:
         details["url_sha256"] = content_digest(action.url)
     if action.element_id is not None:
@@ -472,8 +529,48 @@ def _parse_allowed_origin(value: str) -> str:
     return _canonical_origin(parts)
 
 
+def canonical_browser_url(value: str) -> str:
+    """Canonicalize one full HTTPS URL without resolving its hostname."""
+
+    parts = _split_https_url(value)
+    if parts.fragment:
+        raise PolicyViolation(
+            "browser_fragment_not_allowed",
+            "browser URL fragments are disabled",
+        )
+    origin = _canonical_origin(parts)
+    path = parts.path or "/"
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{origin}{path}{query}"
+
+
 def _origin_for_url(value: str) -> str:
     return _canonical_origin(_split_https_url(value))
+
+
+def _browser_plan_digest(actions: Sequence[BrowserAction]) -> str:
+    payload: list[dict[str, object]] = []
+    for action in actions:
+        item: dict[str, object] = {
+            "id": action.id,
+            "kind": action.kind.value,
+            "origin": action.origin,
+            "page_url": action.page_url,
+        }
+        if action.url is not None:
+            item["url"] = action.url
+        if action.element_id is not None:
+            item["element_id"] = action.element_id
+        if action.value is not None:
+            encoded_value = action.value.encode("utf-8")
+            item["value_sha256"] = content_digest(encoded_value)
+            item["value_bytes"] = len(encoded_value)
+        if action.expected_page_digest is not None:
+            item["expected_page_digest"] = action.expected_page_digest
+        payload.append(item)
+    return content_digest(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    )
 
 
 def _split_https_url(value: str) -> SplitResult:
