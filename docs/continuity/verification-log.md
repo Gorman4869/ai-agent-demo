@@ -4397,3 +4397,28 @@
   硬成本门、Token/费用或底层 transport 取消证据。
 - 没有运行完整 offline 七层门、远程 CI、soak、阶梯增压、HA、TLS、公网入口或在线 Provider。
   M13-T6 不是里程碑最终验收；下一任务为 M13-T7 学习交付。
+
+## V-20260901-002：M13-T6 实现提交锚点与连续性闭环
+
+- 任务：`M13-T6 / verified`
+- 时间：2026-09-01，Asia/Shanghai
+- 验证目标：把 `V-20260901-001` 已验收的精确 M13-T6 worktree 固定为可恢复提交，并确认
+  文件边界、whitespace 和分支状态。
+- 实现提交：`753786e92f67e3181097e81e4a718b3acb363fc1`。
+
+### 实际命令与结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git commit -m "feat: add bounded load fault verification"` | 0 | 15 个 M13-T6 代码、脚本、测试、ADR、规约和连续性文件提交为 `753786e` |
+| `git diff HEAD^ HEAD --check` | 0 | 实现提交无 whitespace 错误 |
+| `git show --stat --oneline --summary HEAD` | 0 | 提交只含 load/fault evaluator/CLI、部署 verifier、测试和 M13-T6 文档 |
+| `git status -sb`（实现提交后、锚点文档前） | 0 | `main` 比 `origin/main` ahead 6，工作区干净 |
+
+### 结论与边界
+
+- `753786e` 是 M13-T6 的可恢复实现锚点；77 项相关回归和三次真实 Docker
+  load/outage/recovery/restart/cleanup 证据继续引用 `V-20260901-001`，本记录不重复有状态演练。
+- 本轮没有 push，远程仍停在 `38fd696`；ahead 6 包含既有 M13-T3/T4/T5 文档/实现与本提交。
+- 本锚点文档形成后只需重跑连续性/diff 检查并创建一个本地验证/交接提交；下一任务保持
+  M13-T7，不再为刚生成的文档提交创建第三个 hash 回填提交。
