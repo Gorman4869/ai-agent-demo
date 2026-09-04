@@ -4574,3 +4574,60 @@ M14-T1 的真实调用链、代表性失败、安全边界、工作说明和可�
   Advanced Agent 相关回归，没有重复完整 703+ offline、MCP、Vue build、Docker 或 online profile。
 - M14-T2 的代码、测试、ADR、工作说明和真实 Chromium fixture 证据满足实施计划，达到
   `verified`。下一任务为 `M14-T3 / planned`；本轮未实现或验证视觉输入。
+
+## V-20260902-001：M14-T3 真实视觉输入适配与离线安全合同验证
+
+- 任务：`M14-T3 / verified`
+- 时间：2026-09-02，Asia/Shanghai
+- 验证目标：复用 M8 统一模型配置接入真实 Responses API 图像输入形状，同时固定 PNG/MIME
+  边界、结构化不可信观察、双重在线授权、Token/字节/时间预算和 metadata 失败回退。
+- 验证基线：`e165646`；本记录覆盖其后的 M14-T3 未提交 worktree，提交 ID 由后续恢复记录补记。
+- 任务等级：A 类跨模型/安全公共合同；证据为真实 OpenAI SDK + 本地 MockTransport 的 E2、共同
+  领域/错误/完整离线门的 E3。没有执行在线 Provider E4。
+- 授权与数据边界：没有读取 Key/用户 `.env`、访问公网、发送真实图片、产生费用、安装/升级依赖、
+  启动 PostgreSQL/Docker、修改 `docs/progress.md` 或 push。测试中的 Key、模型、图片和响应均为
+  固定离线 fixture；SDK 请求由 `https://offline.invalid/v1` 的 `MockTransport` 完全截获。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_multimodal_agent -v`（首轮） | 1 | 原有 5 项通过；新增 7 项中 5 项在业务代码前被 Settings 拒绝，因为 fixture 的 1s Run 小于默认 2s model retry max delay；将测试 Run 上限修正为 3s，未放宽生产配置 |
+| 同一 Multimodal 定向命令（修正后） | 0 | 12 项通过；随后加入真实 SDK MockTransport 纵切和双重授权后最终 13 项通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_multimodal_agent backend.tests.test_advanced_harness backend.tests.test_settings backend.tests.test_openai_agents_runtime -v` | 0 | 74 项通过；PNG/结构化观察、Settings gate、稳定 Provider 错误和 M8 client 生命周期兼容 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_multimodal_agent.MultimodalVisionAgentTest.test_executes_real_sdk_shape_over_offline_mock_transport -v` | 0 | 真实 `openai==2.45.0` 的 `responses.parse` 经本地 MockTransport 执行 `/v1/responses`，结构化输出与 14 Token usage 归一通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（受限沙箱） | 1 | backend 729 项中 59 个 `WinError 5` Temp ACL errors，派生 2 个 MCP process failures；后续 required layer 按合同停止，不作为代码失败或成功证据 |
+| 同一默认门（沙箱外首次） | 1 | Temp/进程权限恢复后 backend 729 项只剩 1 个 TypeScript MCP E2E `startup_timeout`，另有 1 项既有 Windows symlink 条件跳过；后续层停止，失败事实保留 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_mcp_client_e2e -v`（沙箱外） | 0 | 4 项通过；确认前次为一次本地 Node STDIO 启动抖动，未修改 MCP 代码或 timeout |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1`（沙箱外最终） | 0 | backend 729 项通过、1 项既有 symlink 条件跳过；Code Agent Demo、`pip check`、MCP TypeScript build/STDIO 11 项、Vue 12 项与 production build 通过；3 passed、4 skipped、0 failed |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_multimodal_agent -q`（最终测试 URL 收紧后） | 0 | 13 项通过；SDK fixture 使用 `offline.invalid`，日志不再呈现真实 Provider host |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1`（status/handoff 后） | 0 | 52 个稳定任务、171 个 Markdown 文件通过；M14-T3 verified、M14-T4 planned、V/ADR/KI/handoff 与恢复入口一致 |
+| `git diff --check` | 0 | 最终代码和文档无 whitespace error；仅有 Git LF/CRLF 工作树提示 |
+
+### 实现、自审与边界
+
+- `create_multimodal_vision_agent()` 同时要求现有 `Settings.online_provider_enabled` 和调用点显式
+  `online_authorized=True` 才选择 OpenAI；缺任一门都使用 `OfflineVisionModel`，client factory 不创建。
+- `MultimodalVisionAgent` 先执行既有 PNG 字节、签名、IHDR CRC、宽高和像素预算，再构造固定
+  `image/png` 请求。错误 MIME、损坏 IHDR、超限图片均在 client 进入前拒绝。
+- `OpenAIVisionModel` 使用显式每次调用 `AsyncOpenAI`、`max_retries=0`、server-owned model/timeout/
+  output tokens、Base64 data URL、`detail=low`、`store=false` 和 Pydantic structured output；不传工具，
+  图片文字无法直接产生工具或副作用通道。
+- 摘要、可见文字和 uncertainties 都进入 `StructuredVisionObservation` 的
+  `untrusted_visual_data` 域；`can_authorize_actions=False`，原文从 dataclass repr 和事件白名单移除，
+  事件只写摘要、字节数、provider/model 和稳定失败码。
+- 模型 timeout、无效结构、超出观察预算和 Provider 故障返回 PNG metadata fallback 与既有稳定
+  `RunFailure`，不公开 Provider exception。任务取消继续向上传播，不伪装成普通 fallback。
+- 聚焦复审未发现阻断问题；删除一处未使用 import，并把在线 fixture host 改为
+  `offline.invalid`。新增 `ADR-0042` 固定双重授权、无工具视觉 adapter 和不可信观察边界。
+
+### 未验证范围与结论
+
+- 本任务没有执行真实 Provider、真实模型视觉质量、OCR 准确率、真实 usage/费用、隐私上传、代理/
+  TLS、重试或模型支持矩阵；这些只能由 M14-T4 在新单次授权和低预算下验证。
+- 当前继续只接受 PNG，并复用原有签名/IHDR 边界；它不是完整图片 decoder、安全重编码器、metadata
+  剥离器或恶意像素扫描器。更深层 IDAT 损坏可能由 Provider 拒绝，不能把本证据描述成生产上传管线。
+- 完整门中的 OpenAI/DashScope URL 都是既有或本任务 `MockTransport` 日志，不是网络调用。
+  PostgreSQL/E2E/Docker/online profile 按默认门跳过，不冒充新证据。
+- M14-T3 的代码、测试、ADR、说明和 E2/E3 证据满足实施计划，达到 `verified`。下一任务为
+  `M14-T4 / planned`；真实视觉 E4 仍需用户新的单次在线授权。

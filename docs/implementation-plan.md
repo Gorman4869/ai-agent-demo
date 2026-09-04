@@ -1120,6 +1120,22 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 安全：保留现有 PNG 边界校验；视觉文字不能覆盖系统权限或直接触发副作用。
 - 测试：有效图片、损坏/超限图片、错误 MIME、提示注入图片、模型超时和无在线授权。
 
+实现结果（2026-09-02）：
+
+- 新增 `VisionModel`/`VisionModelOutput`、`StructuredVisionObservation` 和 `VisionRunResult` 共同合同；
+  离线与 OpenAI adapter 共用结构化输出，摘要、可见文字和 uncertainties 全部标为
+  `untrusted_visual_data`，固定 `can_authorize_actions=false`。
+- `create_multimodal_vision_agent()` 复用既有 provider/model/key/timeout/output token 配置，并要求
+  单次 `online_authorized=true`；缺任一授权门都选择离线 model，client factory 保持未调用。
+- OpenAI adapter 通过 Responses API `input_image` 发送已验证 PNG 的 Base64 data URL，固定
+  `detail=low`、`store=false`、无 tools、`max_retries=0` 和有界 client 生命周期；模型失败只回退
+  到 PNG metadata，不伪造视觉结论或 usage。
+- 最终 Multimodal 13 项、相关 Settings/Runtime/Harness 合并 74 项通过；真实 OpenAI SDK 经本地
+  MockTransport 的 E2 纵切通过。完整离线门 backend 729 项（1 skip）、MCP 11 项、Vue 12 项与
+  production build 通过，见 `V-20260902-001`、`ADR-0042` 和 `docs/m14-vision-input.md`。
+- M14-T3 达到 `verified`，但没有执行真实 Provider、图片上传、视觉质量或费用 E4；M14-T4 必须
+  重新取得用户单次授权。
+
 ### M14-T4：显式在线视觉冒烟
 
 - 依赖：M14-T3。
