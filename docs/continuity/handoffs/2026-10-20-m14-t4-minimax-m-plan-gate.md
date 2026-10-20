@@ -3,7 +3,7 @@
 ## 当前结论
 
 - 当前任务：`M14-T4 / code_complete`；验证记录：`V-20261020-001/002/003/004`。
-- 验证基线：`5accb4b`；此前 MiniMax adapter 实现提交：`4fae4a3`。
+- 验证基线：`5accb4b`；M Plan 门实现提交：`c53c658`；此前 MiniMax adapter 实现提交：`4fae4a3`。
 - 用户确认环境中的 MiniMax Key 属于 M Plan，但尚未授权真实调用。
 - M Plan 离线门已完成：记录 Token usage，不估算现金成本，不查询套餐余量，不增加网络请求。
 - MiniMax 专项 21 项、扩大相关回归 119 项通过；没有读取 Key、访问 Provider、发送图片或 push。

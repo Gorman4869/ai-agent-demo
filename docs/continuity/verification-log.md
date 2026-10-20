@@ -4849,3 +4849,6 @@ adapter、读取其 Key 或改变 Provider 优先级。只有 MiniMax M Plan 实
 MiniMax M Plan 用量模式已达到离线 `code_complete`：不会把套餐请求写成按量现金费用，也不会为
 查询余量增加第二个网络请求。M14-T4 仍没有真实结构化观察、OCR、usage 或套餐消耗 E4，不能标记
 `verified`。下一动作只剩用户明确授权恰好一次 `MiniMax-M3` M Plan 视觉请求；授权前继续不读取 Key。
+
+实现、测试、说明和本记录随后已以 `c53c658`（`feat: add minimax m plan usage gate`）完成本地提交；
+未 push。该提交是本记录所述 M Plan 门的实现锚点。
