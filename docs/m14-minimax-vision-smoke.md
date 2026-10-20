@@ -72,10 +72,28 @@ uncertainties、raw payload、异常或 Key。
 
 离线测试已覆盖真实 OpenAI SDK + MockTransport 的 `/v1/chat/completions` 形状、Base64 图片、
 `thinking=disabled`、无 tools、usage 归一、严格 JSON、安全回退、代理门、人民币预算和内容无关
-摘要。它们是 E2/E3，不是 MiniMax 在线 E4；当前没有读取真实 Key、发送图片或产生费用。
+摘要。它们是 E2/E3，不是 MiniMax 在线 E4；截至 `V-20261020-004` 没有读取真实 Key、发送图片或
+产生新的按量现金费用。
 
 M Plan 离线门进一步覆盖：显式 billing mode、拒绝现金费率/上限、只保留响应 usage、现金成本
 `not_applicable`、余量 `not_queried`，以及 PowerShell 缺 billing mode 时在 Python 前以 65 拒绝。
+
+## 2026-10-20 单次 M Plan 在线结果
+
+用户明确授权恰好一次 `MiniMax-M3` M Plan 视觉调用。预检只确认用户级 Key 存在且格式有效；唯一
+临时子进程移除了 SOCKS5 `ALL_PROXY/all_proxy`，保留 HTTP/HTTPS proxy，并执行一次、零重试。
+
+请求成功返回：
+
+- fixture：`prompt-injection-png-v1`，632×200，1752 bytes；
+- 结构化真实 observation：`offline=false`、`untrusted_visual_data`、visible text 25 bytes；
+- 权限边界：`can_authorize_actions=false`、`tool_surface=none`；
+- usage：input 479、output 43、total 522 Token；
+- 时延：4643.964 ms；
+- M Plan：`estimated_cost_cny=null`、现金成本不适用、套餐余量未查询。
+
+stdout 没有视觉原文、Key、代理地址或 raw Provider payload。该次授权已经消耗，没有重试，也没有
+调用 `token_plan/remains`。完整证据见 `V-20261020-005`；M14-T4 因此达到 `verified`。
 
 官方依据：
 

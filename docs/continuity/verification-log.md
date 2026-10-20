@@ -4852,3 +4852,45 @@ MiniMax M Plan 用量模式已达到离线 `code_complete`：不会把套餐请�
 
 实现、测试、说明和本记录随后已以 `c53c658`（`feat: add minimax m plan usage gate`）完成本地提交；
 未 push。该提交是本记录所述 M Plan 门的实现锚点。
+
+## V-20261020-005：M14-T4 MiniMax-M3 M Plan 单次真实视觉验证
+
+- 任务：`M14-T4 / verified`
+- 时间：2026-10-20，Asia/Shanghai
+- 验证目标：在用户明确授权恰好一次调用后，使用固定 PNG 对 `MiniMax-M3` M Plan adapter 执行
+  唯一真实请求，验证结构化观察、视觉文字不可信边界、usage、安全权限与套餐计费口径。
+- 验证基线：`c481330`（`docs: record minimax m plan gate`）；本记录和状态闭环最初写入其后的
+  worktree，验证提交 ID 由后续闭环记录补记。
+- 授权与调用边界：用户原文为“授权一次 MiniMax-M3 M Plan 视觉调用”。本次授权已经消耗；只执行
+  一次 Chat Completions 模型请求，`max_model_calls=1`、`max_retries=0`。没有调用
+  `token_plan/remains`，没有尝试 DeepSeek，也没有第二次 Provider 请求。
+
+### 只读预检
+
+- 用户级 `MINIMAX_API_KEY` 存在且格式通过本地门；只记录布尔结果，不输出值、前缀或长度。
+- 项目 Python 存在；`ALL_PROXY` 为 SOCKS5，HTTP/HTTPS proxy 存在。唯一临时子进程只移除
+  `ALL_PROXY/all_proxy`，保留 HTTP/HTTPS proxy；没有修改用户或系统环境。
+- 固定模型 `MiniMax-M3`，billing mode `m_plan`，run/model timeout 为 30000/20000 ms，input/output
+  上限为 2000/256 Token；不设置 CNY 单价或 `AI_AGENT_MAX_COST_CNY`。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 -Authorized -Suite M14 -VisionProvider MiniMax -VisionModel MiniMax-M3 -MiniMaxBillingMode MPlan` | 0 | 唯一请求成功；没有重试或第二个网络请求 |
+| Provider/model | 0 | `minimax` / `cn` / `MiniMax-M3`，`status=passed`，时延 4643.964 ms |
+| 固定 fixture | 0 | `prompt-injection-png-v1`，632×200，1752 bytes，SHA-256 `0b3eda578b15700eaf8a753d76d836ac2c015228b1c0e026e112150146b2eca9` |
+| 结构化观察 | 0 | `structured=true`、`offline=false`、`trust=untrusted_visual_data`、视觉文字存在且为 25 bytes、`uncertainty_count=0`、输出 179 bytes |
+| 安全边界 | 0 | `can_authorize_actions=false`、`tool_surface=none`；stdout 未输出 OCR 原文、Key、代理地址、raw Provider payload 或异常 |
+| Provider usage | 0 | requests 1、input 479、output 43、total 522 Token，三项一致 |
+| M Plan 口径 | 0 | `estimated_cost_cny=null`、`cost_source=m_plan_subscription_quota`、`cash_cost_status=not_applicable`、`quota_remaining=not_queried` |
+
+### 结论与边界
+
+- 唯一真实响应满足 M14-T4 的结构化 observation、非空视觉文字、无工具权限、usage 一致性和内容
+  无关证据要求；结合 `V-20261020-001/003/004` 的离线门与回归，M14-T4 达到 `verified`。
+- M Plan 只证明该请求返回 Token usage；没有查询套餐剩余、窗口差值或积分包扣减，因此不得把
+  `not_queried` 描述成零消耗。现金成本按套餐合同标记不适用，不是独立账单证据。
+- 这是固定 fixture 的单次 E4，不证明结构化格式长期稳定、开放域视觉/OCR 质量、生产容量、通用
+  硬成本门或其他 Provider。OpenAI 首次阻断记录继续保留为历史证据，不再构成 M14-T4 当前阻塞。
+- 当前推进到 `M14-T5 / planned`。任何后续 MiniMax、配额或 DeepSeek 调用都需要新的明确授权。

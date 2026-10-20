@@ -69,6 +69,7 @@
 - M14-T4 首次在线尝试基线：`e6ed850`；验证记录：`V-20261020-002`
 - M14-T4 MiniMax 离线适配基线：`8f5c528`；实现提交：`4fae4a3`；验证记录：`V-20261020-003`
 - M14-T4 MiniMax M Plan 门验证基线：`5accb4b`；实现提交：`c53c658`；验证记录：`V-20261020-004`
+- M14-T4 MiniMax M Plan 在线验证基线：`c481330`；验证记录：`V-20261020-005`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -76,14 +77,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M14-T4` |
-| 状态 | `code_complete` |
-| 目标 | 在新的单次用户授权和低预算下，对 M14-T3 视觉 adapter 执行一次真实 Provider 图片输入并记录结构化观察、usage、费用和安全结果 |
-| 设计依据 | 实施计划 M14-T4；`ADR-0042/0043`；M8 `online_smoke.py` 的单次授权、低预算和内容无关证据模式 |
-| 执行协议 | OpenAI 与 MiniMax 使用相互独立的 adapter/Key/计费门；用户已确认 MiniMax Key 为 M Plan，但仍须再次明确授权后才读取 Key，在固定模型、一次请求、零重试和低 Token 预算下执行一次 E4 |
-| 当前修改 | MiniMax smoke 新增显式 `Payg`/`MPlan` 模式；M Plan 拒绝 CNY 单价和现金上限，只记录响应 Token usage，现金成本标记不适用且不额外查询套餐余量。默认 Runtime 与 Provider adapter 不变 |
-| 验证 | `V-20261020-001/002/003/004`：M Plan 后 MiniMax 专项 21 项、扩大相关回归 119 项通过；真实 SDK 请求仍只由 MockTransport 截获。未读取真实 Key、未访问 Provider，E4 仍未完成 |
-| 下一动作 | 等待用户明确授权“恰好一次 MiniMax-M3 M Plan 视觉请求”；获得授权后只在临时子进程移除 `ALL_PROXY/all_proxy`，不设置 CNY 费率/现金上限、不查询余量，执行一次且零重试 |
+| 任务 ID | `M14-T5` |
+| 状态 | `planned` |
+| 目标 | 建立浏览器与多模态高级 Agent 的固定评测集，记录成功率、步骤数、延迟、成本、安全拒绝和人工介入率 |
+| 设计依据 | 实施计划 M14-T5；M14-T1/T2 浏览器证据；M14-T3 视觉 adapter；M14-T4 离线门与单次 MiniMax E4 |
+| 执行协议 | 先审阅 M14-T5 任务依赖与现有 eval/harness，冻结固定任务集、指标和离线基线；任何新的 Provider 调用都必须取得新的明确授权 |
+| 当前修改 | M14-T4 已用唯一授权的 `MiniMax-M3` M Plan 请求完成真实结构化观察、视觉文字不可信边界、无工具权限与 `479/43/522` Token usage；未查询套餐余量，未重试 |
+| 验证 | `V-20261020-005`：唯一真实请求通过，时延 4643.964 ms，`can_authorize_actions=false`、`tool_surface=none`；M14-T4 达到 `verified` |
+| 下一动作 | 阅读 M14-T5 范围和相邻 eval 实现，提出第一个离线原子评测纵切；当前没有任何新的在线调用授权 |
 
 ## 里程碑状态
 
@@ -97,25 +98,21 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T3 已 verified；T4 的 OpenAI/MiniMax 独立视觉 smoke、固定注入图片、授权/低预算/usage/费用门已 `code_complete`，真实 Provider E4 尚缺新的单次授权；T5–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T4 已 `verified`；T4 已完成 MiniMax M Plan 单次真实视觉 E4，T5–T8 未开始 |
 
 ## 当前阻塞
 
-- M14-T4 首次真实尝试见 `V-20261020-002`：`gpt-5.4-mini` 请求在 SDK client 构造阶段被 SOCKS5 `ALL_PROXY` 缺 `socksio` 阻断，没有 observation/usage，费用 unknown，且未重试。修复后下一次尝试仍必须取得新的单次授权，并只在临时子进程移除 SOCKS 变量。
-- MiniMax 备用路径见 `V-20261020-003` 与 `KI-033`：离线 adapter 和人民币门已完成，但真实
-  `MiniMax-M3` 的 JSON 格式、视觉文字、usage 和套餐消耗没有 E4。Key 已确认为 M Plan，且
-  `V-20261020-004` 已补无现金估算的套餐模式；仍须用户重新授权一次请求，Key 已配置本身不构成
-  调用授权。
+- M14-T5 当前没有已识别的工程阻塞；其首个原子纵切尚待按计划冻结固定评测集和验收指标。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 
 ## 未验证范围
 
-- M14-T3 见 `V-20260902-001`：真实 OpenAI SDK `responses.parse`、Base64 `input_image`、结构化
-  输出和 usage 只通过本地 MockTransport；没有真实 Provider、真实视觉质量/OCR、图片隐私上传、
-  Token/费用、代理/TLS 或模型支持证据。当前 PNG guard 仍只验证签名/IHDR/尺寸/像素，不是完整
-  decoder、安全重编码、metadata 剥离或恶意图片扫描器；M14-T4 只补单次 E4，不得把它扩张成
-  生产上传管线。
+- M14-T3 的 OpenAI `responses.parse` 路径仍只有本地 MockTransport 证据；`V-20261020-005` 已通过
+  独立 MiniMax adapter 补充恰好一次真实图片输入、结构化 observation 和 usage E4，但不证明 OpenAI
+  路径、格式长期稳定性、开放域视觉质量、生产容量、TLS/代理普适性或账单。当前 PNG guard 仍只验证
+  签名/IHDR/尺寸/像素，不是完整 decoder、安全重编码、metadata 剥离或恶意图片扫描器；单次 E4
+  不得被扩张成生产上传管线。
 - M14-T2 是本地 fixture-only E3：完整 URL/plan digest、解析后 IP 分类、逐跳 redirect、DNS
   rebinding 和上传下载拒绝已有确定性/真实 Chromium 证据，但没有访问任意公网、真实公网 DNS/
   HTTP redirect、TLS/代理、个人 profile/Cookie、跨平台浏览器或生产 egress。`KI-010` 关闭不代表
@@ -279,9 +276,9 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-20-m14-t4-minimax-m-plan-gate.md`，再核对
-`V-20261020-004`、`ADR-0043`、`docs/m14-minimax-vision-smoke.md`、
-`backend/app/minimax_vision_smoke.py` 和 `scripts/verify-online.ps1`。MiniMax adapter/人民币门已离线
-完成，M Plan 模式及 119 项相关回归通过，但没有读取真实 Key 或执行 E4。Key 已确认为 M Plan；只有
-用户重新明确授权恰好一次请求后，才可在临时子进程移除 `ALL_PROXY/all_proxy` 并执行；否则不读取/
-输出 Key、不访问 Provider、不查询套餐余量、不升级依赖、不修改学习者 `docs/progress.md` 或 push。
+`docs/continuity/handoffs/2026-10-20-m14-t4-minimax-online-verified.md`，再核对
+`V-20261020-005`、`ADR-0043`、`docs/m14-minimax-vision-smoke.md`、
+`backend/app/minimax_vision_smoke.py` 和 `scripts/verify-online.ps1`。唯一授权的 MiniMax M Plan 请求已
+成功且授权已消耗，M14-T4 为 `verified`；当前任务是 M14-T5，下一动作是审阅任务范围并冻结首个
+离线评测纵切。没有新的 Provider 授权：不得再次读取 Key、访问 Provider、查询套餐余量、尝试
+DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。

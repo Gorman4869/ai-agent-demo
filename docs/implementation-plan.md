@@ -1170,6 +1170,10 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   单价与现金上限，只保留 Provider 响应 Token usage，并输出现金成本不适用、套餐余量未查询。
   官方余量接口不会被 smoke 自动调用，以保持一次模型请求和最小 Key 暴露。相关 119 项回归见
   `V-20261020-004`；真实调用仍需新的单次授权。
+- 2026-10-20 用户明确授权的一次 `MiniMax-M3` M Plan 调用已成功：固定 PNG 得到真实结构化观察，
+  visible text 保持不可信且不能授权动作，无 tools；input/output/total usage 为 `479/43/522` Token，
+  时延 `4643.964 ms`。现金成本不适用，套餐余量未查询；一次授权已消耗且未重试。证据见
+  `V-20261020-005`，M14-T4 达到 `verified`。
 
 ### M14-T5：高级 Agent 评测与对照
 
