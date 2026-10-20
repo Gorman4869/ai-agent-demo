@@ -2,9 +2,13 @@ param(
     [switch]$Authorized,
     [ValidateSet("M8", "M14")]
     [string]$Suite = "M8",
+    [ValidateSet("OpenAI", "MiniMax")]
+    [string]$VisionProvider = "OpenAI",
     [string]$VisionModel = "",
     [decimal]$InputPricePerMillionUsd = 0,
-    [decimal]$OutputPricePerMillionUsd = 0
+    [decimal]$OutputPricePerMillionUsd = 0,
+    [decimal]$InputPricePerMillionCny = 0,
+    [decimal]$OutputPricePerMillionCny = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,16 +36,32 @@ $inputPrice = $InputPricePerMillionUsd.ToString(
 $outputPrice = $OutputPricePerMillionUsd.ToString(
     [System.Globalization.CultureInfo]::InvariantCulture
 )
+$inputPriceCny = $InputPricePerMillionCny.ToString(
+    [System.Globalization.CultureInfo]::InvariantCulture
+)
+$outputPriceCny = $OutputPricePerMillionCny.ToString(
+    [System.Globalization.CultureInfo]::InvariantCulture
+)
 
 Push-Location $repoRoot
 try {
     if ($Suite -eq "M14") {
-        & $python -X utf8 -B -m backend.app.vision_online_smoke `
-            --authorized `
-            --suite $Suite `
-            --vision-model $VisionModel `
-            --input-price-per-million-usd $inputPrice `
-            --output-price-per-million-usd $outputPrice
+        if ($VisionProvider -eq "MiniMax") {
+            & $python -X utf8 -B -m backend.app.minimax_vision_smoke `
+                --authorized `
+                --suite $Suite `
+                --vision-model $VisionModel `
+                --input-price-per-million-cny $inputPriceCny `
+                --output-price-per-million-cny $outputPriceCny
+        }
+        else {
+            & $python -X utf8 -B -m backend.app.vision_online_smoke `
+                --authorized `
+                --suite $Suite `
+                --vision-model $VisionModel `
+                --input-price-per-million-usd $inputPrice `
+                --output-price-per-million-usd $outputPrice
+        }
     }
     else {
         & $python -X utf8 -B -m backend.app.online_smoke `

@@ -3,7 +3,7 @@
 - 更新时间：2026-10-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`cb6714f`
+- 最近已确认实现提交：`8f5c528`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -67,6 +67,7 @@
 - M14-T3 验证基线：`e165646`；实现提交：`cb6714f`；验证记录：`V-20260902-001`
 - M14-T4 离线门禁验证基线：`193c3e6`；验证记录：`V-20261020-001`
 - M14-T4 首次在线尝试基线：`e6ed850`；验证记录：`V-20261020-002`
+- M14-T4 MiniMax 离线适配基线：`8f5c528`；验证记录：`V-20261020-003`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -77,11 +78,11 @@
 | 任务 ID | `M14-T4` |
 | 状态 | `code_complete` |
 | 目标 | 在新的单次用户授权和低预算下，对 M14-T3 视觉 adapter 执行一次真实 Provider 图片输入并记录结构化观察、usage、费用和安全结果 |
-| 设计依据 | 实施计划 M14-T4；`ADR-0042`；M8 `online_smoke.py` 的单次授权、低预算和内容无关证据模式 |
-| 执行协议 | 先离线实现独立 M14 视觉 smoke 的授权/预算/验收门和测试；只有用户再次明确授权后才读取所需 Key、选择明确支持视觉的模型并执行一次 E4 |
-| 当前修改 | 首次授权尝试暴露 SOCKS5 `ALL_PROXY` 缺 `socksio` 的 SDK 构造/清理 stderr 缺口；CLI 已新增 SDK 构造前 SOCKS 支持预检，缺依赖时内容无关 fail closed，不安装依赖或修改全局代理 |
-| 验证 | `V-20261020-001/002`：首次在线尝试没有 observation/usage，费用 unknown；离线构造复现 `ImportError`，修复后相关 37 项通过。真实 E4 仍未完成 |
-| 下一动作 | 等待用户选择继续 OpenAI 还是新增 MiniMax 适配；任一真实请求都必须重新明确单次授权。继续 OpenAI 时只在临时子进程移除 `ALL_PROXY/all_proxy`，沿用相同模型/费率/一次请求/零重试 |
+| 设计依据 | 实施计划 M14-T4；`ADR-0042/0043`；M8 `online_smoke.py` 的单次授权、低预算和内容无关证据模式 |
+| 执行协议 | OpenAI 与 MiniMax 使用相互独立的 adapter/Key/币种门；只有用户确认 Key 类型并再次明确授权后才读取所需 Key，在固定模型、一次请求、零重试和低预算下执行一次 E4 |
+| 当前修改 | 新增固定国内端点与 `MiniMax-M3` 的 Chat Completions 视觉 adapter、严格本地 JSON 解析、独立人民币 smoke/PowerShell 路由和 16 项新测试；默认 Settings、主 Runtime 与 OpenAI 路径未迁移 |
+| 验证 | `V-20261020-001/002/003`：MiniMax 16 项、视觉/M8 53 项及扩大相关回归 114 项通过；真实 SDK 请求形状只由 MockTransport 截获。未读取真实 MiniMax Key、未访问 Provider，E4 仍未完成 |
+| 下一动作 | 先确认环境中的 Key 是普通按量还是 M Plan/Token Plan，并取得新的“恰好一次 MiniMax-M3 请求”授权；两项同时满足后，只在临时子进程移除 `ALL_PROXY/all_proxy`，按对应费用/额度口径执行一次、零重试 |
 
 ## 里程碑状态
 
@@ -95,11 +96,14 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T3 已 verified；T4 的独立视觉 smoke、固定注入图片、授权/低预算/usage/费用门已 `code_complete`，真实 Provider E4 尚未授权；T5–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T3 已 verified；T4 的 OpenAI/MiniMax 独立视觉 smoke、固定注入图片、授权/低预算/usage/费用门已 `code_complete`，真实 Provider E4 尚缺新的单次授权；T5–T8 未开始 |
 
 ## 当前阻塞
 
 - M14-T4 首次真实尝试见 `V-20261020-002`：`gpt-5.4-mini` 请求在 SDK client 构造阶段被 SOCKS5 `ALL_PROXY` 缺 `socksio` 阻断，没有 observation/usage，费用 unknown，且未重试。修复后下一次尝试仍必须取得新的单次授权，并只在临时子进程移除 SOCKS 变量。
+- MiniMax 备用路径见 `V-20261020-003` 与 `KI-033`：离线 adapter 和人民币门已完成，但真实
+  `MiniMax-M3` 的 JSON 格式、视觉文字、usage 和费用/套餐额度没有 E4；执行前必须确认普通按量或
+  M Plan/Token Plan Key，并重新授权一次请求。Key 已配置本身不构成调用授权。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 
@@ -272,9 +276,10 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T4 online-attempt handoff，
-再核对 `V-20261020-002`、`ADR-0042`、`docs/m14-vision-online-smoke.md`、
-`backend/app/vision_online_smoke.py` 和 `scripts/verify-online.ps1`。首次授权已消耗且失败，SOCKS
-fail-fast 修复已落盘且 37 项相关回归通过。只有用户再次明确授权另一请求后，才可在
-临时子进程移除 `ALL_PROXY/all_proxy` 并重试一次；否则不读取/输出 Key、不执行 Provider、不升级
-依赖、不修改学习者 `docs/progress.md` 或 push。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
+`docs/continuity/handoffs/2026-10-20-m14-t4-minimax-offline-adapter.md`，再核对
+`V-20261020-003`、`ADR-0043`、`docs/m14-minimax-vision-smoke.md`、
+`backend/app/minimax_vision_smoke.py` 和 `scripts/verify-online.ps1`。MiniMax adapter/人民币门已离线
+完成，114 项相关回归通过，但没有读取真实 Key 或执行 E4。只有用户确认 Key 类型并重新明确授权
+恰好一次请求后，才可在临时子进程移除 `ALL_PROXY/all_proxy` 并执行；否则不读取/输出 Key、不访问
+Provider、不升级依赖、不修改学习者 `docs/progress.md` 或 push。

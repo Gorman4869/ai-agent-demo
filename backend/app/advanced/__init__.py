@@ -45,6 +45,7 @@ from backend.app.advanced.process_runner import ProcessResourceLimits
 from backend.app.advanced.multimodal import (
     MultimodalInspection,
     MultimodalVisionAgent,
+    MiniMaxVisionModel,
     OfflineMultimodalAgent,
     OfflineVisionModel,
     OpenAIVisionModel,
@@ -58,6 +59,7 @@ from backend.app.advanced.multimodal import (
     VisionRunResult,
     VisionUsage,
     create_multimodal_vision_agent,
+    create_minimax_vision_client_factory,
     create_openai_vision_client_factory,
 )
 
@@ -84,6 +86,7 @@ __all__ = [
     "ControlledCodeAgent",
     "MultimodalInspection",
     "MultimodalVisionAgent",
+    "MiniMaxVisionModel",
     "OfflineMultimodalAgent",
     "OfflineVisionModel",
     "OpenAIVisionModel",
@@ -109,5 +112,6 @@ __all__ = [
     "canonical_browser_url",
     "content_digest",
     "create_multimodal_vision_agent",
+    "create_minimax_vision_client_factory",
     "create_openai_vision_client_factory",
 ]

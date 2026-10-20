@@ -91,3 +91,12 @@ observation 或 usage，且没有重试。离线 dummy Key 构造复现了同一
 到达 Provider；但缺少 usage/账单回执，费用仍按 unknown 记录。
 
 该失败促成上述 SOCKS fail-fast 门。它不是 E4，也不授权第二次请求。
+
+## MiniMax 国内备用纵切
+
+若 OpenAI 不可用，可改走独立 MiniMax 国内 adapter；它不会把 MiniMax Key/Base URL 混入现有
+OpenAI Responses 路径。固定端点、模型、人民币费用门、严格 JSON 解析、执行命令和 Key 类型边界
+见 `docs/m14-minimax-vision-smoke.md` 与 `ADR-0043`。
+
+MiniMax 离线实现和 114 项相关回归已经通过，但同样不构成在线授权或 E4。环境变量已配置只说明
+具备执行准备；真实请求前仍须确认普通按量或 M Plan/Token Plan Key，并由用户重新明确授权一次。

@@ -1155,6 +1155,17 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   usage，费用记为 unknown，且未重试。
 - CLI 已补 SOCKS 支持预检，缺依赖时在 SDK 构造前以配置错误 65 fail closed。下一次真实尝试必须
   重新授权，并只在临时子进程移除 `ALL_PROXY/all_proxy`；不安装依赖、不修改全局代理。
+- MiniMax 国内备用纵切已完成离线实现：固定 `https://api.minimax.cn/v1`、`MiniMax-M3`、Chat
+  Completions Base64 PNG、`detail=low`、`thinking=disabled`、无 tools 和零重试；默认 Settings、主
+  Runtime 与 OpenAI Responses adapter 均不迁移。MiniMax 文档未声明 `response_format/json_schema`，
+  因此输出只通过 server-owned JSON prompt 与本地 Pydantic 严格解析，格式漂移一律 fail closed。
+- MiniMax 独立 CLI 使用 `MINIMAX_API_KEY`、`MINIMAX_MODEL` 和人民币费用门，不复用 OpenAI 的 Key/
+  USD 配置。普通按量 `MiniMax-M3` 标准费率按 input `2.10`、output `8.40 CNY / 1M Token` 时，
+  2000 input + 256 output 的声明上界为 `0.00635040 CNY`。离线相关回归 114 项通过，见
+  `V-20261020-003`、`ADR-0043` 和 `docs/m14-minimax-vision-smoke.md`；尚未读取真实 Key 或执行 E4。
+- 真实 MiniMax 请求前必须确认环境中的 Key 是普通按量还是 M Plan/Token Plan，并取得新的“一次
+  请求”授权；Key 已配置本身不构成授权。订阅 Key 只能记录套餐额度/usage，不能把按量费率估算
+  冒充实际现金账单。
 
 ### M14-T5：高级 Agent 评测与对照
 

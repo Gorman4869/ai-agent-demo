@@ -4729,3 +4729,62 @@ E4 均未执行；不得标记 `verified`。下一动作是由用户明确授权
 先完成修复后的连续性/相关回归并本地提交。若用户希望再次尝试，必须重新明确授权另一次付费调用；
 随后只在临时子进程移除 SOCKS `ALL_PROXY/all_proxy`，继续使用同一模型、费率、一次请求和零重试，
 不得把本次“继续吧”授权复用到第二次请求。
+
+## V-20261020-003：M14-T4 MiniMax 国内视觉 adapter 离线代码完成
+
+- 任务：`M14-T4 / code_complete`，真实 E4 仍未执行
+- 时间：2026-10-20，Asia/Shanghai
+- 验证目标：在不读取真实 Key 或访问 Provider 的前提下，为 MiniMax 国内平台增加独立视觉
+  adapter、人民币低预算门、内容无关证据和可复现离线请求形状。
+- 验证基线：`8f5c528`（OpenAI 视觉 smoke SOCKS fail-fast 修复）；本记录覆盖其后的未提交
+  MiniMax worktree，提交 ID 由后续恢复记录补记。
+- 任务等级：C 类外部门禁任务的离线准备；真实 OpenAI SDK + 本地 MockTransport 为 E2，相关共享
+  adapter/Settings/Runtime 回归为 E3，没有 MiniMax Provider E4。
+- 授权与数据边界：用户说明国内平台 Key 已配置，但没有授权本轮发起真实请求。全过程未读取
+  `MINIMAX_API_KEY` 值、未访问 MiniMax、未发送图片、未产生费用、未安装依赖、未修改全局代理、
+  未修改 `docs/progress.md` 或 push。
+
+### 官方合同与费用核对
+
+- MiniMax 国内 OpenAI-compatible Base URL 为 `https://api.minimax.cn/v1`，Chat Completions 端点为
+  `/v1/chat/completions`；`MiniMax-M3` 支持图片输入和关闭 thinking。
+- 官方 Chat Completions 文档没有列出 `response_format/json_schema`，因此实现没有伪造 Provider
+  structured-output 能力，而是用固定 JSON prompt 加本地 Pydantic 严格解析；格式漂移、Markdown
+  fence、截断、非 stop 和无效 usage 都 fail closed。
+- 普通按量 `MiniMax-M3` 标准层、输入不超过 512k 的当日费率为 input `2.10`、output `8.40 CNY /
+  1M Token`。按 2000 input + 256 output 上限估算 `0.00635040 CNY`，低于本地 `0.05 CNY` 门；
+  实际费用仍需 usage/账单，M Plan/Token Plan Key 不能套用同一现金结论。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_minimax_vision_smoke -v`（沙箱外） | 0 | 新增 16 项全部通过；授权前不读环境、Key/模型/预算/代理门、真实 SDK MockTransport、严格 JSON、usage/CNY 摘要与 PowerShell 未授权入口均通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_minimax_vision_smoke backend.tests.test_vision_online_smoke backend.tests.test_online_smoke backend.tests.test_multimodal_agent -v`（沙箱外） | 0 | 53 项全部通过；MiniMax/OpenAI 视觉和既有 M8 smoke 未回归 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_minimax_vision_smoke backend.tests.test_vision_online_smoke backend.tests.test_online_smoke backend.tests.test_multimodal_agent backend.tests.test_settings backend.tests.test_openai_agents_runtime backend.tests.test_advanced_harness -v`（沙箱外） | 0 | 114 项全部通过，2.356s；一次 asyncio debug slow-task 提示不影响结果。命令只使用 fake/MockTransport，没有真实网络 |
+| `./.venv/Scripts/python.exe -B -m compileall -q backend/app/advanced/multimodal.py backend/app/minimax_vision_smoke.py backend/tests/test_minimax_vision_smoke.py` | 0 | 修改 Python 文件语法编译通过 |
+| 首次本任务文件密钥模式 `rg` | 1 | PowerShell/正则引号组合错误导致未闭合字符类；没有形成扫描结论，随即改为三个独立 `-e` 模式重跑 |
+| 修正后的 `rg`：长 `sk-`、Bearer 与 JWT 形状 | 1 | 预期无匹配；本任务文件没有固定常见 Key、Bearer Token 或 JWT |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、177 个 Markdown 文件通过；M14-T4、V/KI/ADR/handoff 与恢复入口一致 |
+| `git diff --check` | 0 | 最终代码和文档无 whitespace error；只有 Git LF/CRLF 工作树提示 |
+
+### 实现、自审与边界
+
+- `MiniMaxVisionModel` 固定 `MiniMax-M3`、国内 Base URL、Base64 PNG、`detail=low`、
+  `thinking=disabled`、`temperature=0`、`max_completion_tokens`、零 SDK retry 和无 tools；共享 PNG
+  guard、timeout、不可信 observation 与 metadata fallback 保持不变。
+- `backend.app.minimax_vision_smoke` 是独立 opt-in CLI；默认 Settings、主 Runtime 和 OpenAI
+  Responses adapter 不迁移。授权缺失时在读取环境和启动 Python 前拒绝，Key 使用 `SecretStr`，
+  stdout 只包含模型、fixture 元数据、信任布尔值、usage 与人民币估算。
+- `scripts/verify-online.ps1` 保持 OpenAI/M8 入口兼容，只在 `-VisionProvider MiniMax` 时选择新 CLI。
+  当前没有改变依赖、HTTP API、数据库、前端或部署，因此本轮以 114 项相关离线回归验收，没有重复
+  全仓 backend/Vue/MCP/Docker 门。
+- `ADR-0043` 固定独立 adapter、端点/模型、严格本地解析和费用边界；`KI-033` 跟踪真实格式、视觉
+  质量、usage 与 Key 计费类型缺口。
+
+### 结论与下一动作
+
+MiniMax 国内视觉 adapter、独立人民币门、离线请求形状和安全回归已达到 `code_complete`，但没有
+真实结构化观察、OCR、usage 或费用/额度证据，不能把 M14-T4 标记为 `verified`。下一动作是先由用户
+确认 Key 为普通按量或 M Plan/Token Plan，再明确授权恰好一次 `MiniMax-M3` 请求；只有两项同时满足
+后，才允许在临时子进程移除 `ALL_PROXY/all_proxy` 并执行唯一入口。
