@@ -4788,3 +4788,6 @@ MiniMax 国内视觉 adapter、独立人民币门、离线请求形状和安全�
 真实结构化观察、OCR、usage 或费用/额度证据，不能把 M14-T4 标记为 `verified`。下一动作是先由用户
 确认 Key 为普通按量或 M Plan/Token Plan，再明确授权恰好一次 `MiniMax-M3` 请求；只有两项同时满足
 后，才允许在临时子进程移除 `ALL_PROXY/all_proxy` 并执行唯一入口。
+
+实现、测试、ADR、说明和本记录随后已以 `4fae4a3`（`feat: add minimax vision smoke adapter`）完成
+本地提交；未 push。该提交是本记录所述 MiniMax 离线纵切的实现锚点。

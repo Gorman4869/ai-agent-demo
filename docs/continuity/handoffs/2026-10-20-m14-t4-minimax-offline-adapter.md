@@ -3,7 +3,8 @@
 ## 当前结论
 
 - 当前任务仍是 `M14-T4 / code_complete`，验证记录为 `V-20261020-001/002/003`。
-- 本轮验证基线为 `8f5c528`；该提交已包含 OpenAI 视觉 smoke 的 SOCKS fail-fast 修复。
+- 本轮验证基线为 `8f5c528`；MiniMax 离线纵切实现提交为 `4fae4a3`。基线提交已包含 OpenAI 视觉
+  smoke 的 SOCKS fail-fast 修复。
 - MiniMax 国内备用 adapter、独立人民币低预算 CLI、PowerShell 路由、ADR、说明和测试已完成。
 - 用户说明国内平台 Key 已配置，但没有授权本轮真实调用；没有读取 Key、访问 MiniMax、发送图片或
   产生费用，E4 仍未完成。
