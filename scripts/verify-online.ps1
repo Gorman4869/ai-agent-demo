@@ -1,16 +1,18 @@
 param(
     [switch]$Authorized,
-    [ValidateSet("M8")]
+    [ValidateSet("M8", "M14")]
     [string]$Suite = "M8",
+    [string]$VisionModel = "",
     [decimal]$InputPricePerMillionUsd = 0,
     [decimal]$OutputPricePerMillionUsd = 0
 )
 
 $ErrorActionPreference = "Stop"
+$suiteLabel = if ($Suite -eq "M14") { "M14-T4 vision" } else { "M8-T6" }
 
 if (-not $Authorized) {
     [Console]::Error.WriteLine(
-        "M8-T6 online smoke refused: explicit one-time authorization is missing"
+        "$suiteLabel online smoke refused: explicit one-time authorization is missing"
     )
     exit 64
 }
@@ -18,7 +20,9 @@ if (-not $Authorized) {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-    [Console]::Error.WriteLine("M8-T6 online smoke refused: project Python is missing")
+    [Console]::Error.WriteLine(
+        "$suiteLabel online smoke refused: project Python is missing"
+    )
     exit 65
 }
 
@@ -31,11 +35,21 @@ $outputPrice = $OutputPricePerMillionUsd.ToString(
 
 Push-Location $repoRoot
 try {
-    & $python -X utf8 -B -m backend.app.online_smoke `
-        --authorized `
-        --suite $Suite `
-        --input-price-per-million-usd $inputPrice `
-        --output-price-per-million-usd $outputPrice
+    if ($Suite -eq "M14") {
+        & $python -X utf8 -B -m backend.app.vision_online_smoke `
+            --authorized `
+            --suite $Suite `
+            --vision-model $VisionModel `
+            --input-price-per-million-usd $inputPrice `
+            --output-price-per-million-usd $outputPrice
+    }
+    else {
+        & $python -X utf8 -B -m backend.app.online_smoke `
+            --authorized `
+            --suite $Suite `
+            --input-price-per-million-usd $inputPrice `
+            --output-price-per-million-usd $outputPrice
+    }
     $exitCode = $LASTEXITCODE
 }
 finally {

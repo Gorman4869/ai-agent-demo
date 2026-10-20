@@ -4631,3 +4631,52 @@ M14-T1 的真实调用链、代表性失败、安全边界、工作说明和可�
   PostgreSQL/E2E/Docker/online profile 按默认门跳过，不冒充新证据。
 - M14-T3 的代码、测试、ADR、说明和 E2/E3 证据满足实施计划，达到 `verified`。下一任务为
   `M14-T4 / planned`；真实视觉 E4 仍需用户新的单次在线授权。
+
+## V-20261020-001：M14-T4 在线视觉冒烟门禁离线代码完成
+
+- 任务：`M14-T4 / code_complete`
+- 时间：2026-10-20，Asia/Shanghai
+- 验证目标：在不执行 Provider 的前提下冻结独立视觉 smoke 的单次授权、显式模型、固定图片、
+  一次请求/零重试、低预算、结构化观察、usage/费用和内容无关输出合同。
+- 验证基线：`193c3e6`；M14-T3 实现提交已核对为 `cb6714f`。本记录覆盖其后的 M14-T4 未提交
+  worktree，提交 ID 由后续恢复记录补记。
+- 任务等级：C 类外部门禁任务的离线准备；证据最高为本地 fake client E2 与 M14-T3 adapter、
+  Settings/Runtime 相关回归 E3，没有真实 Provider E4。
+- 授权与数据边界：没有新的单次用户授权；未读取 Key/用户 `.env`、访问公网、发送图片、调用模型、
+  产生费用、安装/升级依赖、启动 Docker/PostgreSQL、修改 `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_vision_online_smoke backend.tests.test_online_smoke backend.tests.test_multimodal_agent -v`（受限沙箱） | 中断 | M14 未授权 PowerShell 门先通过；随后 Windows sandbox 在创建 `asyncio` event loop 的本地 `socketpair` 时阻塞。`faulthandler` 定位到 `socket.accept/_fallback_socketpair`，不是业务请求或网络 Provider；中断后无残留 Python 进程 |
+| 同一 35 项命令（沙箱外） | 0 | 35 项全部通过，2.207s；新增视觉 smoke 10 项、既有 M8 online smoke 12 项、Multimodal 13 项通过。全过程使用 fake/MockTransport，无真实网络 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_vision_online_smoke.VisionOnlineSmokeGateTests backend.tests.test_settings backend.tests.test_openai_agents_runtime backend.tests.test_advanced_harness -v`（沙箱外） | 0 | 66 项全部通过，0.243s；授权/模型/预算门、Settings、OpenAI Runtime 生命周期和安全预算未回归 |
+| 同一 35 项命令（最终自审后，`-q`） | 0 | 35 项全部通过，1.796s；M8/M14 PowerShell 未授权入口、视觉 smoke 与 Multimodal 最终回归通过 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、173 个 Markdown 文件通过；M14-T4 code_complete、V/KI/handoff 和恢复入口一致 |
+| `rg -n "sk-[A-Za-z0-9_-]{20,}\|Bearer [A-Za-z0-9._-]{20,}" <本任务代码/测试/脚本/说明/handoff>` | 1 | 预期无匹配；仓库任务文件没有固定 Key 或 Bearer Token |
+| `git diff --check` | 0 | 最终代码和文档无 whitespace error；仅有既有 LF/CRLF 工作树提示 |
+
+### 实现、自审与边界
+
+- `backend/app/vision_online_smoke.py` 只在 `--authorized` 后读取显式环境；还要求
+  `--vision-model` 与 `OPENAI_MODEL` 完全一致。固定 PNG 在内存中确定性生成，包含两行提示注入式
+  可见文字但没有个人数据、用户文件、远程 URL 或动态输入。
+- 一次请求复用 M14-T3 `create_multimodal_vision_agent()`；固定 `detail=low`、无 tools、
+  `store=false`、零重试与有界 timeout/output。成功验收要求非 offline 结构化观察、非空 visible-text、
+  双层 `untrusted_visual_data/can_authorize_actions=false` 和正整数一致 usage。
+- CLI 对声明 Token/费用上界做预检，对真实 usage 做请求后 Token/费用验收；stdout 只输出模型、fixture
+  摘要、时延、字节数、权限布尔值、usage 与操作者费率估算，不输出视觉原文、raw payload 或异常。
+- `scripts/verify-online.ps1` 保持 M8 路径兼容，并新增 M14 分支。缺授权时 M8/M14 都在项目 Python
+  检查前以 64 拒绝；默认 `scripts/verify.ps1` 和 CI 不会运行此付费入口。
+- 聚焦自审没有引入依赖、HTTP/API、数据库、Vue 或公共领域合同变化，因此未运行全量 729+ 默认门。
+  新 CLI 和既有相关回归足以覆盖本次离线纵切；真实 Provider 是刻意保留的唯一外部门。
+- `KI-018` 仍保持 mitigated：本 smoke 只有单请求后的 usage/费用验收，不能在 Provider 计费前硬停止，
+  费率也由操作者提供而非版本化定价源或账单。没有新增架构决策，继续复用 `ADR-0042`。
+
+### 结论
+
+M14-T4 的独立脚本、双重授权、显式模型、固定注入图片、低预算、安全摘要和离线测试已落盘，达到
+`code_complete`。没有用户新的单次授权，因此真实视觉、OCR 质量、Provider usage/费用和图片上传
+E4 均未执行；不得标记 `verified`。下一动作是由用户明确授权一次调用，并提供/确认视觉模型和本次
+官方 input/output 费率后，执行唯一 M14 命令并把实际结果追加到本日志。

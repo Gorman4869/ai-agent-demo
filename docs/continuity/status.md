@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-09-02，Asia/Shanghai
+- 更新时间：2026-10-20，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`e165646`
+- 最近已确认实现提交：`cb6714f`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -64,7 +64,8 @@
 - M13-T7 验证基线：`68ea1bb`；验证记录：`V-20260901-003`
 - M14-T1 验证基线：`4df0341`；实现提交：`4ddfd68`；验证记录：`V-20260901-004`
 - M14-T2 验证基线：`4ddfd68`；实现提交：`e165646`；验证记录：`V-20260901-005`
-- M14-T3 验证基线：`e165646`；验证记录：`V-20260902-001`
+- M14-T3 验证基线：`e165646`；实现提交：`cb6714f`；验证记录：`V-20260902-001`
+- M14-T4 离线门禁验证基线：`193c3e6`；验证记录：`V-20261020-001`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -73,13 +74,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M14-T4` |
-| 状态 | `planned` |
+| 状态 | `code_complete` |
 | 目标 | 在新的单次用户授权和低预算下，对 M14-T3 视觉 adapter 执行一次真实 Provider 图片输入并记录结构化观察、usage、费用和安全结果 |
 | 设计依据 | 实施计划 M14-T4；`ADR-0042`；M8 `online_smoke.py` 的单次授权、低预算和内容无关证据模式 |
 | 执行协议 | 先离线实现独立 M14 视觉 smoke 的授权/预算/验收门和测试；只有用户再次明确授权后才读取所需 Key、选择明确支持视觉的模型并执行一次 E4 |
-| 当前修改 | M14-T3 已以 `V-20260902-001` verified：真实 SDK input_image E2、共同结构化观察 E3、双重授权、不可信视觉文字、预算和 metadata fallback 已落盘 |
-| 验证 | Multimodal 13 项、相关 74 项、完整离线 backend 729 项（1 skip）、MCP 11 项、Vue 12 项和 production build 通过；没有真实 Provider、Key、图片上传或费用 |
-| 下一动作 | 读取 M8 online smoke/价格证据模式与 M14-T4 计划，先冻结独立 CLI 的授权参数、低预算、fixture 图片、usage/费用验收和内容无关摘要；不在没有新授权时执行 Provider |
+| 当前修改 | 新增独立 `vision_online_smoke`、固定无个人数据注入 PNG、显式模型/双重授权/一次请求/零重试/低预算门、内容无关结果与 M14 PowerShell 入口；未修改默认离线验证或产品 API |
+| 验证 | `V-20261020-001`：新增/相关 35 项与 Settings/Runtime/Harness 66 项全部通过；没有真实 Provider、Key、图片上传或费用，证据最高为 E2/E3 |
+| 下一动作 | 仅在用户新的明确单次授权、视觉模型和当前 input/output 官方费率都确认后，执行 `verify-online.ps1 -Authorized -Suite M14` 一次并记录 E4；否则保持停止 |
 
 ## 里程碑状态
 
@@ -93,11 +94,11 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T3 已 verified：真实 Chromium fixture、完整 URL/plan 审批、SSRF/redirect、真实 SDK 视觉输入形状、结构化不可信观察、双重授权与失败回退通过；T4 线上视觉至 T8 尚未完成 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T3 已 verified；T4 的独立视觉 smoke、固定注入图片、授权/低预算/usage/费用门已 `code_complete`，真实 Provider E4 尚未授权；T5–T8 未开始 |
 
 ## 当前阻塞
 
-- M14-T4 的真实视觉 Provider 调用尚未授权；必须重新取得用户单次在线授权，并先确认明确支持视觉输入的模型、低预算和费用来源，不能用 T3 的 SDK/MockTransport 证据冒充 E4。
+- M14-T4 的离线门禁已由 `V-20261020-001` 完成，但真实视觉 Provider 调用尚未授权；必须重新取得用户单次在线授权，并先确认明确支持视觉输入的模型与当前官方费率，不能用 fake/MockTransport 证据冒充 E4。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 
@@ -270,8 +271,8 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T3 verified handoff，
-再核对 `V-20260902-001`、`ADR-0042`、`docs/m14-vision-input.md`、实施计划 M14-T4、M8
-`online_smoke.py` 和当前 multimodal adapter。M14-T3 已 verified；下一原子动作是只读冻结独立
-视觉 smoke 的双重授权、低预算、fixture、usage/费用和内容无关验收合同。没有用户新的单次授权时
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T4 code-complete handoff，
+再核对 `V-20261020-001`、`ADR-0042`、`docs/m14-vision-online-smoke.md`、
+`backend/app/vision_online_smoke.py` 和 `scripts/verify-online.ps1`。M14-T4 离线门禁已完成，下一原子
+动作只能是在用户新的明确单次授权、视觉模型和当前官方费率确认后执行一次真实 E4；缺任一条件时
 不读取 Key/用户 `.env`、不执行 Provider、不升级依赖、不修改学习者 `docs/progress.md` 或 push。

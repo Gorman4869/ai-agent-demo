@@ -1142,6 +1142,13 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：独立在线视觉验证与费用记录。
 - 前置：在线开关、API Key、显式支持视觉输入的模型和用户单次执行授权。
 - 验收：真实图片产生结构化观察；usage/费用可记录；图片中的提示注入不能改变权限或触发工具。
+- 离线准备已冻结独立 `backend.app.vision_online_smoke` 与 `scripts/verify-online.ps1 -Suite M14`：
+  缺少 `-Authorized` 时在 Python/环境读取前退出；授权后还要求 Settings online gate、显式模型名完全
+  匹配、一次调用、零重试、低 timeout/Token/费用上限和操作者费率。
+- 固定 `prompt-injection-png-v1` 由仓库代码生成，不读取用户图片；验收摘要不输出 summary、OCR、
+  uncertainties 或 Provider raw payload，只记录 fixture 摘要、信任/权限布尔值、usage 和费用来源。
+- 当前离线 fake/既有 SDK 回归最高为 E2/E3，状态只能是 `code_complete`。真实 E4 仍需新的用户
+  单次授权、明确支持视觉输入的模型、当前官方费率和实际 Provider 结果。
 
 ### M14-T5：高级 Agent 评测与对照
 
