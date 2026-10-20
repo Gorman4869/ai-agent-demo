@@ -66,6 +66,7 @@
 - M14-T2 验证基线：`4ddfd68`；实现提交：`e165646`；验证记录：`V-20260901-005`
 - M14-T3 验证基线：`e165646`；实现提交：`cb6714f`；验证记录：`V-20260902-001`
 - M14-T4 离线门禁验证基线：`193c3e6`；验证记录：`V-20261020-001`
+- M14-T4 首次在线尝试基线：`e6ed850`；验证记录：`V-20261020-002`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -78,9 +79,9 @@
 | 目标 | 在新的单次用户授权和低预算下，对 M14-T3 视觉 adapter 执行一次真实 Provider 图片输入并记录结构化观察、usage、费用和安全结果 |
 | 设计依据 | 实施计划 M14-T4；`ADR-0042`；M8 `online_smoke.py` 的单次授权、低预算和内容无关证据模式 |
 | 执行协议 | 先离线实现独立 M14 视觉 smoke 的授权/预算/验收门和测试；只有用户再次明确授权后才读取所需 Key、选择明确支持视觉的模型并执行一次 E4 |
-| 当前修改 | 新增独立 `vision_online_smoke`、固定无个人数据注入 PNG、显式模型/双重授权/一次请求/零重试/低预算门、内容无关结果与 M14 PowerShell 入口；未修改默认离线验证或产品 API |
-| 验证 | `V-20261020-001`：新增/相关 35 项与 Settings/Runtime/Harness 66 项全部通过；没有真实 Provider、Key、图片上传或费用，证据最高为 E2/E3 |
-| 下一动作 | 仅在用户新的明确单次授权、视觉模型和当前 input/output 官方费率都确认后，执行 `verify-online.ps1 -Authorized -Suite M14` 一次并记录 E4；否则保持停止 |
+| 当前修改 | 首次授权尝试暴露 SOCKS5 `ALL_PROXY` 缺 `socksio` 的 SDK 构造/清理 stderr 缺口；CLI 已新增 SDK 构造前 SOCKS 支持预检，缺依赖时内容无关 fail closed，不安装依赖或修改全局代理 |
+| 验证 | `V-20261020-001/002`：首次在线尝试没有 observation/usage，费用 unknown；离线构造复现 `ImportError`，修复后相关 37 项通过。真实 E4 仍未完成 |
+| 下一动作 | 等待用户选择继续 OpenAI 还是新增 MiniMax 适配；任一真实请求都必须重新明确单次授权。继续 OpenAI 时只在临时子进程移除 `ALL_PROXY/all_proxy`，沿用相同模型/费率/一次请求/零重试 |
 
 ## 里程碑状态
 
@@ -98,7 +99,7 @@
 
 ## 当前阻塞
 
-- M14-T4 的离线门禁已由 `V-20261020-001` 完成，但真实视觉 Provider 调用尚未授权；必须重新取得用户单次在线授权，并先确认明确支持视觉输入的模型与当前官方费率，不能用 fake/MockTransport 证据冒充 E4。
+- M14-T4 首次真实尝试见 `V-20261020-002`：`gpt-5.4-mini` 请求在 SDK client 构造阶段被 SOCKS5 `ALL_PROXY` 缺 `socksio` 阻断，没有 observation/usage，费用 unknown，且未重试。修复后下一次尝试仍必须取得新的单次授权，并只在临时子进程移除 SOCKS 变量。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 
@@ -271,8 +272,9 @@
 
 ## 恢复入口
 
-若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T4 code-complete handoff，
-再核对 `V-20261020-001`、`ADR-0042`、`docs/m14-vision-online-smoke.md`、
-`backend/app/vision_online_smoke.py` 和 `scripts/verify-online.ps1`。M14-T4 离线门禁已完成，下一原子
-动作只能是在用户新的明确单次授权、视觉模型和当前官方费率确认后执行一次真实 E4；缺任一条件时
-不读取 Key/用户 `.env`、不执行 Provider、不升级依赖、不修改学习者 `docs/progress.md` 或 push。
+若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新 M14-T4 online-attempt handoff，
+再核对 `V-20261020-002`、`ADR-0042`、`docs/m14-vision-online-smoke.md`、
+`backend/app/vision_online_smoke.py` 和 `scripts/verify-online.ps1`。首次授权已消耗且失败，SOCKS
+fail-fast 修复已落盘且 37 项相关回归通过。只有用户再次明确授权另一请求后，才可在
+临时子进程移除 `ALL_PROXY/all_proxy` 并重试一次；否则不读取/输出 Key、不执行 Provider、不升级
+依赖、不修改学习者 `docs/progress.md` 或 push。

@@ -1149,6 +1149,12 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   uncertainties 或 Provider raw payload，只记录 fixture 摘要、信任/权限布尔值、usage 和费用来源。
 - 当前离线 fake/既有 SDK 回归最高为 E2/E3，状态只能是 `code_complete`。真实 E4 仍需新的用户
   单次授权、明确支持视觉输入的模型、当前官方费率和实际 Provider 结果。
+- 2026-10-20 首次单次授权尝试选择支持 image input/Responses/structured outputs 的
+  `gpt-5.4-mini`，按官方 `0.75/4.50 USD / 1M Token` 和最高 `0.002652 USD` 声明上限执行；本机
+  SOCKS5 `ALL_PROXY` 缺少 `socksio`，SDK 客户端在 Provider 请求前构造失败，没有 observation/
+  usage，费用记为 unknown，且未重试。
+- CLI 已补 SOCKS 支持预检，缺依赖时在 SDK 构造前以配置错误 65 fail closed。下一次真实尝试必须
+  重新授权，并只在临时子进程移除 `ALL_PROXY/all_proxy`；不安装依赖、不修改全局代理。
 
 ### M14-T5：高级 Agent 评测与对照
 

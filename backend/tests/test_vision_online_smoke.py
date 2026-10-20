@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from backend.app.advanced.harness import content_digest
 from backend.app.advanced.multimodal import (
@@ -99,6 +100,44 @@ class VisionOnlineSmokeGateTests(unittest.TestCase):
             validate_vision_budget(broad_settings, _prices())
         with self.assertRaisesRegex(VisionSmokeError, "upper bound exceeds"):
             validate_vision_budget(tight_cost_settings, _prices())
+
+    def test_unsupported_socks_proxy_fails_before_sdk_construction(self) -> None:
+        proxy = "socks5://private-proxy.invalid:1080"
+        environment = _online_environment(ALL_PROXY=proxy)
+
+        with patch(
+            "backend.app.vision_online_smoke.find_spec",
+            return_value=None,
+        ):
+            with self.assertRaisesRegex(
+                VisionSmokeError,
+                "SOCKS proxy requires installed HTTP client support",
+            ) as raised:
+                load_vision_settings(
+                    environment,
+                    authorized=True,
+                    declared_model="vision-smoke-model",
+                )
+
+        self.assertEqual(65, raised.exception.exit_code)
+        self.assertNotIn(proxy, str(raised.exception))
+
+    def test_http_proxy_does_not_require_optional_socks_support(self) -> None:
+        environment = _online_environment(
+            HTTPS_PROXY="http://proxy.invalid:8080",
+        )
+
+        with patch(
+            "backend.app.vision_online_smoke.find_spec",
+            side_effect=AssertionError("socks support must stay unchecked"),
+        ):
+            settings = load_vision_settings(
+                environment,
+                authorized=True,
+                declared_model="vision-smoke-model",
+            )
+
+        self.assertEqual("vision-smoke-model", settings.openai_model)
 
     def test_successful_cli_output_excludes_key_and_visual_content(self) -> None:
         environment = _online_environment()

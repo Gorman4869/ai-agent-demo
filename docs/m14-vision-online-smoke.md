@@ -66,6 +66,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 
 65；Provider fallback、缺 usage、输出信任边界错误或验收超限返回 1，且不输出图片、OCR、Provider
 raw payload、异常文本或 Key。
 
+授权后的环境预检还会检查代理协议：如果任一 HTTP/HTTPS/ALL proxy 使用 SOCKS，而当前 Python
+环境没有 `socksio`，CLI 会在构造 SDK client 前以 65 拒绝，且不输出代理地址。项目不会自动安装
+SOCKS 依赖或修改全局代理；若操作者另获一次明确授权，只能在该次临时子进程清除
+`ALL_PROXY/all_proxy`，保留已有 HTTP/HTTPS proxy。
+
 ## 成本与证据边界
 
 固定小图、`detail=low`、一次请求和零重试限制了费用面，但 API 在请求完成后才返回真实 usage。
@@ -76,3 +81,13 @@ raw payload、异常文本或 Key。
 离线 fake client 成功只证明 E2/E3 合同，不是 E4。只有经当次授权的真实 Provider 返回结构化观察、
 usage 和可计算费用，并把实际命令与结果追加到 verification log 后，M14-T4 才能从
 `code_complete` 进入 `verified`。
+
+## 2026-10-20 首次在线尝试
+
+用户授权了一次 `gpt-5.4-mini` 调用；官方页面当日确认其支持 image input、Responses 与 structured
+outputs，标准费率为 input `US$0.75`、output `US$4.50` / 1M Token。唯一尝试在 SDK client 构造
+阶段被本机 SOCKS5 `ALL_PROXY` 与缺失的 `socksio` 阻断，返回 `provider_unavailable`，没有
+observation 或 usage，且没有重试。离线 dummy Key 构造复现了同一 `ImportError`，说明没有成功
+到达 Provider；但缺少 usage/账单回执，费用仍按 unknown 记录。
+
+该失败促成上述 SOCKS fail-fast 门。它不是 E4，也不授权第二次请求。

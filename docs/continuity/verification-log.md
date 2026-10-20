@@ -4680,3 +4680,52 @@ M14-T4 的独立脚本、双重授权、显式模型、固定注入图片、低�
 `code_complete`。没有用户新的单次授权，因此真实视觉、OCR 质量、Provider usage/费用和图片上传
 E4 均未执行；不得标记 `verified`。下一动作是由用户明确授权一次调用，并提供/确认视觉模型和本次
 官方 input/output 费率后，执行唯一 M14 命令并把实际结果追加到本日志。
+
+## V-20261020-002：M14-T4 首次真实视觉尝试被本机 SOCKS 配置阻断
+
+- 任务：`M14-T4 / code_complete`，真实 E4 未完成
+- 时间：2026-10-20，Asia/Shanghai
+- 验证目标：在用户本次明确单次授权、低预算和零重试下，使用明确支持图片输入的模型执行固定
+  `prompt-injection-png-v1`，记录结构化观察、usage、费用与安全边界。
+- 验证基线：`e6ed850`（`feat: add guarded vision smoke runner`）；本记录覆盖其后的 SOCKS fail-fast
+  修复 worktree，提交 ID 由后续恢复记录补记。
+- 模型与费率：OpenAI 官方模型页确认 `gpt-5.4-mini` 支持 image input、Responses 和 structured
+  outputs，标准费率为 input `US$0.75`、output `US$4.50` / 1M Token；声明上界为 2000 input、
+  256 output，最坏估算 `US$0.002652`，低于本地 `US$0.05` 门。
+- 授权与数据边界：本次只授权一次真实请求，`max_model_calls=1`、`max_retries=0`；复用现有 Key，
+  Key/代理地址未输出或写入文件。失败后没有自动或人工重试，没有修改全局代理或安装依赖。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| 只读环境预检 | 0 | Key 已配置、online 开关为 true；原环境未配置 runtime/provider/model。临时子进程补齐 `agents_sdk/openai/gpt-5.4-mini` 和低预算；Key 值未输出 |
+| 官方 OpenAI 模型/视觉/价格页只读核对 | 0 | `gpt-5.4-mini` 的 image input、Responses、structured outputs 与 `0.75/4.50` 标准 Token 费率成立；图片 input 转成计费 input Token |
+| `powershell ... verify-online.ps1 -Authorized -Suite M14 -VisionModel gpt-5.4-mini -InputPricePerMillionUsd 0.75 -OutputPricePerMillionUsd 4.50` | 1 | 唯一在线尝试返回 `provider_unavailable`，没有 observation 或 usage；SDK 的部分初始化 HTTP client 在清理时另报 `_mounts` 缺失。脚本没有重试 |
+| 代理布尔/协议检查 | 0 | `HTTP_PROXY`、`HTTPS_PROXY` 为 HTTP，`ALL_PROXY` 为 SOCKS5；只记录存在性与 scheme，没有输出地址或凭据 |
+| `python -c` 离线 SDK 构造诊断（dummy Key，不调用 API） | 0 | `socksio_configured=False`，仅构造 `AsyncOpenAI` 即以 `ImportError` 失败；证明当前失败位于 SDK HTTP client 初始化阶段，无 Provider 请求成功证据 |
+| 修复后 `python -m unittest` 的 Vision smoke + M8 smoke + Multimodal 定向集 | 0 | 37 项全部通过，1.829s；新增 SOCKS 缺依赖 fail-fast 与普通 HTTP proxy 不受影响两项，既有门禁/adapter 回归通过 |
+| 最终相同 37 项离线回归（沙箱外受控执行） | 0 | 37 项全部通过，1.917s；沙箱内复跑再次卡在已知 Windows event-loop 本地 socket 限制，确认无残留 Python 进程后仅把同一离线命令移到沙箱外，不读取 Key、不访问 Provider |
+| `scripts/check-continuity.ps1` | 0 | 52 个稳定任务、174 个 Markdown 文件，连续性检查通过 |
+| `git diff --check` | 0 | 本轮代码、测试、连续性文档和新 handoff 无空白错误 |
+
+### 失败判定、修复与边界
+
+- 结合 SOCKS5 `ALL_PROXY`、缺失 `socksio` 和 dummy Key 离线构造同样抛出 `ImportError`，证据表明
+  失败发生在 SDK 客户端构造阶段，而不是 Provider 返回。没有真实 observation、usage 或 Provider
+  状态码，不能形成 E4。
+- 没有 Provider 请求成功证据，费用很可能未产生；但缺少 Provider usage/账单回执，因此本记录把
+  实际费用标为 `unknown`，不把推断写成确定的 `0`。
+- 实际失败暴露了 stderr 边界缺口：SDK 部分构造对象的后台清理打印了内部 `AttributeError`。
+  `vision_online_smoke` 现会在 SDK 构造前检查 proxy scheme；检测到 SOCKS 且缺少 `socksio` 时以
+  内容无关配置错误 65 拒绝，不输出代理地址，也不触发 client 构造/清理警告。
+- 没有安装 `socksio`，没有修改用户/系统代理。后续若获得新的单次授权，只允许在该临时子进程中
+  移除 `ALL_PROXY/all_proxy`，保留 HTTP/HTTPS proxy；这与既有 M11 在线验证的隔离方式一致。
+- 本次失败不改变 `ADR-0042` 的视觉不可信数据边界，也不需要新 ADR。M14-T4 保持
+  `code_complete`；真实模型兼容、OCR、usage 和费用仍未验证。
+
+### 下一动作
+
+先完成修复后的连续性/相关回归并本地提交。若用户希望再次尝试，必须重新明确授权另一次付费调用；
+随后只在临时子进程移除 SOCKS `ALL_PROXY/all_proxy`，继续使用同一模型、费率、一次请求和零重试，
+不得把本次“继续吧”授权复用到第二次请求。
