@@ -3,7 +3,7 @@
 ## 当前结论
 
 - `M14-T4 / verified`；验证记录：`V-20261020-001/002/003/004/005`。
-- 在线验证基线：`c481330`；实现锚点：MiniMax adapter `4fae4a3`、M Plan gate `c53c658`。
+- 在线验证基线：`c481330`；验证提交：`eea496a`；实现锚点：MiniMax adapter `4fae4a3`、M Plan gate `c53c658`。
 - 用户明确授权的唯一一次 `MiniMax-M3` M Plan 视觉调用已经成功并消耗；一次请求、零重试。
 - 真实响应 usage 为 input 479、output 43、total 522 Token，时延 4643.964 ms。
 - 没有查询套餐余量，没有 DeepSeek 调用，没有第二次 Provider 请求，没有 push。

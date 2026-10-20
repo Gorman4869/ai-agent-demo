@@ -4894,3 +4894,7 @@ MiniMax M Plan 用量模式已达到离线 `code_complete`：不会把套餐请�
 - 这是固定 fixture 的单次 E4，不证明结构化格式长期稳定、开放域视觉/OCR 质量、生产容量、通用
   硬成本门或其他 Provider。OpenAI 首次阻断记录继续保留为历史证据，不再构成 M14-T4 当前阻塞。
 - 当前推进到 `M14-T5 / planned`。任何后续 MiniMax、配额或 DeepSeek 调用都需要新的明确授权。
+
+在线结果、说明、状态、已知问题和 handoff 随后已以 `eea496a`
+（`docs: verify minimax m plan vision smoke`）完成本地提交；未 push。该提交是本记录所述真实 E4
+验证闭环锚点。

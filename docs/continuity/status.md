@@ -69,7 +69,7 @@
 - M14-T4 首次在线尝试基线：`e6ed850`；验证记录：`V-20261020-002`
 - M14-T4 MiniMax 离线适配基线：`8f5c528`；实现提交：`4fae4a3`；验证记录：`V-20261020-003`
 - M14-T4 MiniMax M Plan 门验证基线：`5accb4b`；实现提交：`c53c658`；验证记录：`V-20261020-004`
-- M14-T4 MiniMax M Plan 在线验证基线：`c481330`；验证记录：`V-20261020-005`
+- M14-T4 MiniMax M Plan 在线验证基线：`c481330`；验证提交：`eea496a`；验证记录：`V-20261020-005`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
