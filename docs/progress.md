@@ -64,3 +64,10 @@
 - 我能解释：检索分数只表示候选文本的相似度，不等于证据足以回答问题；共享 “Agent / 工具” 等词会带来低正分误召回。Top-1 是相对排名，审核节点还须以最高检索分数和最低相关性阈值做绝对判断；只有至少一条证据达到阈值才允许回答。
 - 当前边界：本阶段只学习离线 RAG 检索、引用与审核拒答；尚未进入记忆、数据库、pgvector 或生产级 MCP Client 生命周期。
 - 下一步：先取得 `mcp` 与 `tool-security` 的实际分数，确定能区分两者的阈值；再由学习者以失败测试驱动审核节点拒绝低分误召回。
+
+## 2026-09-04：审核节点最低检索分数完成
+
+- 本次可运行产物：在 `backend/tests/test_research_workflow.py` 新增低相关 evidence 拒答用例；在 `backend/app/agent/research_workflow.py` 集中定义暂定阈值 `0.3`，审核节点以所有 evidence 的最高分、引用草稿和 evidence 是否存在共同决定批准结果。
+- 实际分数与测试证据：对查询 `Agent 如何连接工具` 的 UTF-8 只读探针得到 `mcp=0.353553`、`tool-security=0.246183`。新测试初次按预期失败于 `approved=True`；修正后定向测试 1 项通过，`./.venv/Scripts/python.exe -B -m unittest backend.tests.test_research_workflow -v` 共 3 项通过。
+- 我能解释：evidence 非空不代表资料足以回答问题，模糊/词面匹配会产生误召回；审核应检查 `max_score >= threshold`，而不是要求所有 Top-K 都达标，否则弱候选会否决充分证据。当前 `0.3` 只适用于这组确定性离线样本，真实业务必须结合检索实现、资料分布和误放行/误拒绝成本重新评估。
+- 当前边界：本次只完成离线 RAG 的最低相关性审核门；没有进入长期记忆、数据库、pgvector、在线模型或生产级阈值评测。

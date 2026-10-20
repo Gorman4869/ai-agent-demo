@@ -107,3 +107,50 @@ class RagTest(unittest.TestCase):
         self.assertEqual(["mcp","tool-security"], [results[0].citation.document_id, results[1].citation.document_id])
         self.assertGreater(results[0].score, results[1].score)
         self.assertGreater(results[1].score,0)
+
+    def test_documents_replace_all_old_chunks(self) -> None:
+        knowledge = InMemoryKnowledgeBase(chunk_size=20, overlap=0)
+        old = Document(id="same", title="Old Title", source="old", content="A test method for replacing chunk, this is old chunk")
+        new = Document(id="same", title="New Title", source="new", content="A test method for replacing chunk, this is new chunk")
+        knowledge.add(old)
+        knowledge.add(new)
+        results = knowledge.search("new", limit=3)
+        self.assertEqual(0, len(knowledge.search("old")))
+        self.assertEqual(1, len(results))
+        self.assertEqual("new", results[0].citation.source)
+
+    def test_seed_is_idempotent_and_changed_source_replaces(self) -> None:
+        knowledge = InMemoryKnowledgeBase()
+        first = Document(id="seed", title="Seed", source="old", content="Agent 工具")
+        changed = Document(
+            id="seed",
+            title="Seed",
+            source="new",
+            content="Agent 工具",
+        )
+        self.assertEqual(1, knowledge.seed(first))
+        self.assertEqual(1, knowledge.seed(changed))
+        self.assertEqual("new", knowledge.search("工具")[0].citation.source)
+
+    def test_seed_rebuilds_after_deletion(self) -> None:
+        knowledge = InMemoryKnowledgeBase()
+        document = Document(id="seed", title="Seed", source="one", content="Agent 工具")
+        self.assertEqual(1, knowledge.seed(document))
+        self.assertTrue(knowledge.delete(document.id))
+        self.assertEqual(1, knowledge.seed(document))
+        self.assertEqual("one", knowledge.search("工具")[0].citation.source)
+
+    def test_different_overlaps_produce_different_results(self) -> None:
+        without_overlap_knowledge = InMemoryKnowledgeBase(chunk_size=20, overlap=0)
+        with_overlap_knowledge = InMemoryKnowledgeBase(chunk_size=20, overlap=5)
+        document = Document(id="test", title="Test", source="test", content="1234567890!@#$%^&权限校验")
+        without_overlap_knowledge.add(document)
+        with_overlap_knowledge.add(document)
+        results_without_overlap = without_overlap_knowledge.search("权限校验")
+        results_with_overlap = with_overlap_knowledge.search("权限校验")
+        # 断言无 overlap 的结果中，没有任何 excerpt 包含完整 权限校验
+        self.assertGreater(len(results_without_overlap), 0)
+        self.assertTrue(all("权限校验" not in result.citation.excerpt for result in results_without_overlap))
+        # 断言有 overlap 的结果中，至少一个 excerpt 包含完整 权限校验
+        self.assertGreater(len(results_with_overlap), 0)
+        self.assertTrue(any("权限校验" in result.citation.excerpt for result in results_with_overlap))
