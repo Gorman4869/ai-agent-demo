@@ -5,6 +5,7 @@ param(
     [ValidateSet("OpenAI", "MiniMax")]
     [string]$VisionProvider = "OpenAI",
     [string]$VisionModel = "",
+    [string]$MiniMaxBillingMode = "",
     [decimal]$InputPricePerMillionUsd = 0,
     [decimal]$OutputPricePerMillionUsd = 0,
     [decimal]$InputPricePerMillionCny = 0,
@@ -47,10 +48,23 @@ Push-Location $repoRoot
 try {
     if ($Suite -eq "M14") {
         if ($VisionProvider -eq "MiniMax") {
+            if ($MiniMaxBillingMode -eq "Payg") {
+                $billingMode = "payg"
+            }
+            elseif ($MiniMaxBillingMode -eq "MPlan") {
+                $billingMode = "m_plan"
+            }
+            else {
+                [Console]::Error.WriteLine(
+                    "$suiteLabel online smoke refused: MiniMax billing mode must be Payg or MPlan"
+                )
+                exit 65
+            }
             & $python -X utf8 -B -m backend.app.minimax_vision_smoke `
                 --authorized `
                 --suite $Suite `
                 --vision-model $VisionModel `
+                --billing-mode $billingMode `
                 --input-price-per-million-cny $inputPriceCny `
                 --output-price-per-million-cny $outputPriceCny
         }

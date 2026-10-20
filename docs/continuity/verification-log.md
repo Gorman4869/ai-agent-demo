@@ -4791,3 +4791,61 @@ MiniMax 国内视觉 adapter、独立人民币门、离线请求形状和安全�
 
 实现、测试、ADR、说明和本记录随后已以 `4fae4a3`（`feat: add minimax vision smoke adapter`）完成
 本地提交；未 push。该提交是本记录所述 MiniMax 离线纵切的实现锚点。
+
+## V-20261020-004：M14-T4 MiniMax M Plan 套餐用量门离线验证
+
+- 任务：`M14-T4 / code_complete`，真实 E4 仍未执行
+- 时间：2026-10-20，Asia/Shanghai
+- 验证目标：在用户确认 Key 为 M Plan 后，移除普通按量现金估算歧义，使同一视觉 smoke 明确记录
+  套餐 Token usage、拒绝 CNY 单价/现金上限，并继续保持一次模型请求和最小 Key 暴露。
+- 验证基线：`5accb4b`（MiniMax 离线适配文档闭环）；本记录覆盖其后的未提交 M Plan gate
+  worktree，提交 ID 由后续恢复记录补记。
+- 任务等级：C 类外部门禁任务的离线修正；证据为 fake/真实 OpenAI SDK + 本地 MockTransport E2
+  与相关共享回归 E3，没有 MiniMax Provider E4。
+- 授权与数据边界：用户只确认 Key 类型为 M Plan，没有授权真实请求。未读取 `MINIMAX_API_KEY`、
+  未调用 Chat Completions 或 `token_plan/remains`、未发送图片、未产生新现金费用、未安装依赖、
+  未修改代理、`docs/progress.md` 或远程 Git。
+
+### 官方合同核对
+
+- MiniMax 官方 M Plan 页面说明订阅 Key 只消耗套餐额度和积分包，额度耗尽不会自动扣按量账户
+  余额；剩余额度可由套餐页面、`mmx quota` 或 `https://www.minimax.cn/v1/token_plan/remains` 查询。
+- M Plan 支持 API Key 接入 OpenAI-compatible 工具和多模态理解；现有 `MiniMax-M3` adapter 的端点/
+  请求形状继续由 `ADR-0043` 固定。本轮没有因计费类型切换模型或扩大工具面。
+- 为保持 M14-T4 “恰好一次模型请求”，smoke 不自动调用 quota API；套餐证据仅记录模型响应 usage，
+  `estimated_cost_cny=null`、`cash_cost_status=not_applicable`、`quota_remaining=not_queried`。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `./.venv/Scripts/python.exe -B -m compileall -q backend/app/minimax_vision_smoke.py backend/tests/test_minimax_vision_smoke.py` | 0 | 修改 Python 文件语法编译通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_minimax_vision_smoke -v`（沙箱外） | 0 | 21 项全部通过，2.071s；新增 M Plan 配置、现金字段拒绝、CLI、摘要和 PowerShell billing mode 门通过 |
+| `./.venv/Scripts/python.exe -B -m unittest backend.tests.test_minimax_vision_smoke backend.tests.test_vision_online_smoke backend.tests.test_online_smoke backend.tests.test_multimodal_agent backend.tests.test_settings backend.tests.test_openai_agents_runtime backend.tests.test_advanced_harness -v`（沙箱外） | 0 | 119 项全部通过，3.003s；M Plan、普通按量、OpenAI 视觉、M8 smoke、Settings/Runtime/Harness 未回归。只有 asyncio debug slow-task 提示 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-continuity.ps1` | 0 | 52 个稳定任务、178 个 Markdown 文件通过；M Plan V/KI/status/handoff 与恢复入口一致 |
+| 本任务文件长 Key、Bearer、JWT 形状 `rg` | 1 | 预期无匹配；未把用户 Key 或固定 Token 写入任务文件 |
+| `git diff --check` | 0 | 无 whitespace error；只有 Git LF/CRLF 工作树提示 |
+
+### 实现、自审与边界
+
+- CLI 和 PowerShell 现在要求显式 `payg/Payg` 或 `m_plan/MPlan`，不设默认计费模式；缺失或非法值以
+  配置错误 65 拒绝。未经 `--authorized` 仍在环境读取和 Python 启动前以 64 拒绝。
+- `payg` 保留原有操作者费率、CNY 上限和请求后成本校验；`m_plan` 要求不设置
+  `AI_AGENT_MAX_COST_CNY`，并拒绝所有非零 CNY rate，防止同一调用同时出现套餐与现金口径。
+- 两种模式共享一次调用、零重试、Token/timeout 上限、固定 PNG、无 tools、不可信 observation 和
+  usage 一致性校验。M Plan 没有放宽 input/output Token 预算。
+- 没有调用 quota API，因此不能报告套餐剩余、窗口消耗差值或积分包扣减；`not_queried` 是明确
+  未验证状态，不是零消耗。没有修改 `ADR-0043` 的已接受结论，本实现正是其订阅额度分支。
+
+### DeepSeek 备用边界
+
+用户表示如需按量可提供 DeepSeek Key。官方当前 Vision 文档显示 `deepseek-flash` 支持 Chat
+Completions/Responses 图片输入和 Base64 PNG，因此技术上可作为后续视觉备用；本轮没有新增 DeepSeek
+adapter、读取其 Key 或改变 Provider 优先级。只有 MiniMax M Plan 实际失败且用户另行批准扩展时，
+才进入独立适配、费率核对与新单次授权。
+
+### 结论与下一动作
+
+MiniMax M Plan 用量模式已达到离线 `code_complete`：不会把套餐请求写成按量现金费用，也不会为
+查询余量增加第二个网络请求。M14-T4 仍没有真实结构化观察、OCR、usage 或套餐消耗 E4，不能标记
+`verified`。下一动作只剩用户明确授权恰好一次 `MiniMax-M3` M Plan 视觉请求；授权前继续不读取 Key。

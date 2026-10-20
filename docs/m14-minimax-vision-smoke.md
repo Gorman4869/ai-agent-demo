@@ -34,15 +34,21 @@ prompt 要求一个 JSON 对象，再由本地 Pydantic 严格解析。任何 Ma
 | `AI_AGENT_MODEL_TIMEOUT_MS` | 不超过 `20000` |
 | `AI_AGENT_MAX_INPUT_TOKENS` | 不超过 `2000` |
 | `AI_AGENT_MAX_OUTPUT_TOKENS` | 不超过 `256` |
-| `AI_AGENT_MAX_COST_CNY` | 不超过 `0.05` |
+| `AI_AGENT_MAX_COST_CNY` | 普通按量不超过 `0.05`；M Plan 必须不设置 |
 | `AI_AGENT_MAX_MODEL_RETRIES` | `0` |
 
-当前官方普通按量价格为 `MiniMax-M3` 标准层、输入不超过 512k 时 input `¥2.10`、output `¥8.40`
-/ 1M Token。按本地最大 2000 input + 256 output 计算，声明上界为 `¥0.00635040`。实际 usage 只能
-请求后获得；本地上限不是 Provider 侧逐 Token 硬停止。
+`-MiniMaxBillingMode` 必须显式选择 `Payg` 或 `MPlan`，没有默认值。普通按量模式要求当前 Token
+单价和 `AI_AGENT_MAX_COST_CNY`；M Plan 模式拒绝非零 Token 单价和现金上限，避免把订阅额度伪装成
+按量现金支出。
 
-Key 类型必须在执行前确认：普通按量 API Key 才使用上述现金费率；M Plan/Token Plan 订阅 Key 的
-消耗属于套餐额度，不能把同一估算写成实际现金账单。
+用户已确认当前 Key 为 M Plan。官方说明订阅 Key 只消耗 M Plan 额度和积分包，不会自动扣按量账户
+余额；套餐余量可由网页、`mmx quota` 或独立 `token_plan/remains` API 查询。本 smoke 为保持恰好
+一次模型请求和最小 Key 暴露，不额外调用余量 API，只记录 Chat Completions 响应中的 Token usage，
+输出 `estimated_cost_cny=null`、`cash_cost_status=not_applicable`、`quota_remaining=not_queried`。
+
+普通按量兼容路径仍保留：当前 `MiniMax-M3` 标准层、输入不超过 512k 时 input `¥2.10`、output
+`¥8.40` / 1M Token；2000 input + 256 output 的声明上界为 `¥0.00635040`。该费率不用于本次
+M Plan 请求。
 
 ## 唯一执行入口
 
@@ -55,8 +61,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-online.ps1 
   -Suite M14 `
   -VisionProvider MiniMax `
   -VisionModel MiniMax-M3 `
-  -InputPricePerMillionCny 2.10 `
-  -OutputPricePerMillionCny 8.40
+  -MiniMaxBillingMode MPlan
 ```
 
 未授权时脚本在启动 Python、读取 Key 或访问 Provider 前返回 64。配置/代理问题返回 65；Provider
@@ -69,8 +74,12 @@ uncertainties、raw payload、异常或 Key。
 `thinking=disabled`、无 tools、usage 归一、严格 JSON、安全回退、代理门、人民币预算和内容无关
 摘要。它们是 E2/E3，不是 MiniMax 在线 E4；当前没有读取真实 Key、发送图片或产生费用。
 
+M Plan 离线门进一步覆盖：显式 billing mode、拒绝现金费率/上限、只保留响应 usage、现金成本
+`not_applicable`、余量 `not_queried`，以及 PowerShell 缺 billing mode 时在 Python 前以 65 拒绝。
+
 官方依据：
 
 - [MiniMax 国内 OpenAI SDK 与多模态输入](https://platform.minimax.cn/docs/api-reference/text-openai-api)
 - [MiniMax 国内 Chat Completions](https://platform.minimax.cn/docs/api-reference/text-chat-openai)
 - [MiniMax 国内定价](https://platform.minimax.cn/docs/pricing/overview)
+- [MiniMax M Plan 与用量说明](https://platform.minimax.cn/subscribe/coding-plan)

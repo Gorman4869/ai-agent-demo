@@ -98,5 +98,6 @@ observation 或 usage，且没有重试。离线 dummy Key 构造复现了同一
 OpenAI Responses 路径。固定端点、模型、人民币费用门、严格 JSON 解析、执行命令和 Key 类型边界
 见 `docs/m14-minimax-vision-smoke.md` 与 `ADR-0043`。
 
-MiniMax 离线实现和 114 项相关回归已经通过，但同样不构成在线授权或 E4。环境变量已配置只说明
-具备执行准备；真实请求前仍须确认普通按量或 M Plan/Token Plan Key，并由用户重新明确授权一次。
+MiniMax Key 已确认为 M Plan，离线门已改为套餐 usage 模式；专项 21 项、扩大相关回归 119 项通过，
+但仍不构成在线授权或 E4。环境变量已配置只说明具备执行准备；真实请求前仍须由用户重新明确授权
+一次。M Plan 不使用普通按量费率，也不会由 smoke 额外查询套餐余量。

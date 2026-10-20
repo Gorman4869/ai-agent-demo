@@ -1166,6 +1166,10 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 真实 MiniMax 请求前必须确认环境中的 Key 是普通按量还是 M Plan/Token Plan，并取得新的“一次
   请求”授权；Key 已配置本身不构成授权。订阅 Key 只能记录套餐额度/usage，不能把按量费率估算
   冒充实际现金账单。
+- 用户已确认当前 Key 为 M Plan。离线门现要求显式 `Payg`/`MPlan` billing mode；M Plan 拒绝 CNY
+  单价与现金上限，只保留 Provider 响应 Token usage，并输出现金成本不适用、套餐余量未查询。
+  官方余量接口不会被 smoke 自动调用，以保持一次模型请求和最小 Key 暴露。相关 119 项回归见
+  `V-20261020-004`；真实调用仍需新的单次授权。
 
 ### M14-T5：高级 Agent 评测与对照
 

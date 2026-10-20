@@ -36,7 +36,7 @@
 | KI-030 | low | closed | M14 连续性 | M14-T3 恢复时 Git HEAD、`V-20260901-005` 和最新 handoff 已证明 M14-T2 完成本地提交 `e165646`，但动态 `status.md` 的当前阻塞仍残留“M14-T2 将形成一个本地实现/验证提交”，顶部最近实现锚点也未推进到 M14 | `V-20260902-001`：先登记漂移，再删除过期阻塞、补记 M14-T2 实现提交并把恢复入口推进到 M14-T4；旧 handoff 保持不可变 |
 | KI-031 | low | closed | M14 连续性 | Git 已存在 M14-T3 实现提交 `cb6714f`，其文件范围与 `V-20260902-001`、`ADR-0042` 和 M14-T3 handoff 一致；但动态 `status.md` 的最近实现锚点仍停在 `e165646`，旧 handoff 仍按创建时事实写“提交尚未创建” | `V-20261020-001`：保留旧 handoff 不改写，在 M14-T4 动态 status 和新 handoff 中补记 `cb6714f`，并以连续性检查确认恢复锚点一致 |
 | KI-032 | medium | closed | M14 | M14-T4 首次单次授权尝试在 SDK client 构造阶段被 SOCKS5 `ALL_PROXY` 与缺失 `socksio` 阻断；部分初始化的 httpx wrapper 清理时把内部 `AttributeError` 写到 stderr，违反 CLI 只输出稳定错误的目标 | `V-20261020-002`：离线 dummy Key 构造复现 `ImportError`；CLI 新增 SOCKS scheme/依赖预检，在 SDK 构造前以内容无关配置错误 65 拒绝。37 项相关回归通过；未安装依赖、未改全局代理、未重试在线请求 |
-| KI-033 | medium | open | M14 | MiniMax 国内 Chat Completions 文档未声明 `response_format/json_schema`；当前 adapter 通过固定 JSON prompt 与本地 Pydantic 严格解析 fail closed，但真实 `MiniMax-M3` 是否稳定返回目标 JSON、图片文字和完整 usage 尚无 Provider E4。Key 类型也未确认，普通按量现金费率不能冒充 M Plan/Token Plan 套餐成本 | `V-20261020-003`、`ADR-0043`：真实 SDK + MockTransport 和相关 114 项离线回归通过；关闭需新的单次授权、Key 类型确认及一次真实结构化观察/usage/费用或额度证据 |
+| KI-033 | medium | open | M14 | MiniMax 国内 Chat Completions 文档未声明 `response_format/json_schema`；当前 adapter 通过固定 JSON prompt 与本地 Pydantic 严格解析 fail closed，但真实 `MiniMax-M3` 是否稳定返回目标 JSON、图片文字和完整 usage 尚无 Provider E4。用户已确认 Key 为 M Plan；独立 billing mode 已拒绝普通按量现金费率/上限，只记录响应 Token usage，未额外查询套餐余量 | `V-20261020-003/004`、`ADR-0043`：真实 SDK + MockTransport 和相关 119 项离线回归通过；关闭需新的单次授权及一次真实结构化观察/usage/套餐消耗证据 |
 
 ## 状态值
 

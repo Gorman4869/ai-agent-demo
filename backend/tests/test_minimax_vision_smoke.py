@@ -92,6 +92,7 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
                         environment,
                         authorized=True,
                         declared_model=declared_model,
+                        declared_billing_mode="payg",
                     )
 
     def test_incomplete_or_invalid_gate_fails_without_exposing_key(self) -> None:
@@ -108,6 +109,7 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
                         environment,
                         authorized=True,
                         declared_model=MINIMAX_VISION_MODEL,
+                        declared_billing_mode="payg",
                     )
                 self.assertNotIn(credential, str(raised.exception))
 
@@ -116,11 +118,13 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
             _online_environment(AI_AGENT_MAX_MODEL_CALLS="2"),
             authorized=True,
             declared_model=MINIMAX_VISION_MODEL,
+            declared_billing_mode="payg",
         )
         tight = load_minimax_vision_settings(
             _online_environment(AI_AGENT_MAX_COST_CNY="0.001"),
             authorized=True,
             declared_model=MINIMAX_VISION_MODEL,
+            declared_billing_mode="payg",
         )
 
         with self.assertRaisesRegex(MiniMaxVisionSmokeError, "low limits"):
@@ -142,6 +146,7 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
                     _online_environment(ALL_PROXY=proxy),
                     authorized=True,
                     declared_model=MINIMAX_VISION_MODEL,
+                    declared_billing_mode="payg",
                 )
 
         self.assertEqual(65, raised.exception.exit_code)
@@ -156,6 +161,7 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
                 _online_environment(HTTPS_PROXY="http://proxy.invalid:8080"),
                 authorized=True,
                 declared_model=MINIMAX_VISION_MODEL,
+                declared_billing_mode="payg",
             )
 
         self.assertEqual(MINIMAX_VISION_MODEL, settings.model)
@@ -180,6 +186,8 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
                 "--authorized",
                 "--vision-model",
                 MINIMAX_VISION_MODEL,
+                "--billing-mode",
+                "payg",
                 "--input-price-per-million-cny",
                 "2.1",
                 "--output-price-per-million-cny",
@@ -210,6 +218,8 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
                 "--authorized",
                 "--vision-model",
                 MINIMAX_VISION_MODEL,
+                "--billing-mode",
+                "payg",
                 "--input-price-per-million-cny",
                 "2.1",
                 "--output-price-per-million-cny",
@@ -224,6 +234,86 @@ class MiniMaxVisionSmokeGateTests(unittest.TestCase):
         self.assertEqual(1, exit_code)
         self.assertNotIn(secret, stderr.getvalue())
         self.assertIn("internal error", stderr.getvalue())
+
+    def test_m_plan_requires_quota_mode_without_cash_configuration(self) -> None:
+        environment = _online_environment()
+        environment.pop("AI_AGENT_MAX_COST_CNY")
+        settings = load_minimax_vision_settings(
+            environment,
+            authorized=True,
+            declared_model=MINIMAX_VISION_MODEL,
+            declared_billing_mode="m_plan",
+        )
+
+        self.assertEqual("m_plan", settings.billing_mode)
+        self.assertIsNone(settings.max_cost_cny)
+        self.assertIsNone(validate_minimax_vision_budget(settings, None))
+        with self.assertRaisesRegex(MiniMaxVisionSmokeError, "without cash"):
+            validate_minimax_vision_budget(settings, _prices())
+        with self.assertRaisesRegex(MiniMaxVisionSmokeError, "settings are invalid"):
+            load_minimax_vision_settings(
+                _online_environment(),
+                authorized=True,
+                declared_model=MINIMAX_VISION_MODEL,
+                declared_billing_mode="m_plan",
+            )
+
+    def test_m_plan_cli_rejects_cash_prices(self) -> None:
+        environment = _online_environment()
+        environment.pop("AI_AGENT_MAX_COST_CNY")
+        stderr = io.StringIO()
+        exit_code = run_cli(
+            [
+                "--authorized",
+                "--vision-model",
+                MINIMAX_VISION_MODEL,
+                "--billing-mode",
+                "m_plan",
+                "--input-price-per-million-cny",
+                "2.1",
+            ],
+            environment=environment,
+            stdout=io.StringIO(),
+            stderr=stderr,
+        )
+
+        self.assertEqual(65, exit_code)
+        self.assertIn("prices must stay zero", stderr.getvalue())
+
+    def test_m_plan_cli_passes_quota_mode_without_prices(self) -> None:
+        environment = _online_environment()
+        environment.pop("AI_AGENT_MAX_COST_CNY")
+
+        async def executor(settings, prices):
+            self.assertEqual("m_plan", settings.billing_mode)
+            self.assertIsNone(settings.max_cost_cny)
+            self.assertIsNone(prices)
+            return {
+                "provider": "minimax",
+                "billing_mode": "m_plan",
+                "estimated_cost_cny": None,
+                "exit_code": 0,
+            }
+
+        stdout = io.StringIO()
+        exit_code = run_cli(
+            [
+                "--authorized",
+                "--vision-model",
+                MINIMAX_VISION_MODEL,
+                "--billing-mode",
+                "m_plan",
+            ],
+            environment=environment,
+            executor=executor,
+            stdout=stdout,
+            stderr=io.StringIO(),
+        )
+
+        self.assertEqual(0, exit_code)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual("m_plan", payload["billing_mode"])
+        self.assertIsNone(payload["estimated_cost_cny"])
 
 
 class MiniMaxVisionAdapterTests(unittest.IsolatedAsyncioTestCase):
@@ -413,6 +503,26 @@ class MiniMaxVisionSmokeEvidenceTests(unittest.IsolatedAsyncioTestCase):
                 client_factory=_client_factory(FakeCompletions()),
             )
 
+    async def test_m_plan_summary_records_quota_usage_without_cash_cost(self) -> None:
+        class FakeCompletions:
+            async def create(self, **kwargs: object) -> object:
+                del kwargs
+                return _provider_response()
+
+        summary = await execute_minimax_vision_smoke(
+            _settings(billing_mode="m_plan"),
+            None,
+            client_factory=_client_factory(FakeCompletions()),
+            clock=_clock(2.0, 2.05),
+        )
+
+        self.assertEqual("m_plan", summary["billing_mode"])
+        self.assertIsNone(summary["estimated_cost_cny"])
+        self.assertEqual("not_applicable", summary["cash_cost_status"])
+        self.assertEqual("not_queried", summary["quota_remaining"])
+        self.assertEqual("m_plan_subscription_quota", summary["cost_source"])
+        self.assertEqual(60, summary["usage"]["total_tokens"])
+
     def test_cost_above_declared_runtime_cap_is_rejected(self) -> None:
         settings = _settings(AI_AGENT_MAX_COST_CNY="0.0001")
         result = SimpleNamespace(
@@ -493,6 +603,43 @@ class VerifyMiniMaxVisionOnlineScriptTests(unittest.TestCase):
         self.assertEqual("", completed.stdout)
         self.assertIn("authorization is missing", completed.stderr)
 
+    def test_authorized_script_requires_explicit_minimax_billing_mode(self) -> None:
+        powershell = shutil.which("powershell") or shutil.which("powershell.exe")
+        if powershell is None:
+            self.skipTest("Windows PowerShell is unavailable")
+        environment = {
+            name: value
+            for name in ("SystemRoot", "ComSpec", "PATH", "TEMP", "TMP")
+            if (value := os.environ.get(name)) is not None
+        }
+
+        completed = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(_REPO_ROOT / "scripts" / "verify-online.ps1"),
+                "-Authorized",
+                "-Suite",
+                "M14",
+                "-VisionProvider",
+                "MiniMax",
+            ],
+            cwd=_REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+            check=False,
+        )
+
+        self.assertEqual(65, completed.returncode)
+        self.assertEqual("", completed.stdout)
+        self.assertIn("billing mode must be Payg or MPlan", completed.stderr)
+
 
 def _online_environment(**overrides: str) -> dict[str, str]:
     environment = {
@@ -512,11 +659,15 @@ def _online_environment(**overrides: str) -> dict[str, str]:
     return environment
 
 
-def _settings(**overrides: str):
+def _settings(*, billing_mode: str = "payg", **overrides: str):
+    environment = _online_environment(**overrides)
+    if billing_mode == "m_plan":
+        environment.pop("AI_AGENT_MAX_COST_CNY", None)
     return load_minimax_vision_settings(
-        _online_environment(**overrides),
+        environment,
         authorized=True,
         declared_model=MINIMAX_VISION_MODEL,
+        declared_billing_mode=billing_mode,
     )
 
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from importlib.util import find_spec
 from time import perf_counter
-from typing import TextIO
+from typing import Literal, TextIO
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
@@ -78,12 +78,9 @@ class MiniMaxVisionSmokeSettings(BaseModel):
 
     api_key: SecretStr = Field(repr=False, exclude=True)
     model: str
+    billing_mode: Literal["payg", "m_plan"]
     budget: RunBudgetSettings
-    max_cost_cny: Decimal = Field(
-        gt=Decimal("0"),
-        le=Decimal("10"),
-        allow_inf_nan=False,
-    )
+    max_cost_cny: Decimal | None = None
     base_url: str = Field(default=MINIMAX_CN_BASE_URL, repr=False)
 
     @field_validator("api_key", mode="before")
@@ -109,6 +106,15 @@ class MiniMaxVisionSmokeSettings(BaseModel):
     def validate_model(cls, value: str) -> str:
         if value != MINIMAX_VISION_MODEL:
             raise ValueError("MiniMax vision requires MiniMax-M3")
+        return value
+
+    @field_validator("max_cost_cny")
+    @classmethod
+    def validate_max_cost_cny(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and (
+            not value.is_finite() or value <= Decimal("0") or value > Decimal("10")
+        ):
+            raise ValueError("AI_AGENT_MAX_COST_CNY must be a positive finite value")
         return value
 
 
@@ -158,7 +164,7 @@ class MiniMaxCnyTokenPrices:
 
 MiniMaxVisionSmokeSummary = dict[str, object]
 MiniMaxVisionSmokeExecutor = Callable[
-    [MiniMaxVisionSmokeSettings, MiniMaxCnyTokenPrices],
+    [MiniMaxVisionSmokeSettings, MiniMaxCnyTokenPrices | None],
     Awaitable[MiniMaxVisionSmokeSummary],
 ]
 
@@ -168,6 +174,7 @@ def load_minimax_vision_settings(
     *,
     authorized: bool,
     declared_model: str | None,
+    declared_billing_mode: str | None,
 ) -> MiniMaxVisionSmokeSettings:
     """Read the MiniMax credential only after one-time authorization."""
 
@@ -179,6 +186,11 @@ def load_minimax_vision_settings(
     if declared_model != MINIMAX_VISION_MODEL:
         raise MiniMaxVisionSmokeError(
             "--vision-model must be the reviewed MiniMax-M3 model",
+            exit_code=_CONFIGURATION_EXIT_CODE,
+        )
+    if declared_billing_mode not in ("payg", "m_plan"):
+        raise MiniMaxVisionSmokeError(
+            "--billing-mode must be payg or m_plan",
             exit_code=_CONFIGURATION_EXIT_CODE,
         )
     online_value = environment.get("AI_AGENT_ONLINE_ENABLED")
@@ -206,12 +218,18 @@ def load_minimax_vision_settings(
     }
     try:
         budget = Settings.from_environment(budget_environment).budget
-        max_cost_cny = Decimal(
-            environment.get("AI_AGENT_MAX_COST_CNY", "0.05").strip()
+        max_cost_value = environment.get("AI_AGENT_MAX_COST_CNY")
+        if declared_billing_mode == "m_plan" and max_cost_value is not None:
+            raise ValueError("M Plan must not use a cash cost cap")
+        max_cost_cny = (
+            Decimal((max_cost_value or "0.05").strip())
+            if declared_billing_mode == "payg"
+            else None
         )
         settings = MiniMaxVisionSmokeSettings(
             api_key=api_key,
             model=configured_model.strip(),
+            billing_mode=declared_billing_mode,
             budget=budget,
             max_cost_cny=max_cost_cny,
         )
@@ -226,9 +244,9 @@ def load_minimax_vision_settings(
 
 def validate_minimax_vision_budget(
     settings: MiniMaxVisionSmokeSettings,
-    prices: MiniMaxCnyTokenPrices,
-) -> Decimal:
-    """Reject broad limits and return the operator-declared CNY upper bound."""
+    prices: MiniMaxCnyTokenPrices | None,
+) -> Decimal | None:
+    """Reject broad limits and return a pay-as-you-go CNY upper bound."""
 
     budget = settings.budget
     violations: list[str] = []
@@ -242,13 +260,28 @@ def validate_minimax_vision_budget(
         violations.append("AI_AGENT_MAX_INPUT_TOKENS")
     if budget.max_output_tokens > 256:
         violations.append("AI_AGENT_MAX_OUTPUT_TOKENS")
-    if settings.max_cost_cny > Decimal("0.05"):
+    if (
+        settings.max_cost_cny is not None
+        and settings.max_cost_cny > Decimal("0.05")
+    ):
         violations.append("AI_AGENT_MAX_COST_CNY")
     if budget.max_model_retries != 0:
         violations.append("AI_AGENT_MAX_MODEL_RETRIES")
     if violations:
         raise MiniMaxVisionSmokeError(
             "MiniMax vision smoke requires low limits: " + ", ".join(violations),
+            exit_code=_CONFIGURATION_EXIT_CODE,
+        )
+    if settings.billing_mode == "m_plan":
+        if prices is not None or settings.max_cost_cny is not None:
+            raise MiniMaxVisionSmokeError(
+                "M Plan must use quota evidence without cash token prices",
+                exit_code=_CONFIGURATION_EXIT_CODE,
+            )
+        return None
+    if prices is None or settings.max_cost_cny is None:
+        raise MiniMaxVisionSmokeError(
+            "payg mode requires token prices and AI_AGENT_MAX_COST_CNY",
             exit_code=_CONFIGURATION_EXIT_CODE,
         )
     upper_bound = prices.estimate(
@@ -265,7 +298,7 @@ def validate_minimax_vision_budget(
 
 async def execute_minimax_vision_smoke(
     settings: MiniMaxVisionSmokeSettings,
-    prices: MiniMaxCnyTokenPrices,
+    prices: MiniMaxCnyTokenPrices | None,
     *,
     client_factory: MiniMaxVisionClientFactory | None = None,
     clock: Callable[[], float] = perf_counter,
@@ -301,7 +334,7 @@ def build_minimax_vision_summary(
     result: VisionRunResult,
     *,
     duration_ms: float,
-    prices: MiniMaxCnyTokenPrices,
+    prices: MiniMaxCnyTokenPrices | None,
     settings: MiniMaxVisionSmokeSettings,
 ) -> MiniMaxVisionSmokeSummary:
     """Accept one MiniMax observation and return content-free evidence."""
@@ -377,15 +410,40 @@ def build_minimax_vision_summary(
             "MiniMax vision usage exceeded the declared token budget",
             exit_code=_ACCEPTANCE_EXIT_CODE,
         )
-    estimated_cost = prices.estimate(
-        input_tokens=usage["input_tokens"],
-        output_tokens=usage["output_tokens"],
-    )
-    if estimated_cost > settings.max_cost_cny:
-        raise MiniMaxVisionSmokeError(
-            "estimated MiniMax vision cost exceeded AI_AGENT_MAX_COST_CNY",
-            exit_code=_ACCEPTANCE_EXIT_CODE,
+    billing_summary: dict[str, object]
+    if settings.billing_mode == "m_plan":
+        if prices is not None or settings.max_cost_cny is not None:
+            raise MiniMaxVisionSmokeError(
+                "M Plan billing evidence is invalid",
+                exit_code=_ACCEPTANCE_EXIT_CODE,
+            )
+        billing_summary = {
+            "billing_mode": "m_plan",
+            "estimated_cost_cny": None,
+            "cost_source": "m_plan_subscription_quota",
+            "cash_cost_status": "not_applicable",
+            "quota_remaining": "not_queried",
+        }
+    else:
+        if prices is None or settings.max_cost_cny is None:
+            raise MiniMaxVisionSmokeError(
+                "payg billing evidence is invalid",
+                exit_code=_ACCEPTANCE_EXIT_CODE,
+            )
+        estimated_cost = prices.estimate(
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
         )
+        if estimated_cost > settings.max_cost_cny:
+            raise MiniMaxVisionSmokeError(
+                "estimated MiniMax vision cost exceeded AI_AGENT_MAX_COST_CNY",
+                exit_code=_ACCEPTANCE_EXIT_CODE,
+            )
+        billing_summary = {
+            "billing_mode": "payg",
+            "estimated_cost_cny": _format_cost(estimated_cost),
+            "cost_source": "operator_supplied_per_million_token_rates",
+        }
     return {
         "suite": "M14-T4",
         "status": "passed",
@@ -412,8 +470,7 @@ def build_minimax_vision_summary(
             "tool_surface": "none",
         },
         "usage": usage,
-        "estimated_cost_cny": _format_cost(estimated_cost),
-        "cost_source": "operator_supplied_per_million_token_rates",
+        **billing_summary,
         "exit_code": 0,
     }
 
@@ -434,14 +491,16 @@ def run_cli(
         )
         return _AUTHORIZATION_EXIT_CODE
     try:
-        prices = MiniMaxCnyTokenPrices.from_strings(
-            args.input_price_per_million_cny,
-            args.output_price_per_million_cny,
+        prices = _load_token_prices(
+            billing_mode=args.billing_mode,
+            input_price=args.input_price_per_million_cny,
+            output_price=args.output_price_per_million_cny,
         )
         settings = load_minimax_vision_settings(
             os.environ if environment is None else environment,
             authorized=True,
             declared_model=args.vision_model,
+            declared_billing_mode=args.billing_mode,
         )
         validate_minimax_vision_budget(settings, prices)
         summary = asyncio.run(executor(settings, prices))
@@ -491,6 +550,34 @@ def _format_cost(value: Decimal) -> str:
     return format(value.quantize(_COST_QUANTUM, rounding=ROUND_HALF_UP), "f")
 
 
+def _load_token_prices(
+    *,
+    billing_mode: str | None,
+    input_price: str,
+    output_price: str,
+) -> MiniMaxCnyTokenPrices | None:
+    if billing_mode == "payg":
+        return MiniMaxCnyTokenPrices.from_strings(input_price, output_price)
+    if billing_mode != "m_plan":
+        raise MiniMaxVisionSmokeError(
+            "--billing-mode must be payg or m_plan",
+            exit_code=_CONFIGURATION_EXIT_CODE,
+        )
+    try:
+        supplied_prices = (Decimal(input_price), Decimal(output_price))
+    except InvalidOperation:
+        raise MiniMaxVisionSmokeError(
+            "M Plan token prices must stay zero",
+            exit_code=_CONFIGURATION_EXIT_CODE,
+        ) from None
+    if any(not value.is_finite() or value != 0 for value in supplied_prices):
+        raise MiniMaxVisionSmokeError(
+            "M Plan token prices must stay zero",
+            exit_code=_CONFIGURATION_EXIT_CODE,
+        )
+    return None
+
+
 def _create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the explicitly authorized M14-T4 MiniMax CN vision smoke.",
@@ -498,6 +585,7 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--authorized", action="store_true")
     parser.add_argument("--suite", choices=("M14",), default="M14")
     parser.add_argument("--vision-model")
+    parser.add_argument("--billing-mode", choices=("payg", "m_plan"))
     parser.add_argument("--input-price-per-million-cny", default="0")
     parser.add_argument("--output-price-per-million-cny", default="0")
     return parser
