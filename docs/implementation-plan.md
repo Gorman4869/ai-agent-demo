@@ -1181,6 +1181,20 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 产物：浏览器和多模态固定任务集，记录成功率、步骤数、延迟、成本、安全拒绝和人工介入率。
 - 验收：不能只展示成功录屏；至少包含失败样例和修复/降级说明。
 
+第一离线纵切（2026-10-21）：
+
+- 新增 `advanced-agent-eval-v1` 固定数据集和显式 `backend.app.evals.advanced_agent` CLI；默认不读取
+  Key、不构造 Provider client、不访问网络，也不进入应用启动链。
+- 7 个案例覆盖 Browser 只读成功、缺审批、越权 origin，以及 Vision 离线观察、提示注入权限隔离、
+  损坏 PNG 和 Provider timeout 元数据降级；4 个非完成结果均附稳定修复/降级码。
+- 报告区分 expectation pass rate 与 task success rate，并记录计划步骤、按 modality 的本地延迟、
+  safety rejection 和 fixture human-intervention rate；离线 Token/费用保持 unknown/null。
+- 当前离线结果为 7/7 预期行为通过、3/7 任务完成、4/4 安全边界通过、1/7 需要精确审批，计划
+  步骤 9。数据集摘要为 `a5a2ef030139ded150bcf823fb991a3da0b558e72401397b7040c7b433ec47f8`。
+- 该结果最高为固定 fixture E3。真实 Chromium 尚未进入同一评测报告，也没有在线视觉、真实人工
+  操作、Provider usage/cost 或生产容量证据，因此 M14-T5 保持 `in_progress`；下一纵切复用同一
+  指标合同增加受控 Playwright fixture adapter。
+
 ### M14-T6：生产级作品集交付
 
 - 依赖：M14-T5；在线演示状态引用 M14-T4。

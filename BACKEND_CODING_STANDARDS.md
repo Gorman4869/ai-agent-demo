@@ -425,3 +425,15 @@
 - The controlled fixture driver may prevalidate its complete server-owned redirect chain and navigate Chromium to the final registered document. A page-initiated request to a redirect source remains unplanned and fails closed; fixture evidence is not public-network redirect evidence.
 - Upload and download are disabled both as model actions and as browser events. File chooser, download, popup/new window, cross-origin navigation, and unknown resources return stable content-free errors. Opening any transfer path requires a new reviewed policy for source, MIME, size, scanning, storage, approval, and cleanup.
 - `SystemBrowserAddressResolver` is a seam for later real-network work, not proof that public browsing is enabled. M14-T2 remains fresh-context, fixture-only, key-free E3 with no personal profile, cookies, public DNS call, or network access.
+
+## 34. Advanced-Agent Fixed Evaluation
+
+- The M14 advanced-agent baseline lives in the explicit `backend.app.evals.advanced_agent` module and never runs during application import, Container construction, or FastAPI lifespan. Its default command is deterministic, offline, key-free, and network-free.
+- The repository-owned fixture uses the strict `advanced-agent-eval-v1` schema, a stable version, canonical-JSON SHA-256 digest, bounded case count, and server-owned scenario IDs. Fixture data selects only reviewed scenarios; it never supplies URLs, prompts, tools, selectors, model names, or executable behavior.
+- Keep evaluation expectation pass rate separate from task success rate. An expected policy rejection or metadata fallback may pass the evaluation while remaining a non-completed task outcome; never inflate task completion by counting safety refusals as successful task execution.
+- Record planned step count and local process wall-clock latency with explicit scope labels. They are not model reasoning steps, browser network latency, Provider latency, production SLA, or capacity evidence.
+- Safety rejection covers either a stable policy rejection or rejection of control-plane authority from untrusted visual text. Human-intervention rate counts fixtures that require exact approval; it does not claim that a human was observed or measure operator labor.
+- Offline browser and vision fixtures do not construct Provider clients. Missing Provider usage, Token counts, currency, and estimated cost remain `None`; do not merge historical online smoke usage into a new offline evaluation run.
+- Reports expose only case IDs, modality, stable outcome/error/mitigation codes, counts, rates, step counts, and bounded latency. Raw URLs, visual text, image bytes, prompts, Provider payloads, exceptions, secrets, and personal data never enter report records.
+- Normalize only reviewed Browser policy failures and Vision fallback results. Unknown evaluator or programmer exceptions propagate instead of being converted into an ordinary case result.
+- Real Chromium evaluation, online vision quality, observed human intervention, Provider usage/cost, and production capacity require separately identified evidence paths. The first offline baseline must not be described as those claims.
