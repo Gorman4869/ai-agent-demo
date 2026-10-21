@@ -1195,6 +1195,20 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   操作、Provider usage/cost 或生产容量证据，因此 M14-T5 保持 `in_progress`；下一纵切复用同一
   指标合同增加受控 Playwright fixture adapter。
 
+第二受控 Chromium 纵切（2026-10-21）：
+
+- 保留默认离线 CLI，并新增显式 `--browser-driver playwright-fixture`；同一 dataset version、digest、
+  case ID、阈值和指标合同下，报告标明 Browser 是 policy simulation 还是受控真实 Chromium。
+- Playwright 档位只使用 server-owned `BrowserFixtureSite`、静态公共测试地址判定和全新 context；
+  不访问公网、不加载个人 profile/Cookie、不读取模型 Key，也不改变 Vision 离线档位。
+- Browser 正常案例先取得页面摘要，再经 `BrowserAgent.run_with_driver()` 完成真实 DOM 读取；缺审批
+  与越权 origin 仍保持拒绝。页面漂移与元素消失进入稳定失败分析并统一建议重新观察和重规划。
+- 新增 11 项评测单元测试、1 项显式真实 Chromium 集成；Browser/Network/Multimodal/Harness 合并
+  59 项通过。两种 CLI 均保持 7/7 预期行为、3/7 completed、4/4 safety、1/7 approval fixture、
+  9 个冻结计划步骤，Provider usage/cost 为 null。
+- M14-T5 的固定任务集、失败/降级、离线/真实 Browser 对照和指标口径均已验证，状态推进为
+  `verified`。真实人工操作、在线视觉质量、账单、公网浏览与生产容量仍明确不在该结论内。
+
 ### M14-T6：生产级作品集交付
 
 - 依赖：M14-T5；在线演示状态引用 M14-T4。

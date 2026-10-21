@@ -4938,3 +4938,48 @@ MiniMax M Plan 用量模式已达到离线 `code_complete`：不会把套餐请�
 报告，达到固定 fixture E3。它还不是完整 M14-T5：Browser 只走离线 `run()`，没有在同一报告中执行
 Playwright；Vision 没有在线质量/usage/cost，human-intervention rate 也没有观察真实人员。因此任务
 保持 `in_progress`，下一原子动作是让受控 Playwright fixture adapter 复用同一数据集与报告合同。
+
+## V-20261021-002：M14-T5 受控 Playwright 固定评测（verified，E3/C）
+
+- 任务：`M14-T5 / verified`
+- 时间：2026-10-21，Asia/Shanghai
+- 任务等级：C 类本地真实 Chromium；默认评测仍为离线 B 类入口。
+- 验证基线：`896f754`；实现提交：`3b556b9`（`feat: add playwright advanced agent evaluation`）。
+- 数据与授权边界：只使用仓库既有 Node/Playwright Chromium 和 server-owned fixture；没有访问公网、
+  加载个人 profile/Cookie、读取环境密钥、调用 MiniMax/OpenAI/DeepSeek、查询套餐、安装依赖、修改
+  `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m compileall -q backend/app/evals/advanced_agent.py backend/tests/test_advanced_agent_eval.py backend/tests/advanced_agent_browser_integration.py` | 0 | 新增/修改 Python 文件语法通过 |
+| `python -m unittest backend.tests.test_advanced_agent_eval -v`（受限沙箱） | 中断 | dataset 前 4 项通过，进入 `IsolatedAsyncioTestCase` 后再次停在 Windows sandbox 本地 socketpair；执行器结束后无残留 Python 进程，不是业务断言、浏览器或 Provider 失败 |
+| 同一评测单元测试（沙箱外） | 0 | 11 项全部通过，0.360s；覆盖默认离线、显式 driver 注入、报告档位、page drift/element missing、内容脱敏和零 Provider client |
+| `python -m unittest backend.tests.advanced_agent_browser_integration -v`（沙箱外） | 0 | 1 项通过，8.395s；固定评测的 Browser 正常案例实际进入 Playwright Chromium 并保持无公网 scope |
+| `python -m backend.app.evals.advanced_agent --browser-driver playwright-fixture`（沙箱外） | 0 | 同一 7 案例与 digest 通过；报告明确 `playwright_fixture` / `real_chromium_server_owned_fixture_without_public_network` |
+| 相关合并回归首次命令 | 1 | 46 个实际用例通过；命令误写不存在的 `backend.tests.test_multimodal`，产生 1 个 import error，实际模块名为 `test_multimodal_agent` |
+| 修正模块名后的评测 + BrowserAgent + BrowserNetwork + BrowserDriver + 两组 Chromium + Multimodal + Harness（沙箱外） | 0 | 59 项全部通过，11.788s；既有 observer warning 与 asyncio slow-task 调试提示不影响结果 |
+| `python -m backend.app.evals.advanced_agent`（沙箱外） | 0 | 默认仍为 `offline` Browser 档位；7/7 预期通过且未启动受控 Chromium 档位 |
+| `scripts/check-continuity.ps1`（文档闭环后） | 0 | 52 个稳定任务、182 个 Markdown 文件通过 |
+| `git diff --check`（实现提交前） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 固定指标与执行档位
+
+- dataset version/digest/case ID/阈值未改变：`m14-advanced-agent-v1`，摘要仍为
+  `a5a2ef030139ded150bcf823fb991a3da0b558e72401397b7040c7b433ec47f8`。
+- `offline` 与 `playwright_fixture` 均为 7/7 expectation、3/7 completed、4/4 safety、1/7 approval
+  fixture、9 个冻结计划步骤；Provider usage 不可用，Token、估算费用和币种均为 `null`。
+- 本次显式 Chromium CLI 的 Browser/ Vision wall-clock 分别为 `2461.791 ms` / `53.348 ms`；默认
+  离线复核分别为 `0.571 ms` / `34.777 ms`。它们只是同机本地 fixture 观测，不是公网、Provider、
+  生产 SLA 或容量证据。
+- Playwright DOM 动作前的受控页面观察用于绑定 `page_digest`，计入 wall-clock 但不改变冻结任务
+  step count。审批缺失和越权 origin 仍按原稳定码拒绝；页面漂移/元素消失建议重新观察和重规划，
+  不自动重试或扩大权限。
+
+### 结论与未验证范围
+
+M14-T5 已同时具备冻结 Browser/Vision 任务集、失败/降级、默认离线对照、同报告受控真实 Chromium、
+指标口径和自动化证据，达到 `verified`。该结论仍只是 fixture-only E3：不包含公网浏览、真实 DNS/TLS/
+redirect、个人登录态、跨平台浏览器、在线视觉质量、真实人工操作、Provider 账单或生产容量。M14-T4
+的一次 MiniMax E4 保持独立证据，不合并进本次离线 usage/cost。

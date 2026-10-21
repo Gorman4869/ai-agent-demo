@@ -3,7 +3,7 @@
 - 更新时间：2026-10-21，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`44acfd7`
+- 最近已确认实现提交：`3b556b9`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -71,6 +71,7 @@
 - M14-T4 MiniMax M Plan 门验证基线：`5accb4b`；实现提交：`c53c658`；验证记录：`V-20261020-004`
 - M14-T4 MiniMax M Plan 在线验证基线：`c481330`；验证提交：`eea496a`；验证记录：`V-20261020-005`
 - M14-T5 第一离线评测基线：`af8a752`；实现提交：`44acfd7`；验证记录：`V-20261021-001`
+- M14-T5 受控 Chromium 评测基线：`896f754`；实现提交：`3b556b9`；验证记录：`V-20261021-002`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -78,14 +79,14 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 任务 ID | `M14-T5` |
-| 状态 | `in_progress` |
-| 目标 | 建立浏览器与多模态高级 Agent 的固定评测集，记录成功率、步骤数、延迟、成本、安全拒绝和人工介入率 |
-| 设计依据 | 实施计划 M14-T5；M14-T1/T2 浏览器证据；M14-T3 视觉 adapter；M14-T4 离线门与单次 MiniMax E4 |
-| 执行协议 | 先用版本化固定 fixture 冻结 Browser/Vision 指标与失败分析，再在后续纵切把受控 Playwright driver 接入同一合同；任何新的 Provider 调用都必须取得新的明确授权 |
-| 当前修改 | 新增 `advanced-agent-eval-v1`、离线 CLI 和 7 个固定案例；报告区分预期行为与任务完成，记录步骤、按 modality 本地延迟、安全拒绝、fixture 审批介入和 unknown cost，并提供 4 个稳定修复/降级码 |
-| 验证 | `V-20261021-001`：新增 9 项、Browser/Network/Multimodal/Harness 合并 44 项通过；CLI 7/7 预期通过、3/7 completed、4/4 safety、1/7 approval intervention、9 steps，Provider usage/cost 为 null |
-| 下一动作 | 复用同一数据集/报告合同增加显式受控 Playwright fixture adapter，使至少 Browser 正常案例进入真实 Chromium；不开放公网，不读取模型 Key |
+| 任务 ID | `M14-T6` |
+| 状态 | `planned` |
+| 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
+| 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
+| 执行协议 | 先审计现有 M12–M14 产物并形成缺口矩阵，再拆分原子交付；默认保持离线，任何新的 Provider、远程服务、上传或付费调用都需新授权 |
+| 当前修改 | M14-T5 已新增显式 `playwright_fixture` 档位，同一固定评测报告中完成真实 Chromium DOM 读取并保持安全拒绝；M14-T6 尚未开始改代码 |
+| 验证 | `V-20261021-002`：评测单元 11 项、显式 Chromium 1 项、相关合并 59 项通过；两种 CLI 均 7/7 预期通过，Provider usage/cost 为 null |
+| 下一动作 | 只读盘点 M12–M14 已有架构、部署、演示、评测、成本、威胁模型和迁移材料，输出 M14-T6 缺口矩阵与下一原子任务，不触发在线调用 |
 
 ## 里程碑状态
 
@@ -99,20 +100,21 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T4 已 `verified`；T5 第一离线固定评测纵切已完成并保持 `in_progress`，真实 Chromium 尚未进入同一报告；T6–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T5 在同一冻结合同中保留默认离线档位并补受控真实 Chromium 对照；T6 为当前 planned，T7–T8 未开始 |
 
 ## 当前阻塞
 
-- M14-T5 当前没有已识别的工程阻塞；下一原子纵切是把受控 Playwright fixture adapter 接入已冻结指标合同。
+- M14-T6 当前没有已识别的审计阻塞；若后续方案需要在线部署、视频上传或新的 Provider 请求，必须先取得对应明确授权。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 
 ## 未验证范围
 
-- M14-T5 第一纵切见 `V-20261021-001`：固定数据集和 Browser/Vision 领域边界已离线执行，但 Browser
-  仍使用 `BrowserAgent.run()`，真实 Chromium 未进入同一评测报告；Vision 使用确定性模型，
-  human-intervention rate 只是需要精确审批的 fixture 比例，不是观察到的人员操作。Provider usage、
-  Token、费用和生产容量均为 unknown/null；不得把本地 wall-clock 写成公网或 Provider 性能。
+- M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
+  `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
+  fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
+  审批的 fixture 比例，不是观察到的人员操作。Provider usage、Token、费用和生产容量均为
+  unknown/null；不得把本地 wall-clock 写成公网、Provider 性能或生产 SLA。
 - M14-T3 的 OpenAI `responses.parse` 路径仍只有本地 MockTransport 证据；`V-20261020-005` 已通过
   独立 MiniMax adapter 补充恰好一次真实图片输入、结构化 observation 和 usage E4，但不证明 OpenAI
   路径、格式长期稳定性、开放域视觉质量、生产容量、TLS/代理普适性或账单。当前 PNG guard 仍只验证
@@ -281,9 +283,9 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-21-m14-t5-offline-eval-baseline.md`，再核对
-`V-20261021-001`、`docs/m14-advanced-agent-evaluation.md`、
-`backend/app/evals/advanced_agent.py` 与 `backend/app/evals/fixtures/advanced_agent_v1.json`。M14-T5
-第一离线固定评测纵切已提交为 `44acfd7`；下一动作是让受控 Playwright fixture adapter 复用同一
-数据集/报告合同，不改变默认离线入口、不开放公网。没有新的 Provider 授权：不得再次读取 Key、
-访问 MiniMax、查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。
+`docs/continuity/handoffs/2026-10-21-m14-t5-playwright-eval-verified.md`，再核对
+`V-20261021-002`、`docs/m14-advanced-agent-evaluation.md`、
+`backend/app/evals/advanced_agent.py` 与 `backend/tests/advanced_agent_browser_integration.py`。M14-T5
+实现提交为 `3b556b9` 并已 verified；当前 M14-T6 只先做已有产物缺口审计。没有新的 Provider 授权：
+不得再次读取 Key、访问 MiniMax、查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者
+`docs/progress.md` 或 push。

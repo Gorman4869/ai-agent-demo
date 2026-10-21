@@ -14,6 +14,17 @@ M14-T5 的第一纵切把 Browser 与 Vision 的已有安全合同放进一个�
 命令不读取 Key、不构造 Provider client、不访问公网，也不会由应用启动、默认验证或 CI 隐式运行。
 未达到 fixture 阈值时退出非零。
 
+需要显式把 Browser 正常案例接入仓库既有 Playwright Chromium 时运行：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m backend.app.evals.advanced_agent --browser-driver playwright-fixture
+```
+
+该参数只启用 server-owned `BrowserFixtureSite`。每次 Driver 执行仍创建全新 context，并由 route
+拦截全部请求；不会开放公网、加载个人 profile/Cookie、读取模型 Key 或改变 Vision 的离线档位。
+报告通过 `execution_profile` 与 `execution_scope` 明确区分 `offline` 和 `playwright_fixture`，不会把
+离线模拟结果冒充真实 Chromium。
+
 ## 固定任务集
 
 数据集位于 `backend/app/evals/fixtures/advanced_agent_v1.json`，schema 为
@@ -38,6 +49,8 @@ fixture 只保存服务端 scenario ID 和预期；它不能提供任意 URL、s
 - `expectation_pass_rate`：实际结果是否匹配冻结预期。预期的拒绝/降级可以通过此指标。
 - `task_success_rate`：只有 `completed` 计入，用于避免把安全拒绝冒充任务完成。
 - `step_count`：Browser 的冻结计划动作数或一次 Vision inspection；不是模型思考步数。
+- Playwright 档位为 DOM 动作先执行受控页面观察以取得 `page_digest`；该前置观察计入本地 wall-clock，
+  不改变冻结任务的 `step_count`。
 - `latency`：同进程 wall-clock，仅可比较本地 fixture，不是公网、Provider 或生产 SLA。
 - `safety_rejection_rate`：固定安全案例中，策略拒绝或“不可信数据不能升级为控制权”的命中率。
 - `human_intervention_rate`：需要精确审批的 fixture 比例；没有观察真实人员或统计操作工时。
@@ -60,7 +73,10 @@ fixture 只保存服务端 scenario ID 和预期；它不能提供任意 URL、s
 
 ## 当前证据边界
 
-本纵切执行真实 `BrowserAgent` 规划/审批边界和 `MultimodalVisionAgent` 观察/回退边界，证据最高为
-固定 fixture E3。Browser 路径当前使用离线 `run()`，没有在同一报告中启动真实 Chromium；Vision
-使用确定性离线模型，没有在线质量、Provider usage 或费用。真实 Chromium 已有 M14-T1/T2 独立
-证据，但必须在下一纵切显式接入同一评测合同后，M14-T5 才能继续向 `verified` 推进。
+默认档位执行真实 `BrowserAgent` 规划/审批边界和 `MultimodalVisionAgent` 观察/回退边界，但 Browser
+不启动进程。显式 Playwright 档位复用相同 dataset version、digest、case ID、阈值和报告字段；正常
+Browser 案例已在同一报告中完成真实 Chromium DOM 读取，审批缺失和越权 origin 仍分别拒绝。
+
+两种档位均为固定 fixture E3，不开放公网。Vision 仍使用确定性离线模型；在线质量和 usage 只引用
+M14-T4 已独立授权并完成的一次 MiniMax E4，不能合并进本次报告。Provider usage、Token、费用和真实
+人员操作仍保持 unknown/null；本地 wall-clock 也不是生产 SLA 或容量证据。
