@@ -734,6 +734,7 @@ __all__ = [
     "MULTISOURCE_REVIEW_VERSION",
     "REVIEWER_ROLE",
     "REVIEW_TOOL_NAMES",
+    "ReviewDecision",
     "ReviewImageAsset",
     "ReviewImageEvidence",
     "ReviewPageEvidence",

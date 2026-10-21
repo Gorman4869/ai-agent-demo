@@ -5101,3 +5101,44 @@ M14-T6 从 `planned` 进入 `in_progress`，但本轮没有运行时代码或行
 下一原子动作是实现 canonical evidence bundle 与同 Run 离线 Runtime 编排：前三个只读工具各调用
 一次，生成版本化 bundle digest，并在第四个 `publish_review` 前停在精确审批；补同 Run provenance、
 四调用/每工具一次/单副作用预算和不可信内容不能改变控制面的测试，仍不接默认 Container/API/UI。
+
+## V-20261021-006：M14-T6 同 Run canonical evidence 与发布审批暂停
+
+- 任务：`M14-T6 / in_progress`
+- 时间：2026-10-21，Asia/Shanghai
+- 任务等级：A 类安全/审批/公共 Runtime 合同；本原子步骤实现同 Run evidence 编排和审批暂停，
+  不实现批准后 resume、持久 publication store、API/UI 或部署。
+- 验证基线：`86609d5`（`feat: add multisource review tool registry`）；本轮实现提交在记录创建时尚未生成，
+  将由下一次 verification/handoff 回填为恢复锚点。
+- 数据与授权边界：默认离线、server-owned 资源和注入式 adapter；没有读取 Key、调用 Provider/公网、
+  启动真实 Chromium/Docker、安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -B -m compileall -q backend/app/advanced/review_runtime.py backend/tests/test_review_runtime.py` | 0 | 新增 Runtime 与测试语法编译通过 |
+| 首次沙箱外 `python -B -m unittest backend.tests.test_review_runtime -v` | 1 | 10 项中 5 项 error；测试 fixture 把同步 `list.append` 作为 async event sink 传入，Runtime 对 `await emit(...)` 的真实合同暴露该问题；改为 async sink 后重跑，不隐藏失败 |
+| 修正 event sink 后的同一专项命令（沙箱外） | 0 | 自审前 10/10 通过，0.042s；补缺审批 fail-fast 后最终 10/10 通过，0.030s |
+| 沙箱内异步专项与既有 registry 单测 | 中断 | `IsolatedAsyncioTestCase` 均停在首个 async 用例；同步 bundle 测试 2/2 正常。手动终止后在沙箱外重跑通过，判定为既有 Windows sandbox socketpair 限制，不是业务断言失败 |
+| `python -B -m unittest`：Review Runtime/Tools、Tool Security、Reliability、Multimodal、Browser Agent/Driver、RAG、Run Coordinator、Runtime Contract（沙箱外） | 0 | 147 项全部通过，1.663s；既有故障注入日志和 asyncio slow-task debug 不影响结果 |
+| `scripts/check-continuity.ps1`（代码、规约、状态与 handoff 同步后） | 0 | 52 个稳定任务、188 个 Markdown 文件通过 |
+| `git diff --check`（收尾） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 实现结论与边界
+
+- `ReviewRunCatalog` 将 review/revision/image/topic/page/decision 绑定到可信 principal + durable Run；
+  `RuntimeRequest.input_text` 中的注入文字、资源 ID、decision 或发布指令不能改变任何工具参数。
+- `MultisourceReviewRuntime` 在同一 Run 按 image、policy、page 固定顺序调用三个只读工具各一次，产生
+  三条 `review.evidence.recorded`，再用安全字段 canonical 编码形成唯一 bundle digest。
+- 公开事件只含版本、ref、digest、bytes、trust/status 和 citation ID；测试中的视觉、网页和 RAG
+  恶意原文均未进入事件、审批参数或 Run 持久记录。视觉降级不能支持 `approve`。
+- 每次编排强制四调用、每工具一次、单副作用一次；缺审批上下文在任何工具前失败。第四步只创建
+  绑定当前 review/revision/decision/bundle 的精确审批并返回 `RuntimeApprovalPause`，publisher 未调用。
+- `RunCoordinator` 集成用例证明 `run.started`、三条 evidence 和 `run.waiting_approval` 共享同一
+  `run_id`，step 为 0–4。当前 Runtime 故意没有 `resume()`，因此不能把本记录描述成审批恢复、
+  `ToolExecution`、publication CAS、结果未知对账或重启恢复完成；`KI-034` 保持 open。
+
+下一原子动作是实现批准后的 resume：接入持久 `ToolExecutionStore` 仲裁和 owner-scoped publication
+store CAS，覆盖拒绝/过期/参数篡改/同键重放/并发 resume/result-unknown 权威对账；仍不接默认
+Container/API/UI，不运行 Provider。

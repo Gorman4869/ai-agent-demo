@@ -1254,6 +1254,23 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 下一纵切实现 canonical evidence bundle 与同 Run 离线编排，前三个只读工具各调用一次并停在
   `publish_review` 精确审批点；仍不接默认 Container/API/UI，不提前关闭 `KI-034`。
 
+同 Run 证据编排纵切（2026-10-21）：
+
+- 新增可信 `ReviewRunCatalog` 与 `MultisourceReviewRuntime`；Runtime 只从 owner-scoped Run binding
+  读取 review/revision/resource/decision，`input_text` 中的指令、ID 和 decision 均不能覆盖控制面。
+- 三个只读工具按 `image -> policy -> page` 固定顺序在同一 durable Run 执行，各产生一条安全的
+  `review.evidence.recorded`；canonical bundle 只由版本化 ref、digest、bytes、trust/status 和有界
+  citation ID 构造，不持久化视觉文字、页面正文或 RAG excerpt。
+- 每次编排用本地 ledger 强制最多四次、每工具一次、单副作用一次；缺审批上下文在任何工具前失败，
+  完整证据后只创建绑定当前 bundle/revision/decision 的 `publish_review` 精确审批并暂停，publisher
+  调用次数仍为零。
+- `RunCoordinator` 集成测试证明 started、三条 evidence 和 waiting approval 共享同一 Run/step 序列；
+  新增专项 10 项、相关 Runtime/Tool/Security/Reliability/Vision/Browser/RAG 回归共 147 项通过，见
+  `V-20261021-006`。
+- 本纵切尚未实现 approval resume、持久 `ToolExecution`、publication store CAS/对账或最终
+  `review.result`，也未接默认 Container/API/UI/部署；下一原子任务先补持久发布恢复链，`KI-034`
+  保持 open。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。
