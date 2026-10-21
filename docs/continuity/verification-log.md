@@ -5059,3 +5059,45 @@ M14-T6 从 `planned` 进入 `in_progress`，但本轮没有运行时代码或行
 
 下一原子动作是实现版本化领域类型、server-owned 资源目录和独立四工具 registry factory，并以
 定向测试固定参数、角色、预算与内容安全；仍不接默认 Container、HTTP、Vue 或部署。
+
+## V-20261021-005：M14-T6 多源证据审查四工具注册表
+
+- 任务：`M14-T6 / in_progress`
+- 时间：2026-10-21，Asia/Shanghai
+- 任务等级：A 类安全/公共工具合同；本原子步骤实现领域类型、资源目录和独立 registry factory，
+  不实现同 Run Runtime、持久 publication store、API/UI 或部署。
+- 验证基线：`9e34565`（`docs: define m14 multisource review contract`）。
+- 数据与授权边界：默认离线视觉、进程内 Knowledge 和注入式 Browser driver/publisher；没有读取 Key、
+  调用 Provider/公网、启动真实 Chromium/Docker、安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际检查与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` 与强制 continuity/status/playbook/plan/ADR/handoff/verification/后端规约恢复读取 | 0 | 开始时工作区干净；当前原子动作与 `ADR-0044` 一致 |
+| `python -B -m compileall -q backend/app/advanced/review_tools.py backend/app/advanced/multimodal.py backend/app/reliability.py backend/tests/test_review_tools.py` | 0 | 新增与关联 Python 文件编译通过 |
+| 沙箱内 `python -B -m unittest backend.tests.test_review_tools -v` | 中断 | 首个同步用例后进入 `IsolatedAsyncioTestCase` 时卡住；与 Windows 沙箱 socketpair 限制一致，手动中断，未出现业务断言失败 |
+| 沙箱外 `python -B -m unittest backend.tests.test_review_tools -v` | 0 | 自审前 12/12、补 owner/schema/result-unknown 后 13/13、补 page drift 后 14/14；最终补发布 timeout/I/O 不可重试后专项 15/15 通过 |
+| 沙箱外 `python -B -m unittest backend.tests.test_review_tools backend.tests.test_tool_security backend.tests.test_reliability backend.tests.test_multimodal_agent backend.tests.test_browser_agent backend.tests.test_browser_driver backend.tests.test_rag` | 0 | 最终 85 项通过；既有故障注入日志和 asyncio slow-task debug 不影响结果 |
+| 首次读取 `backend/pyproject.toml` 与 Windows 通配 `requirements*.txt` | 1 | 假定路径/通配无效；改用仓库索引确认依赖文件是 `backend/requirements-m2.txt`，本次未改依赖 |
+| `scripts/check-continuity.ps1`（代码、规约、状态与 handoff 同步后） | 0 | 52 个稳定任务、187 个 Markdown 文件通过 |
+| `git diff --check`（收尾） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 实现结论与边界
+
+- `AsyncReviewToolRegistry` 暴露且只暴露四个版本化工具；它复用同步 `ToolRegistry` 的 schema、RBAC
+  和一次性精确审批策略，但异步等待领域 handler，避免改变默认同步注册表和 M1-M13 调用链。
+- immutable `ReviewResourceCatalog` 按 principal owner 解析 server-owned PNG/fixture URL；未知与跨
+  owner 统一 `review_asset_not_found`，模型参数不能提供 path/URL/selector/bytes/owner/provider。
+- `inspect_image`、`search_review_policy`、`read_fixture_page` 分别真实调用现有 Vision、
+  `KnowledgeBase.search()` 和 `BrowserAgent.run_with_driver()`；视觉与网页内容保持不可信，原始内容
+  不进入 repr，RAG 最多 3 条 citation，页面漂移一次失败且不重试。
+- `publish_review` 要求 `reviewer`、Run identity 和精确审批，服务端派生隐藏业务幂等键；revision
+  conflict 与 result-unknown 使用稳定错误，发布 timeout/I/O 也标记结果未知，调用方不得自动重放。
+- `ReviewScenarioLimits` 当前只是 registry 合同快照，不是 per-Run 计数器。本轮没有证明四工具属于
+  同一 Run 的 canonical evidence provenance，也没有接持久 `ToolExecution` 或 publication CAS；
+  `KI-034` 保持 open。
+
+下一原子动作是实现 canonical evidence bundle 与同 Run 离线 Runtime 编排：前三个只读工具各调用
+一次，生成版本化 bundle digest，并在第四个 `publish_review` 前停在精确审批；补同 Run provenance、
+四调用/每工具一次/单副作用预算和不可信内容不能改变控制面的测试，仍不接默认 Container/API/UI。

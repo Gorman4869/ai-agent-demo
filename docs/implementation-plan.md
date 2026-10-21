@@ -1240,6 +1240,20 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   API/UI 与兼容回归完成前不接默认 `ApplicationContainer`，PostgreSQL publication adapter 是后续
   可复现部署与重启恢复的必要条件。
 
+工具注册表纵切（2026-10-21）：
+
+- 新增独立 `AsyncReviewToolRegistry` 与 factory，固定四个工具 schema、`reviewer` 可见性、发布高风险
+  副作用和精确审批门；复用既有同步 `ToolRegistry` 做 policy gate，不改变默认注册表或 Container。
+- 图片和页面由 immutable、owner-scoped server-owned catalog 解析；Vision 真实进入现有异步 agent，
+  RAG 真实进入 `KnowledgeBase.search()` 且最多 3 条 citation，Browser 真实进入
+  `BrowserAgent.run_with_driver()` 的只读 fixture 边界。
+- 发布命令绑定 Run、review/revision/decision/evidence digest，并由服务端派生隐藏业务幂等键；稳定
+  revision conflict 与 result-unknown 已固定，timeout/I/O 进入发布边界后均标记结果未知且不自动重放。
+- 定向与直接依赖回归共 85 项通过，见 `V-20261021-005`。本纵切只证明四工具适配器和 policy
+  boundary，不证明同 Run provenance/预算执行、持久 `ToolExecution`、publication CAS 或重启恢复。
+- 下一纵切实现 canonical evidence bundle 与同 Run 离线编排，前三个只读工具各调用一次并停在
+  `publish_review` 精确审批点；仍不接默认 Container/API/UI，不提前关闭 `KI-034`。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

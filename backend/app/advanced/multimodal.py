@@ -477,6 +477,18 @@ class MultimodalVisionAgent:
         self._limits = limits or PngLimits()
         self._observer = observer
 
+    @property
+    def provider(self) -> str:
+        return self._model.provider
+
+    @property
+    def model(self) -> str:
+        return self._model.model
+
+    @property
+    def offline(self) -> bool:
+        return self._model.offline
+
     async def inspect(
         self,
         image: bytes,

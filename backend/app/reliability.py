@@ -142,6 +142,48 @@ _FAILURE_SPECS = {
             "Model call budget was exhausted",
             False,
         ),
+        FailureSpec(
+            "review_asset_not_found",
+            "validation",
+            "Review resource is unavailable",
+            False,
+        ),
+        FailureSpec(
+            "review_policy_no_evidence",
+            "validation",
+            "Review policy evidence is unavailable",
+            False,
+        ),
+        FailureSpec(
+            "review_page_changed",
+            "validation",
+            "Review page no longer matches its observation",
+            False,
+        ),
+        FailureSpec(
+            "review_evidence_invalid",
+            "validation",
+            "Review evidence is invalid",
+            False,
+        ),
+        FailureSpec(
+            "review_revision_conflict",
+            "conflict",
+            "Review revision is no longer current",
+            False,
+        ),
+        FailureSpec(
+            "review_budget_exceeded",
+            "budget",
+            "Review budget was exhausted",
+            False,
+        ),
+        FailureSpec(
+            "tool_result_unknown",
+            "tool",
+            "Tool result is unknown",
+            False,
+        ),
     )
 }
 

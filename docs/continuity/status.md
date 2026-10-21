@@ -72,6 +72,7 @@
 - M14-T4 MiniMax M Plan 在线验证基线：`c481330`；验证提交：`eea496a`；验证记录：`V-20261020-005`
 - M14-T5 第一离线评测基线：`af8a752`；实现提交：`44acfd7`；验证记录：`V-20261021-001`
 - M14-T5 受控 Chromium 评测基线：`896f754`；实现提交：`3b556b9`；验证记录：`V-20261021-002`
+- M14-T6 多源审查合同提交：`9e34565`；工具注册表验证基线：`9e34565`；验证记录：`V-20261021-005`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -84,9 +85,9 @@
 | 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
 | 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
 | 执行协议 | 已完成缺口审计与 `ADR-0044` 合同冻结；后续按离线同 Run 真实工具、API/UI/部署、材料与演练三个纵切推进，默认保持离线 |
-| 当前修改 | 新增 accepted `ADR-0044`：冻结 `multisource-review-v1`、四工具输入/输出、同 Run evidence/result、发布审批与业务幂等、稳定失败码、预算和离线验收矩阵；未改运行时代码 |
-| 验证 | `V-20261021-004`：按实际 Vision/Browser/RAG/ToolRegistry/ToolExecution 合同完成 ADR 聚焦自审，连续性和 diff 检查通过；没有运行 Provider、Docker、Chromium 或业务测试 |
-| 下一动作 | 实现 `multisource-review-v1` 领域类型、server-owned 资源目录和独立四工具 registry factory，先以定向测试固定参数/角色/预算/内容安全；不接默认 Container/API/UI |
+| 当前修改 | 新增版本化领域类型、immutable owner-scoped 资源目录和独立异步四工具 registry；真实复用 Vision/RAG/Browser，发布固定 reviewer/Run/精确审批/服务端幂等边界；未接默认 Container/API/UI |
+| 验证 | `V-20261021-005`：新增专项 15 项及 Tool/Security/Reliability/Vision/Browser/RAG 直接依赖回归共 85 项通过；compileall、continuity 和 diff 检查通过；未运行 Provider、真实 Chromium、Docker 或全量门 |
+| 下一动作 | 实现 canonical evidence bundle 与同 Run 离线编排，执行前三个只读工具各一次并停在 `publish_review` 精确审批点；补 provenance/调用预算测试，仍不接默认 Container/API/UI |
 
 ## 里程碑状态
 
@@ -100,7 +101,7 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 已完成缺口审计与 `ADR-0044` 合同冻结，`KI-034` 继续跟踪同 Run 真实工具与旧 capstone 文档漂移；T7–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 已完成缺口审计、`ADR-0044` 和独立四工具 registry，下一步补同 Run 编排与持久发布；`KI-034` 继续跟踪，T7–T8 未开始 |
 
 ## 当前阻塞
 
@@ -110,10 +111,10 @@
 
 ## 未验证范围
 
-- M14-T6 缺口审计与合同见 `V-20261021-003/004`：只证明已有资产已分类且
-  `multisource-review-v1` 的工具、同 Run、失败、预算和验收合同已冻结，不证明多源审查业务已经
-  运行。当前 Vision、RAG、Browser 仍未作为同一 durable Run 的三个真实工具，模拟
-  `publish_report` 也不能冒充已完成的业务副作用；旧 capstone 架构/演示需在实现后重写。
+- M14-T6 缺口审计、合同和首个代码纵切见 `V-20261021-003/004/005`：独立 registry 已让三个
+  只读工具真实进入既有 Vision、RAG、Browser 边界，并固定发布审批/幂等命令；但尚无 Runtime
+  在同一 durable Run 中生成 canonical evidence bundle、执行四次调用预算或持久发布。registry
+  存在不能冒充同 Run/重启恢复/API/UI/部署完成；旧 capstone 架构/演示仍需在纵切落地后重写。
 - M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
   `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
   fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
@@ -287,8 +288,8 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-21-m14-t6-contract-adr.md`，再核对 `V-20261021-004`、
-`ADR-0044`、`docs/m14-production-portfolio-gap-audit.md`、`KI-034` 和 M14-T6 实施计划。下一动作只
-实现版本化领域类型、server-owned 资源目录和独立四工具 registry factory 及定向测试，不接默认
-Container/API/UI。没有新的 Provider 授权：不得再次读取 Key、访问 MiniMax、查询套餐余量、尝试
-DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。
+`docs/continuity/handoffs/2026-10-21-m14-t6-review-tool-registry.md`，再核对 `V-20261021-005`、
+`ADR-0044`、`backend/app/advanced/review_tools.py`、`KI-034` 和 M14-T6 实施计划。下一动作只实现
+canonical evidence bundle 与同 Run 离线编排、provenance/调用预算测试，执行前三个只读工具后停在
+发布审批点；不接默认 Container/API/UI。没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
+查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。
