@@ -4898,3 +4898,43 @@ MiniMax M Plan 用量模式已达到离线 `code_complete`：不会把套餐请�
 在线结果、说明、状态、已知问题和 handoff 随后已以 `eea496a`
 （`docs: verify minimax m plan vision smoke`）完成本地提交；未 push。该提交是本记录所述真实 E4
 验证闭环锚点。
+
+## V-20261021-001：M14-T5 高级 Agent 第一离线固定评测纵切
+
+- 任务：`M14-T5 / in_progress`
+- 时间：2026-10-21，Asia/Shanghai
+- 任务等级：B 类普通课程任务；第一纵切冻结固定任务集、指标、失败样例和降级说明，不进入后续
+  作品集交付或在线质量评测。
+- 验证基线：`af8a752`；实现提交：`44acfd7`（`feat: add advanced agent evaluation baseline`）。
+- 数据与授权边界：默认离线、无 Key、零 Provider 请求；未读取环境密钥、启动 Chromium、访问公网、
+  调用 MiniMax/OpenAI/DeepSeek、查询套餐、安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -m unittest backend.tests.test_advanced_agent_eval -v`（受限沙箱首次） | 中断 | 1 个纯读取用例通过，3 个临时 JSON 用例因 Windows sandbox Temp ACL `PermissionError/WinError 5` 失败；进入首个 `IsolatedAsyncioTestCase` 后本地 socketpair 阻塞。已终止，无残留进程；不是业务、Provider 或公网失败 |
+| 同一新增测试（把临时目录改为工作区后，沙箱外） | 0 | 9 项全部通过，0.447s；dataset、digest、稳定拒绝、指标、内容脱敏、阈值漂移和不构造 Provider client 均通过 |
+| `python -m unittest`：新增评测 + BrowserAgent + BrowserNetwork + Multimodal + AdvancedHarness（沙箱外） | 0 | 44 项全部通过，1.663s；一条 observer warning 为既有预期用例，两条 asyncio slow-task 调试提示不影响结果 |
+| `python -m backend.app.evals.advanced_agent`（沙箱外） | 0 | 固定 7 案例通过阈值；dataset digest `a5a2ef030139ded150bcf823fb991a3da0b558e72401397b7040c7b433ec47f8` |
+| `python -m compileall -q backend/app/evals/advanced_agent.py backend/tests/test_advanced_agent_eval.py` | 0 | 新增 Python 文件语法编译通过 |
+| `scripts/check-continuity.ps1`（实现提交前） | 0 | 52 个稳定任务、180 个 Markdown 文件通过 |
+| `git diff --check`（实现提交前） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### CLI 指标与失败分析
+
+- expectation pass rate `1.0`；task success rate `0.428571`（3/7 completed）；安全边界 `1.0`
+  （4/4）；需要精确审批的 fixture 比例 `0.142857`（1/7）；计划步骤 9。
+- Browser 3 案例：1 completed / 2 rejected，5 steps，本次 wall-clock 0.671 ms；Vision 4 案例：
+  2 completed / 1 rejected / 1 degraded，4 steps，本次 wall-clock 40.621 ms。该本地时延不是生产性能。
+- failure analysis 各 1 次：`approval_required`、`origin_not_allowed`、`invalid_png_signature`、
+  `provider_timeout`；分别给出精确审批、保留 reviewed origin、模型前拒绝和 metadata fallback 码。
+- Provider usage 不可用，Token、估算费用和币种均为 `null`。没有把 M14-T4 历史在线 usage 合并进本次
+  离线报告。
+
+### 结论与未验证范围
+
+第一离线纵切完成版本化 fixture、真实 Browser/Vision 领域合同调用、指标口径、失败样例和内容安全
+报告，达到固定 fixture E3。它还不是完整 M14-T5：Browser 只走离线 `run()`，没有在同一报告中执行
+Playwright；Vision 没有在线质量/usage/cost，human-intervention rate 也没有观察真实人员。因此任务
+保持 `in_progress`，下一原子动作是让受控 Playwright fixture adapter 复用同一数据集与报告合同。
