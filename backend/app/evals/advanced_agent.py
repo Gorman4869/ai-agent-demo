@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import hashlib
 import json
 import math
 import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
 
 from backend.app.advanced.browser_agent import BrowserAgent
+from backend.app.advanced.browser_driver import (
+    BrowserDriver,
+    BrowserFixtureSite,
+    PlaywrightBrowserDriver,
+)
 from backend.app.advanced.harness import PolicyViolation
+from backend.app.advanced.browser_network import (
+    BrowserNetworkPolicy,
+    StaticBrowserAddressResolver,
+)
 from backend.app.advanced.multimodal import (
     MultimodalVisionAgent,
     OfflineVisionModel,
@@ -32,11 +42,19 @@ DEFAULT_ADVANCED_AGENT_DATASET = (
 Modality = Literal["browser", "vision"]
 Outcome = Literal["completed", "rejected", "degraded"]
 Clock = Callable[[], float]
+BrowserDriverFactory = Callable[[], BrowserDriver]
+BrowserExecutionProfile = Literal["offline", "playwright_fixture"]
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 _CODE_PATTERN = re.compile(r"[a-z0-9][a-z0-9_]{0,79}")
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 _MAX_CASES = 64
+_BROWSER_FIXTURE_ORIGIN = "https://docs.example.test"
+_BROWSER_FIXTURE_DOCUMENT = """<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Advanced Agent Fixture</title></head>
+  <body><article data-agent-id="article-body">Reviewed fixture article</article></body>
+</html>"""
 _SCENARIO_MODALITIES: dict[str, Modality] = {
     "browser_read_allowed": "browser",
     "browser_approval_required": "browser",
@@ -307,6 +325,7 @@ class AdvancedAgentModalityMetrics:
 class AdvancedAgentEvalReport:
     dataset_version: str
     dataset_digest: str
+    browser_execution_profile: BrowserExecutionProfile
     thresholds: AdvancedAgentEvalThresholds
     results: tuple[AdvancedAgentCaseResult, ...]
 
@@ -384,8 +403,22 @@ class AdvancedAgentEvalReport:
         )
 
     def to_record(self) -> dict[str, object]:
+        browser_execution_scope = {
+            "offline": "policy_simulation_without_browser_process",
+            "playwright_fixture": (
+                "real_chromium_server_owned_fixture_without_public_network"
+            ),
+        }[self.browser_execution_profile]
         return {
             "evidence_level": "E3_offline_fixed_fixture",
+            "execution_profile": {
+                "browser": self.browser_execution_profile,
+                "vision": "offline_fixture",
+            },
+            "execution_scope": {
+                "browser": browser_execution_scope,
+                "vision": "deterministic_model_without_provider_request",
+            },
             "dataset_version": self.dataset_version,
             "dataset_digest": self.dataset_digest,
             "total_cases": len(self.results),
@@ -457,16 +490,27 @@ class _ScenarioObservation:
 
 
 class AdvancedAgentEvaluator:
-    """Run the versioned browser and vision task set without network access."""
+    """Run the versioned browser and vision task set without public network."""
 
     def __init__(
         self,
         dataset: AdvancedAgentDataset,
         *,
         clock: Clock = perf_counter,
+        browser_execution_profile: BrowserExecutionProfile = "offline",
+        browser_driver_factory: BrowserDriverFactory | None = None,
     ) -> None:
+        if browser_execution_profile not in {"offline", "playwright_fixture"}:
+            raise ValueError("unsupported browser execution profile")
+        if (
+            browser_execution_profile == "offline"
+            and browser_driver_factory is not None
+        ):
+            raise ValueError("offline evaluation cannot receive a browser driver")
         self._dataset = dataset
         self._clock = clock
+        self._browser_execution_profile = browser_execution_profile
+        self._browser_driver_factory = browser_driver_factory
 
     async def evaluate(self) -> AdvancedAgentEvalReport:
         results = tuple(
@@ -475,6 +519,7 @@ class AdvancedAgentEvaluator:
         return AdvancedAgentEvalReport(
             dataset_version=self._dataset.version,
             dataset_digest=self._dataset.digest,
+            browser_execution_profile=self._browser_execution_profile,
             thresholds=self._dataset.thresholds,
             results=results,
         )
@@ -484,7 +529,11 @@ class AdvancedAgentEvaluator:
         case: AdvancedAgentEvalCase,
     ) -> AdvancedAgentCaseResult:
         started_at = self._clock()
-        observed = await _run_scenario(case.scenario)
+        observed = await _run_scenario(
+            case.scenario,
+            browser_execution_profile=self._browser_execution_profile,
+            browser_driver_factory=self._browser_driver_factory,
+        )
         latency_ms = max(0.0, (self._clock() - started_at) * 1_000)
         if not math.isfinite(latency_ms):
             latency_ms = 0.0
@@ -591,22 +640,56 @@ async def run_default_advanced_agent_eval() -> AdvancedAgentEvalReport:
     return await AdvancedAgentEvaluator(load_advanced_agent_dataset()).evaluate()
 
 
-def main() -> None:
-    report = asyncio.run(run_default_advanced_agent_eval())
+async def run_playwright_advanced_agent_eval() -> AdvancedAgentEvalReport:
+    return await AdvancedAgentEvaluator(
+        load_advanced_agent_dataset(),
+        browser_execution_profile="playwright_fixture",
+    ).evaluate()
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Run the fixed M14 browser and vision evaluation.",
+    )
+    parser.add_argument(
+        "--browser-driver",
+        choices=("offline", "playwright-fixture"),
+        default="offline",
+        help="use the offline policy path or explicit controlled Chromium fixture",
+    )
+    arguments = parser.parse_args(argv)
+    if arguments.browser_driver == "playwright-fixture":
+        report = asyncio.run(run_playwright_advanced_agent_eval())
+    else:
+        report = asyncio.run(run_default_advanced_agent_eval())
     print(json.dumps(report.to_record(), ensure_ascii=False, indent=2))
     if not report.passed:
         raise SystemExit(1)
 
 
-async def _run_scenario(scenario: str) -> _ScenarioObservation:
+async def _run_scenario(
+    scenario: str,
+    *,
+    browser_execution_profile: BrowserExecutionProfile,
+    browser_driver_factory: BrowserDriverFactory | None,
+) -> _ScenarioObservation:
     if scenario.startswith("browser_"):
-        return _run_browser_scenario(scenario)
+        return _run_browser_scenario(
+            scenario,
+            execution_profile=browser_execution_profile,
+            driver_factory=browser_driver_factory,
+        )
     return await _run_vision_scenario(scenario)
 
 
-def _run_browser_scenario(scenario: str) -> _ScenarioObservation:
+def _run_browser_scenario(
+    scenario: str,
+    *,
+    execution_profile: BrowserExecutionProfile,
+    driver_factory: BrowserDriverFactory | None,
+) -> _ScenarioObservation:
     agent = BrowserAgent(
-        allowed_origins=("https://docs.example.test",),
+        allowed_origins=(_BROWSER_FIXTURE_ORIGIN,),
         allowed_element_ids=("article-body",),
     )
     if scenario == "browser_read_allowed":
@@ -647,7 +730,29 @@ def _run_browser_scenario(scenario: str) -> _ScenarioObservation:
         raise AdvancedAgentDatasetError("advanced_eval_scenario_unknown")
     try:
         plan = agent.validate_plan(raw_actions)
-        result = agent.run(plan)
+        if execution_profile == "playwright_fixture":
+            driver = (
+                driver_factory()
+                if driver_factory is not None
+                else _build_playwright_fixture_driver()
+            )
+            if len(raw_actions) > 1:
+                page_digest = _observe_browser_page(
+                    agent,
+                    driver,
+                    str(raw_actions[0]["url"]),
+                )
+                raw_actions = (
+                    raw_actions[0],
+                    {
+                        **raw_actions[1],
+                        "expected_page_digest": page_digest,
+                    },
+                )
+                plan = agent.validate_plan(raw_actions)
+            result = agent.run_with_driver(plan, driver=driver)
+        else:
+            result = agent.run(plan)
     except PolicyViolation as error:
         return _ScenarioObservation(
             outcome="rejected",
@@ -660,6 +765,37 @@ def _run_browser_scenario(scenario: str) -> _ScenarioObservation:
     return _ScenarioObservation(
         outcome="completed",
         step_count=len(result.actions),
+    )
+
+
+def _observe_browser_page(
+    agent: BrowserAgent,
+    driver: BrowserDriver,
+    url: str,
+) -> str:
+    observation_plan = agent.validate_plan(
+        ({"id": "observe", "kind": "navigate", "url": url},)
+    )
+    return agent.run_with_driver(
+        observation_plan,
+        driver=driver,
+    ).observation.page_digest
+
+
+def _build_playwright_fixture_driver() -> PlaywrightBrowserDriver:
+    return PlaywrightBrowserDriver(
+        BrowserFixtureSite(
+            _BROWSER_FIXTURE_ORIGIN,
+            {
+                "/guide": _BROWSER_FIXTURE_DOCUMENT,
+                "/approve": _BROWSER_FIXTURE_DOCUMENT,
+            },
+        ),
+        network_policy=BrowserNetworkPolicy(
+            StaticBrowserAddressResolver(
+                {"docs.example.test": ("93.184.216.34",)}
+            )
+        ),
     )
 
 
@@ -771,6 +907,8 @@ def _required_text(value: object) -> str:
 def _mitigation_for(failure_code: str) -> str:
     mitigations = {
         "approval_required": "obtain_exact_single_use_approval",
+        "browser_element_missing": "refresh_observation_and_replan",
+        "browser_page_changed": "refresh_observation_and_replan",
         "origin_not_allowed": "keep_navigation_inside_reviewed_origin",
         "invalid_png_signature": "reject_input_before_model_call",
         "provider_timeout": "use_verified_png_metadata_fallback",
