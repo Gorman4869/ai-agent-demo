@@ -1216,6 +1216,18 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 必须包含：至少 3 个真实工具，其中至少 1 个有副作用且具备审批和幂等。
 - 验收：学习者能不看答案完成部署、演示、故障定位和架构答辩。
 
+缺口审计基线（2026-10-21）：
+
+- `docs/m14-production-portfolio-gap-audit.md` 已按代码、verification 和当前文档盘点九类交付物。
+- M14-T5 固定评测为 `complete`；业务场景、架构、部署、演示、成本、威胁、故障和迁移均只有可复用
+  基础，尚未形成 M14 同 Run 作品集，评级为 `partial`。
+- `create_default_registry()` 的加法、温度换算和模拟发布不能满足“三个真实业务工具”；Vision、RAG、
+  Browser 目前又是分离模块/命令，尚未进入同一 durable Run，因此该项为 `missing`。
+- 旧 capstone 架构和演示脚本仍描述 M0–M7/M6 时期现状，与 M12–M14 持久化、部署和高级 Agent
+  证据冲突；先由 `KI-034` 跟踪，不把文档存在本身当作验收完成。
+- 后续按“合同 ADR → 离线同 Run 真实工具纵切 → API/UI/部署 → 作品集材料与演练”推进；任何在线
+  模型、公网、远程部署、视频上传或新依赖仍需新的明确授权。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

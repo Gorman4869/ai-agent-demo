@@ -80,13 +80,13 @@
 | 字段 | 内容 |
 | --- | --- |
 | 任务 ID | `M14-T6` |
-| 状态 | `planned` |
+| 状态 | `in_progress` |
 | 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
 | 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
-| 执行协议 | 先审计现有 M12–M14 产物并形成缺口矩阵，再拆分原子交付；默认保持离线，任何新的 Provider、远程服务、上传或付费调用都需新授权 |
-| 当前修改 | M14-T5 已新增显式 `playwright_fixture` 档位，同一固定评测报告中完成真实 Chromium DOM 读取并保持安全拒绝；M14-T6 尚未开始改代码 |
-| 验证 | `V-20261021-002`：评测单元 11 项、显式 Chromium 1 项、相关合并 59 项通过；两种 CLI 均 7/7 预期通过，Provider usage/cost 为 null |
-| 下一动作 | 只读盘点 M12–M14 已有架构、部署、演示、评测、成本、威胁模型和迁移材料，输出 M14-T6 缺口矩阵与下一原子任务，不触发在线调用 |
+| 执行协议 | 已完成 M12–M14 产物缺口审计；后续按合同 ADR、离线同 Run 真实工具、API/UI/部署、材料与演练四个纵切推进，默认保持离线 |
+| 当前修改 | 新增 `docs/m14-production-portfolio-gap-audit.md`；确认评测 complete、八类材料 partial、三个真实业务工具门槛 missing，并以 `KI-034` 登记旧 capstone 文档与当前代码的稳定漂移 |
+| 验证 | `V-20261021-003`：只读核对代码、部署、M12–M14 文档、ADR 与关联 E3/E4 记录；连续性和 Markdown/diff 检查通过，没有运行 Provider、Docker、Chromium 或业务测试 |
+| 下一动作 | 新增 M14-T6 accepted ADR，冻结多源证据审查场景、Vision/RAG/Browser/发布四工具合同、同 Run 结果、审批幂等、失败码和离线验收矩阵；不接默认 Container/API/UI |
 
 ## 里程碑状态
 
@@ -100,16 +100,19 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T5 在同一冻结合同中保留默认离线档位并补受控真实 Chromium 对照；T6 为当前 planned，T7–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 已完成缺口审计并进入 `in_progress`，`KI-034` 跟踪同 Run 真实工具与旧 capstone 文档漂移；T7–T8 未开始 |
 
 ## 当前阻塞
 
-- M14-T6 当前没有已识别的审计阻塞；若后续方案需要在线部署、视频上传或新的 Provider 请求，必须先取得对应明确授权。
+- M14-T6 当前没有外部阻塞；`KI-034` 是下一纵切可处理的工程缺口。若后续方案需要在线部署、视频上传、新依赖或新的 Provider 请求，必须先取得对应明确授权。
 - npm 既有 Vue/Vite 构建链仍有 `KI-027` 两项公告；未执行未授权的 `npm audit fix`，它不阻塞本次 M13 课程验收，仍须由独立依赖升级任务处理。
 - M13-T2 没有读取模型 Key、DSN 或执行在线 Provider；错误、重试、取消和副作用边界验收不需要在线调用。
 
 ## 未验证范围
 
+- M14-T6 缺口审计见 `V-20261021-003`：只证明已有资产和缺口已按当前代码/历史证据分类，不证明
+  多源审查业务已经运行。当前 Vision、RAG、Browser 仍未作为同一 durable Run 的三个真实工具，
+  模拟 `publish_report` 也不能冒充已完成的业务副作用；旧 capstone 架构/演示需在实现后重写。
 - M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
   `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
   fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
@@ -283,9 +286,8 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-21-m14-t5-playwright-eval-verified.md`，再核对
-`V-20261021-002`、`docs/m14-advanced-agent-evaluation.md`、
-`backend/app/evals/advanced_agent.py` 与 `backend/tests/advanced_agent_browser_integration.py`。M14-T5
-实现提交为 `3b556b9` 并已 verified；当前 M14-T6 只先做已有产物缺口审计。没有新的 Provider 授权：
-不得再次读取 Key、访问 MiniMax、查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者
-`docs/progress.md` 或 push。
+`docs/continuity/handoffs/2026-10-21-m14-t6-gap-audit.md`，再核对 `V-20261021-003`、
+`docs/m14-production-portfolio-gap-audit.md`、`KI-034`、M14-T6 实施计划和 ADR-0029/0031/0037/
+0040–0043。下一动作只冻结多源审查业务与四工具合同，不接默认 Container/API/UI。没有新的
+Provider 授权：不得再次读取 Key、访问 MiniMax、查询套餐余量、尝试 DeepSeek、升级依赖、修改
+学习者 `docs/progress.md` 或 push。

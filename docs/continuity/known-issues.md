@@ -37,6 +37,7 @@
 | KI-031 | low | closed | M14 连续性 | Git 已存在 M14-T3 实现提交 `cb6714f`，其文件范围与 `V-20260902-001`、`ADR-0042` 和 M14-T3 handoff 一致；但动态 `status.md` 的最近实现锚点仍停在 `e165646`，旧 handoff 仍按创建时事实写“提交尚未创建” | `V-20261020-001`：保留旧 handoff 不改写，在 M14-T4 动态 status 和新 handoff 中补记 `cb6714f`，并以连续性检查确认恢复锚点一致 |
 | KI-032 | medium | closed | M14 | M14-T4 首次单次授权尝试在 SDK client 构造阶段被 SOCKS5 `ALL_PROXY` 与缺失 `socksio` 阻断；部分初始化的 httpx wrapper 清理时把内部 `AttributeError` 写到 stderr，违反 CLI 只输出稳定错误的目标 | `V-20261020-002`：离线 dummy Key 构造复现 `ImportError`；CLI 新增 SOCKS scheme/依赖预检，在 SDK 构造前以内容无关配置错误 65 拒绝。37 项相关回归通过；未安装依赖、未改全局代理、未重试在线请求 |
 | KI-033 | medium | closed | M14 | MiniMax 国内 Chat Completions 文档未声明 `response_format/json_schema`；adapter 通过固定 JSON prompt 与本地 Pydantic 严格解析 fail closed。用户已确认 Key 为 M Plan，独立 billing mode 拒绝普通按量现金费率/上限，只记录响应 Token usage且不额外查询套餐余量 | `V-20261020-003/004/005`、`ADR-0043`：离线 119 项通过；唯一授权的真实 `MiniMax-M3` 请求返回严格结构化观察、视觉文字、`479/43/522` usage 与安全边界。单次 E4 已满足；格式长期稳定性、生产容量和通用硬成本门不由本问题关闭 |
+| KI-034 | high | open | M14 | M14-T6 审计发现旧 capstone 架构/演示仍把当前系统描述为进程内与 M6 状态；Stage 14 的多源审查场景也未进入同一 durable Run。默认三工具是加法、温度换算和模拟发布，不能满足三个真实业务工具及审批幂等副作用的作品集门槛 | 先用 M14-T6 ADR 冻结 Vision/RAG/Browser/发布四工具合同；随后完成同 Run 离线纵切、API/UI/部署复验，并更新架构、演示、成本、威胁、故障和迁移材料后关闭 |
 
 ## 状态值
 

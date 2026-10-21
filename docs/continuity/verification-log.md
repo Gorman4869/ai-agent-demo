@@ -4983,3 +4983,42 @@ M14-T5 已同时具备冻结 Browser/Vision 任务集、失败/降级、默认�
 指标口径和自动化证据，达到 `verified`。该结论仍只是 fixture-only E3：不包含公网浏览、真实 DNS/TLS/
 redirect、个人登录态、跨平台浏览器、在线视觉质量、真实人工操作、Provider 账单或生产容量。M14-T4
 的一次 MiniMax E4 保持独立证据，不合并进本次离线 usage/cost。
+
+## V-20261021-003：M14-T6 生产级作品集缺口审计
+
+- 任务：`M14-T6 / in_progress`
+- 时间：2026-10-21，Asia/Shanghai
+- 任务等级：B 类纯文档审计；一个原子步骤内完成资产盘点、冲突登记和下一纵切定义。
+- 验证基线：`fca6d90`（`docs: verify playwright advanced agent evaluation`）。
+- 数据与授权边界：只读本地代码、文档和历史 verification；没有读取 Key、运行 Provider、Docker、
+  Chromium、远程服务或业务测试，没有安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际检查与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` 与强制 continuity/status/plan/handoff/verification 恢复读取 | 0 | 开始时工作区干净；当前任务和下一动作确认为 M14-T6 缺口审计 |
+| `rg --files docs` 与关键字盘点架构、部署、演示、成本、威胁、故障、迁移和作品集 | 0 | 找到旧 capstone、M12 迁移、M13 部署/观测/故障和 M14 Browser/Vision/评测资产 |
+| 首次 PowerShell 行数/标题汇总与带 `docker-compose*.yml`、`docs/m14-*.md` 的 Windows `rg` | 1 | 一个 pipeline 写法产生空管道 ParserError；两个通配路径在 Windows 返回文件名语法错误。未据此得结论，改用显式文件列表和目录级搜索完成审计 |
+| 定向读取 `capstone-*`、Stage 14、M12–M14 文档、ADR-0037/0039/0042/0043、部署 Compose/Dockerfile、Container 和默认工具 | 0 | 证实旧架构/演示漂移、M13 部署不含 Node/Chromium、M14 高级模块未接同一 durable Run、默认工具仍是教学/模拟工具 |
+| 定向检索 frontend 与 `backend.app.main/container` 的 Vision/Browser 接线 | 1 | 无匹配；退出 1 表示未发现 M14 Vision/Browser API/UI/Container 接线，是审计证据而非命令故障 |
+| `scripts/check-continuity.ps1`（审计文档与 handoff 后） | 0 | 52 个稳定任务、184 个 Markdown 文件通过 |
+| `git diff --check` | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 缺口结论
+
+- `docs/m14-production-portfolio-gap-audit.md` 将固定评测评为 `complete`；业务场景、架构、部署、
+  演示、成本、威胁、故障和迁移评为 `partial`；三个真实业务工具及审批幂等副作用评为 `missing`。
+- `capstone-architecture.md` 仍把当前 Run/审批/记忆描述为进程内，`capstone-demo-script.md` 仍引用
+  M6；它们与 M12/M13 已验证持久化/部署事实冲突，新增 `KI-034` 跟踪，未静默改写历史证据。
+- `create_default_registry()` 的三个工具为加法、温度换算和代码明示的模拟发布。Vision、RAG、Browser
+  有真实领域模块，但彼此分离且未进入同一 durable Run，所以不能用“模块存在”判定作品集完成。
+- M13 单机部署、故障手册、负载演练、M12 API 迁移和 M14-T5 评测均可复用；若后续镜像加入
+  Chromium/Node 或新运行时，必须重新取得依赖/镜像操作授权并重做相应部署验证。
+
+### 结论与下一动作
+
+M14-T6 从 `planned` 进入 `in_progress`，但本轮没有运行时代码或行为变化，也不宣称作品集可运行。
+下一原子动作是新增 accepted ADR，冻结多源证据审查场景、`inspect_image`、
+`search_review_policy`、`read_fixture_page`、`publish_review` 四工具合同、同 Run 结果、审批幂等、
+稳定失败码和离线验收矩阵；暂不接默认 Container、HTTP、Vue 或部署。
