@@ -1228,6 +1228,18 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
 - 后续按“合同 ADR → 离线同 Run 真实工具纵切 → API/UI/部署 → 作品集材料与演练”推进；任何在线
   模型、公网、远程部署、视频上传或新依赖仍需新的明确授权。
 
+合同基线（2026-10-21）：
+
+- `ADR-0044` 已接受 `multisource-review-v1`：目标用户是内容审核人员，一个 owner-scoped durable
+  Run 固定调用 `inspect_image`、`search_review_policy`、`read_fixture_page` 和 `publish_review`。
+- 图片、规则主题和页面都只通过 server-owned ID/目录解析；视觉文字、网页正文和 RAG excerpt 均
+  是数据而非控制面，不能改变 decision、角色、预算、工具参数或审批。
+- 发布固定为 `reviewer` 高风险副作用，完整绑定 principal/run/call/arguments/evidence bundle，并同时
+  使用业务幂等键与持久 `ToolExecution`；结果未知只允许按权威 publication record 对账，不自动重放。
+- 下一代码纵切须先以显式注入的作品集 registry/runtime 实现离线同 Run E3 和 ADR 验收矩阵；在
+  API/UI 与兼容回归完成前不接默认 `ApplicationContainer`，PostgreSQL publication adapter 是后续
+  可复现部署与重启恢复的必要条件。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

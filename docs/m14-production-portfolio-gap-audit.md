@@ -83,6 +83,7 @@ RAG 无证据、页面漂移和发布结果未知。只有代码真实调用已�
 
 ## 下一条原子动作
 
-执行第一纵切中的“设计与合同”部分：新增 M14-T6 ADR，冻结多源证据审查场景、四工具边界、同 Run
-事件/结果、审批幂等和离线验收矩阵。该动作不安装依赖、不调用 Provider、不改 Vue/部署，也不在
-合同确定前接入默认 `ApplicationContainer`。
+第一纵切中的设计合同已由 `ADR-0044` 冻结。下一条原子动作进入第二纵切的首个代码步骤：实现
+`multisource-review-v1` 版本化领域类型、server-owned 资源目录和四工具独立 registry factory，并以
+定向测试证明参数/角色/预算/内容安全合同。该步骤先不接默认 `ApplicationContainer`、HTTP、Vue 或
+部署，也不运行 Provider；同 Run 编排与持久 publication adapter 继续按 ADR 的验收矩阵分步完成。

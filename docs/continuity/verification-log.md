@@ -5022,3 +5022,40 @@ M14-T6 从 `planned` 进入 `in_progress`，但本轮没有运行时代码或行
 下一原子动作是新增 accepted ADR，冻结多源证据审查场景、`inspect_image`、
 `search_review_policy`、`read_fixture_page`、`publish_review` 四工具合同、同 Run 结果、审批幂等、
 稳定失败码和离线验收矩阵；暂不接默认 Container、HTTP、Vue 或部署。
+
+## V-20261021-004：M14-T6 多源证据审查合同 ADR
+
+- 任务：`M14-T6 / in_progress`
+- 时间：2026-10-21，Asia/Shanghai
+- 任务等级：A 类跨模块公共合同；本原子步骤只冻结业务、工具、同 Run、审批幂等、失败、预算和
+  验收边界，不实现 Runtime/API/UI/部署。
+- 验证基线：`fe3d7f7`（`docs: audit m14 production portfolio gaps`）。
+- 数据与授权边界：只读本地代码、文档和历史 verification；没有读取 Key、运行 Provider、Docker、
+  Chromium、远程服务或业务测试，没有安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际检查与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short` 与强制 continuity/status/playbook/plan/handoff/verification 恢复读取 | 0 | 开始时工作区干净；当前下一动作确认为 accepted 合同 ADR |
+| 读取 ADR-0029/0031/0037/0040–0043，并定向检索 ToolRegistry、ToolExecution、Vision、Browser、RAG、Container 和稳定错误目录 | 0 | 确认 owner/capability、同 Run event projection、精确审批、持久执行仲裁、fixture Browser、不可信视觉和离线默认边界 |
+| 首次按假定路径读取 `tools/base.py`、`agents/multimodal_vision.py`、`agents/browser.py`，以及检索不存在的 `runtime` 目录/`coordinator.py` | 1 | 路径不存在；没有据此形成合同，随后用 `rg --files backend/app` 定位真实的 `tools/registry.py`、`advanced/*`、`services/run_coordinator.py` 和 `reliability.py` |
+| ADR-0044 结构与关键合同定向检索 | 0 | 场景版本、四工具、同 Run evidence/result、审批/幂等、稳定失败码、预算和 12 类离线验收场景均存在 |
+| `scripts/check-continuity.ps1`（ADR 与状态同步后） | 0 | 52 个稳定任务、185 个 Markdown 文件通过 |
+| `git diff --check`（ADR 与状态同步后） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 合同结论与边界
+
+- `ADR-0044` 接受 `multisource-review-v1`：一个 owner-scoped durable Run 使用图片、内部规则和受控
+  页面形成三源 evidence bundle，再由高风险 `publish_review` 发布审查结果。
+- `inspect_image`、`search_review_policy` 与 `read_fixture_page` 必须真实调用既有 Vision、RAG 和
+  Browser 领域模块；`publish_review` 必须同时经过 `reviewer` 角色、精确审批、server-owned 业务
+  幂等键、持久 `ToolExecution` 和 publication store CAS。
+- 发布进入副作用边界后的 timeout/连接中断统一为 `tool_result_unknown`，不自动重放，只允许按业务
+  key 查询权威 publication record。默认仍为离线视觉、server-owned Browser fixture、零 Provider
+  请求和 unknown/null usage/cost。
+- 本轮最高证据是合同与代码一致性审计，不是运行行为 E3。四工具尚未注册或进入同一 Run，
+  publication store 尚未实现，`KI-034` 保持 open；旧 capstone 文档也暂不更新成完成态。
+
+下一原子动作是实现版本化领域类型、server-owned 资源目录和独立四工具 registry factory，并以
+定向测试固定参数、角色、预算与内容安全；仍不接默认 Container、HTTP、Vue 或部署。
