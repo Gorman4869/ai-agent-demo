@@ -5142,3 +5142,45 @@ M14-T6 从 `planned` 进入 `in_progress`，但本轮没有运行时代码或行
 下一原子动作是实现批准后的 resume：接入持久 `ToolExecutionStore` 仲裁和 owner-scoped publication
 store CAS，覆盖拒绝/过期/参数篡改/同键重放/并发 resume/result-unknown 权威对账；仍不接默认
 Container/API/UI，不运行 Provider。
+
+## V-20261022-001：M14-T6 审批恢复、ToolExecution 与内存 publication CAS
+
+- 任务：`M14-T6 / in_progress`
+- 时间：2026-10-22，Asia/Shanghai
+- 任务等级：A 类持久化/并发/审批/副作用恢复；本原子步骤实现离线 E3 的 resume 与内存权威发布，
+  不实现 PostgreSQL publication、默认 Container/API/UI 或部署。
+- 验证基线：`3b68851`（`feat: add same-run review evidence runtime`）；本轮实现提交在记录创建时尚未
+  生成，将由下一次 verification/handoff 回填。
+- 数据与授权边界：默认离线、server-owned 资源和内存 publication adapter；没有读取 Key、调用
+  Provider/公网、启动真实 Chromium/PostgreSQL/Docker、安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short`、`git diff --stat`、`git log -3 --oneline` 与强制 continuity/plan/ADR/handoff/verification/规约恢复读取 | 0 | 开始时工作区干净，HEAD `3b68851`；status 的旧锚点符合“下一次记录回填”节奏，不是代码漂移 |
+| 沙箱外 `python -B -m unittest backend.tests.test_review_runtime -v`（恢复基线） | 0 | 上一纵切 10/10 通过，0.188s |
+| `python -B -m compileall -q`：publication、review tools/runtime、exports 与两组专项测试 | 0 | 新增/修改 Python 文件语法通过 |
+| 沙箱外 publication + review Runtime 专项 | 0 | 首轮 22/22；补 PENDING 清理和副作用边界取消 UNKNOWN 后最终 23/23 通过，0.082s |
+| 沙箱外 publication/Runtime/Review Tools/ToolExecution/Coordinator/Tool Security/Reliability 合并回归 | 0 | 109 项通过，0.676s；既有 lease/notifier 故障注入日志不影响结果 |
+| 沙箱外再加入 Multimodal/Browser Agent/Driver/RAG/Runtime Contract 的最终相关回归 | 0 | 170 项通过，2.235s；既有 observer warning 与 asyncio slow-task debug 不影响结果 |
+| `scripts/check-continuity.ps1`（代码、规约、状态与 handoff 同步后） | 0 | 52 个稳定任务、189 个 Markdown 文件通过 |
+| `git diff --check`（收尾） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 实现结论与边界
+
+- 初始 Runtime 在发布审批前创建 side-effecting `ToolExecution` 并转 `WAITING_APPROVAL`；resume 重新
+  校验 owner/Run/call/tool/arguments/decision/业务幂等摘要，只有 version-CAS winner 进入 publisher。
+- `InMemoryReviewPublicationStore` 以 owner digest + review revision 做 CAS，以 business-key digest
+  幂等返回同一 publication。拒绝、过期、篡改和 revision conflict 均不调用或不重试 publisher。
+- Coordinator 两个并发 resume 返回同一 completed Run，registry/publisher 各调用一次。成功事件
+  `review.result` 只含安全 publication/evidence digest/ref 与 unknown/null usage/cost。
+- result unknown 只进行一次权威 reconcile：已提交记录让仍为 RUNNING 的 ToolExecution 安全完成；
+  无记录或查询不可确认时落 `UNKNOWN`，再次 resume 不调用 publisher。副作用边界内取消也落 UNKNOWN。
+- 当前最高证据为进程内 E3。既有 `ToolExecutionStore` 协议可替换 PostgreSQL adapter，但 publication
+  仍只有内存实现；未验证跨 composition 重启、多进程竞争、真实 PostgreSQL migration/API/UI/部署，
+  `KI-034` 保持 open。
+
+下一原子动作是实现 PostgreSQL publication migration/adapter，并复用现有 PostgreSQL
+`ToolExecutionStore` 完成两 composition 重启、并发幂等、revision conflict 及 result-unknown 已存在/
+不存在对账；仍不接默认 API/UI，不运行 Provider。

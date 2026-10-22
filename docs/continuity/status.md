@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-10-21，Asia/Shanghai
+- 更新时间：2026-10-22，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`86609d5`
+- 最近已确认实现提交：`3b68851`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -72,7 +72,7 @@
 - M14-T4 MiniMax M Plan 在线验证基线：`c481330`；验证提交：`eea496a`；验证记录：`V-20261020-005`
 - M14-T5 第一离线评测基线：`af8a752`；实现提交：`44acfd7`；验证记录：`V-20261021-001`
 - M14-T5 受控 Chromium 评测基线：`896f754`；实现提交：`3b556b9`；验证记录：`V-20261021-002`
-- M14-T6 多源审查合同提交：`9e34565`；工具注册表实现提交：`86609d5`；同 Run 证据编排验证基线：`86609d5`；验证记录：`V-20261021-005/006`
+- M14-T6 多源审查合同提交：`9e34565`；工具注册表实现提交：`86609d5`；同 Run 证据编排实现提交：`3b68851`；审批恢复验证基线：`3b68851`；验证记录：`V-20261021-005/006`、`V-20261022-001`
 - 远程仓库：`https://github.com/Gorman4869/ai-agent-demo.git`；Actions run `#1` 失败、run `#2` 全绿
 - 在线付费调用：DashScope 第五次单次授权已完成真实 E4；仅在临时子进程移除 SOCKS proxy，完成两次请求、写入/查询/清理，费用来源未知
 
@@ -85,9 +85,9 @@
 | 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
 | 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
 | 执行协议 | 已完成缺口审计与 `ADR-0044` 合同冻结；后续按离线同 Run 真实工具、API/UI/部署、材料与演练三个纵切推进，默认保持离线 |
-| 当前修改 | 新增可信 Run 目录、canonical evidence bundle 和同 Run 离线 Runtime；固定 image/policy/page 顺序、安全事件与四调用预算，完整证据后停在 `publish_review` 精确审批；未实现 resume 或接默认 Container/API/UI |
-| 验证 | `V-20261021-006`：新增专项 10 项及 Runtime/Tool/Security/Reliability/Vision/Browser/RAG 直接依赖回归共 147 项通过；compileall 通过，continuity/diff 收尾检查见验证记录；未运行 Provider、真实 Chromium、Docker 或全量门 |
-| 下一动作 | 实现批准后 resume、持久 `ToolExecution` 仲裁和 owner-scoped publication store CAS/结果未知对账；固定拒绝/过期/篡改/重放/并发恢复，仍不接默认 Container/API/UI |
+| 当前修改 | 在同 Run Runtime 增加精确审批 resume、`ToolExecutionStore` CAS、owner-scoped 内存 publication CAS/权威对账和安全 `review.result`；UNKNOWN/取消不重放；未接 PostgreSQL publication、默认 Container/API/UI |
+| 验证 | `V-20261022-001`：专项 23 项，publication/Runtime/ToolExecution/Tool/Security/Reliability/Vision/Browser/RAG/Coordinator 相关回归共 170 项通过；compileall、continuity 和 diff 收尾见验证记录；未运行 PostgreSQL、Provider、真实 Chromium、Docker 或全量门 |
+| 下一动作 | 新增 PostgreSQL publication migration/adapter，并用现有 PostgreSQL `ToolExecutionStore` 验证跨 composition 重启、并发幂等和 result-unknown 权威对账；仍不接默认 API/UI |
 
 ## 里程碑状态
 
@@ -101,7 +101,7 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 已完成缺口审计、`ADR-0044`、独立四工具 registry 和同 Run evidence/审批暂停，下一步补持久发布恢复；`KI-034` 继续跟踪，T7–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 已完成合同、四工具、同 Run evidence、审批 resume、ToolExecution 和内存 publication CAS；下一步补 PostgreSQL 重启证据，再进入 API/UI/部署；`KI-034` 继续跟踪，T7–T8 未开始 |
 
 ## 当前阻塞
 
@@ -111,10 +111,10 @@
 
 ## 未验证范围
 
-- M14-T6 缺口审计、合同和两个代码纵切见 `V-20261021-003/004/005/006`：独立 registry 已让三个
-  只读工具真实进入既有 Vision、RAG、Browser 边界；Runtime 已在同一 durable Run 生成 canonical
-  evidence、执行四调用预算并停在精确发布审批。但 approval resume、持久 `ToolExecution`、
-  publication CAS/对账、最终结果、API/UI 和部署尚未实现；旧 capstone 架构/演示仍需后续重写。
+- M14-T6 缺口审计、合同和三个代码纵切见 `V-20261021-003/004/005/006`、`V-20261022-001`：
+  独立 registry 已让三个只读工具真实进入既有 Vision、RAG、Browser；Runtime 已在同一 durable Run
+  生成 evidence、执行预算、完成精确审批 resume、ToolExecution 仲裁、内存 publication CAS/对账和
+  安全结果。PostgreSQL publication/restart、多进程、API/UI 和部署尚未实现；旧 capstone 材料仍需重写。
 - M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
   `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
   fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
@@ -288,7 +288,8 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-21-m14-t6-same-run-evidence-pause.md`，再核对 `V-20261021-006`、
-`ADR-0044`、`backend/app/advanced/review_runtime.py`、`KI-034` 和 M14-T6 实施计划。下一动作只实现
-批准后的持久 `ToolExecution`/publication resume 与结果未知对账；不接默认 Container/API/UI。没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
+`docs/continuity/handoffs/2026-10-22-m14-t6-review-publication-resume.md`，再核对 `V-20261022-001`、
+`ADR-0044`、`backend/app/advanced/review_runtime.py`、`backend/app/advanced/review_publication.py`、
+`KI-034` 和 M14-T6 实施计划。下一动作只实现 PostgreSQL publication/restart 对账；不接默认
+Container/API/UI。没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
 查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。

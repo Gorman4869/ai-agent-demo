@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from backend.app.advanced.review_tools import (
     MULTISOURCE_REVIEW_VERSION,
@@ -18,10 +19,16 @@ from backend.app.advanced.review_tools import (
     ReviewImageEvidence,
     ReviewPageEvidence,
     ReviewPolicyEvidence,
+    ReviewPublicationResult,
+    ReviewPublisher,
     ReviewScenarioLimits,
+    create_review_publication_command,
 )
+from backend.app.advanced.review_publication import ReviewPublicationStore
 from backend.app.agent import (
+    RuntimeApprovalDecision,
     RuntimeApprovalPause,
+    RuntimeApprovalResume,
     RuntimeControl,
     RuntimeEvent,
     RuntimeEventSink,
@@ -29,9 +36,15 @@ from backend.app.agent import (
     RuntimeRequest,
     RuntimeResult,
 )
-from backend.app.domain.run import RunFailure, RunStatus
+from backend.app.domain.run import (
+    RunFailure,
+    RunStatus,
+    ToolExecution,
+    ToolExecutionStatus,
+)
 from backend.app.reliability import stable_run_failure
-from backend.app.tools import ToolExecutionContext, ToolResult
+from backend.app.stores import ConcurrentWriteError, ToolExecutionStore
+from backend.app.tools import ToolExecutionContext, ToolHandlerError, ToolResult
 
 
 REVIEW_EVIDENCE_SCHEMA = "review-evidence-v1"
@@ -282,6 +295,9 @@ class ReviewRuntimeRegistry(Protocol):
     @property
     def limits(self) -> ReviewScenarioLimits: ...
 
+    @property
+    def publisher(self) -> ReviewPublisher: ...
+
     async def execute(
         self,
         name: str,
@@ -300,19 +316,34 @@ class MultisourceReviewRuntime:
         *,
         registry: ReviewRuntimeRegistry,
         run_catalog: ReviewRunCatalog,
+        tool_execution_store: ToolExecutionStore,
         approval_ttl: timedelta = timedelta(minutes=15),
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(registry, AsyncReviewToolRegistry) and not (
-            hasattr(registry, "execute") and hasattr(registry, "limits")
+            hasattr(registry, "execute")
+            and hasattr(registry, "limits")
+            and hasattr(registry, "publisher")
         ):
             raise TypeError("review runtime registry is invalid")
         if not isinstance(run_catalog, ReviewRunCatalog):
             raise TypeError("review run catalog is invalid")
+        if not (
+            hasattr(tool_execution_store, "create")
+            and hasattr(tool_execution_store, "get")
+            and hasattr(tool_execution_store, "transition")
+        ):
+            raise TypeError("review tool execution store is invalid")
+        if not hasattr(registry.publisher, "reconcile"):
+            raise TypeError("review publication store is invalid")
         if not isinstance(approval_ttl, timedelta) or approval_ttl <= timedelta(0):
             raise ValueError("review approval ttl must be positive")
         self._registry = registry
         self._run_catalog = run_catalog
+        self._tool_execution_store = tool_execution_store
+        self._publication_store = cast(ReviewPublicationStore, registry.publisher)
         self._approval_ttl = approval_ttl
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     async def run(
         self,
@@ -394,6 +425,21 @@ class MultisourceReviewRuntime:
         }
         call_id = _publish_call_id(request.run_id, bundle.digest)
         try:
+            command = create_review_publication_command(arguments, context)
+            candidate = _new_tool_execution(
+                request.run_id,
+                call_id=call_id,
+                arguments=arguments,
+                idempotency_key=command.idempotency_key,
+                created_at=self._clock(),
+            )
+            created = await self._tool_execution_store.create(
+                candidate,
+                owner_id=context.principal_id,
+            )
+        except (TypeError, ValueError):
+            return _failed_result("review_evidence_invalid", step=4)
+        try:
             approval = approval_store.request(
                 run_id=request.run_id,
                 principal_id=context.principal_id,
@@ -403,6 +449,25 @@ class MultisourceReviewRuntime:
                 expires_in=self._approval_ttl,
             )
         except ValueError:
+            if created.record.status is ToolExecutionStatus.PENDING:
+                await self._tool_execution_store.transition(
+                    created.record.id,
+                    owner_id=context.principal_id,
+                    expected_version=created.record.version,
+                    target_status=ToolExecutionStatus.CANCELLED,
+                    error_code="review_evidence_invalid",
+                    public_message="Review approval request could not be created",
+                )
+            return _failed_result("review_evidence_invalid", step=4)
+        execution = created.record
+        if execution.status is ToolExecutionStatus.PENDING:
+            execution = await self._tool_execution_store.transition(
+                execution.id,
+                owner_id=context.principal_id,
+                expected_version=execution.version,
+                target_status=ToolExecutionStatus.WAITING_APPROVAL,
+            )
+        if execution.status is not ToolExecutionStatus.WAITING_APPROVAL:
             return _failed_result("review_evidence_invalid", step=4)
         return RuntimeApprovalPause(
             approval_id=approval.id,
@@ -412,6 +477,381 @@ class MultisourceReviewRuntime:
             expires_at=approval.expires_at,
             step=4,
         )
+
+    async def resume(
+        self,
+        request: RuntimeRequest,
+        *,
+        approval: RuntimeApprovalResume,
+        emit: RuntimeEventSink,
+        control: RuntimeControl,
+    ) -> RuntimeOutcome:
+        context = _review_execution_context(request)
+        if context is None or context.approval_store is None:
+            return _authorization_failure("approval_context_required", step=4)
+        spec = self._run_catalog.resolve(
+            request.run_id,
+            owner_id=context.principal_id,
+        )
+        if spec is None:
+            return _failed_result("review_asset_not_found", step=4)
+        resolution = context.approval_store.get_resolution(
+            approval_id=approval.approval_id,
+            run_id=request.run_id,
+            principal_id=context.principal_id,
+        )
+        if resolution is None or not _approval_matches(approval, resolution):
+            return _approval_resolution_failure(step=4)
+        execution = await self._tool_execution_store.get(
+            _execution_id(approval.tool_call_id),
+            owner_id=context.principal_id,
+        )
+        if execution is None or not _execution_matches_approval(
+            execution,
+            request.run_id,
+            approval,
+        ):
+            return _failed_result("review_evidence_invalid", step=4)
+        if approval.decision is RuntimeApprovalDecision.REJECTED:
+            return await self._settle_approval_failure(
+                execution,
+                owner_id=context.principal_id,
+                code="approval_rejected",
+                public_message="Review publication was rejected",
+            )
+        if approval.decision is RuntimeApprovalDecision.EXPIRED:
+            return await self._settle_approval_failure(
+                execution,
+                owner_id=context.principal_id,
+                code="approval_expired",
+                public_message="Review publication approval expired",
+            )
+        try:
+            arguments = context.approval_store.approved_arguments(resolution)
+            if not _arguments_match_spec(arguments, spec):
+                return _failed_result("review_evidence_invalid", step=4)
+            command = create_review_publication_command(arguments, context)
+            candidate = _new_tool_execution(
+                request.run_id,
+                call_id=approval.tool_call_id,
+                arguments=arguments,
+                idempotency_key=command.idempotency_key,
+                created_at=execution.created_at,
+            )
+        except (TypeError, ValueError):
+            return _failed_result("review_evidence_invalid", step=4)
+        if not _execution_matches_candidate(execution, candidate):
+            return _failed_result("review_evidence_invalid", step=4)
+        if execution.status is ToolExecutionStatus.COMPLETED:
+            try:
+                publication = await self._publication_store.reconcile(command)
+            except (ToolHandlerError, TimeoutError, OSError):
+                publication = None
+            if publication is None:
+                return _failed_result("tool_result_unknown", step=4)
+            return await _published_result(
+                spec,
+                command.evidence_bundle_digest,
+                publication,
+                emit=emit,
+            )
+        if execution.status is ToolExecutionStatus.UNKNOWN:
+            return _failed_result("tool_result_unknown", step=4)
+        if execution.status in {
+            ToolExecutionStatus.FAILED,
+            ToolExecutionStatus.CANCELLED,
+        }:
+            return _execution_failure_result(execution, step=4)
+        if execution.status is not ToolExecutionStatus.WAITING_APPROVAL:
+            return _failed_result("review_evidence_invalid", step=4)
+        if control.cancellation_token.is_cancelled:
+            await self._tool_execution_store.transition(
+                execution.id,
+                owner_id=context.principal_id,
+                expected_version=execution.version,
+                target_status=ToolExecutionStatus.CANCELLED,
+                error_code="tool_cancelled",
+                public_message="Review publication was cancelled",
+            )
+            return _cancelled_result(control, step=4)
+        try:
+            running = await self._tool_execution_store.transition(
+                execution.id,
+                owner_id=context.principal_id,
+                expected_version=execution.version,
+                target_status=ToolExecutionStatus.RUNNING,
+            )
+        except ConcurrentWriteError:
+            winner = await self._tool_execution_store.get(
+                execution.id,
+                owner_id=context.principal_id,
+            )
+            if winner is not None and winner.status is ToolExecutionStatus.COMPLETED:
+                try:
+                    publication = await self._publication_store.reconcile(command)
+                except (ToolHandlerError, TimeoutError, OSError):
+                    publication = None
+                if publication is not None:
+                    return await _published_result(
+                        spec,
+                        command.evidence_bundle_digest,
+                        publication,
+                        emit=emit,
+                    )
+            return _failed_result("tool_result_unknown", step=4)
+        try:
+            result = await self._registry.execute(
+                "publish_review",
+                arguments,
+                context=context,
+                call_id=approval.tool_call_id,
+            )
+        except asyncio.CancelledError:
+            await self._settle_unknown(running, owner_id=context.principal_id)
+            raise
+        if result.ok and isinstance(result.value, ReviewPublicationResult):
+            publication = result.value
+        elif result.result_unknown:
+            try:
+                publication = await self._publication_store.reconcile(command)
+            except (ToolHandlerError, TimeoutError, OSError):
+                publication = None
+            if publication is None:
+                await self._settle_unknown(
+                    running,
+                    owner_id=context.principal_id,
+                )
+                return _failed_result("tool_result_unknown", step=4)
+        else:
+            code = result.error_code or "review_evidence_invalid"
+            failed = await self._tool_execution_store.transition(
+                running.id,
+                owner_id=context.principal_id,
+                expected_version=running.version,
+                target_status=ToolExecutionStatus.FAILED,
+                error_code=code,
+                public_message="Review publication failed",
+            )
+            return _execution_failure_result(failed, step=4)
+        completed = await self._tool_execution_store.transition(
+            running.id,
+            owner_id=context.principal_id,
+            expected_version=running.version,
+            target_status=ToolExecutionStatus.COMPLETED,
+            result={
+                "publication_id": publication.publication_id,
+                "revision": publication.revision,
+                "status": publication.status,
+                "evidence_bundle_digest": command.evidence_bundle_digest,
+            },
+            result_summary="review publication confirmed",
+        )
+        if completed.status is not ToolExecutionStatus.COMPLETED:
+            return _failed_result("tool_result_unknown", step=4)
+        return await _published_result(
+            spec,
+            command.evidence_bundle_digest,
+            publication,
+            emit=emit,
+        )
+
+    async def _settle_approval_failure(
+        self,
+        execution: ToolExecution,
+        *,
+        owner_id: str,
+        code: str,
+        public_message: str,
+    ) -> RuntimeResult:
+        if execution.status is ToolExecutionStatus.WAITING_APPROVAL:
+            execution = await self._tool_execution_store.transition(
+                execution.id,
+                owner_id=owner_id,
+                expected_version=execution.version,
+                target_status=ToolExecutionStatus.FAILED,
+                error_code=code,
+                public_message=public_message,
+            )
+        return _execution_failure_result(execution, step=4)
+
+    async def _settle_unknown(
+        self,
+        execution: ToolExecution,
+        *,
+        owner_id: str,
+    ) -> ToolExecution:
+        return await self._tool_execution_store.transition(
+            execution.id,
+            owner_id=owner_id,
+            expected_version=execution.version,
+            target_status=ToolExecutionStatus.UNKNOWN,
+            error_code="tool_result_unknown",
+            public_message="Review publication result could not be confirmed",
+        )
+
+
+def _new_tool_execution(
+    run_id: str,
+    *,
+    call_id: str,
+    arguments: Mapping[str, object],
+    idempotency_key: str,
+    created_at: datetime,
+) -> ToolExecution:
+    return ToolExecution.create(
+        execution_id=_execution_id(call_id),
+        run_id=run_id,
+        tool_call_id=call_id,
+        tool_name="publish_review",
+        arguments=arguments,
+        created_at=created_at,
+        side_effecting=True,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _execution_id(call_id: str) -> str:
+    return f"review-execution-{_length_prefixed_digest(call_id)[:32]}"
+
+
+def _approval_matches(approval: RuntimeApprovalResume, resolution: object) -> bool:
+    request = getattr(resolution, "request", None)
+    status = getattr(resolution, "status", None)
+    return (
+        request is not None
+        and request.id == approval.approval_id
+        and request.tool_call_id == approval.tool_call_id
+        and request.tool_name == approval.tool_name
+        and request.arguments_digest == approval.arguments_digest
+        and getattr(status, "value", None) == approval.decision.value
+    )
+
+
+def _execution_matches_approval(
+    execution: ToolExecution,
+    run_id: str,
+    approval: RuntimeApprovalResume,
+) -> bool:
+    return (
+        execution.run_id == run_id
+        and execution.tool_call_id == approval.tool_call_id
+        and execution.tool_name == approval.tool_name
+        and execution.arguments_digest == approval.arguments_digest
+        and execution.side_effecting
+    )
+
+
+def _execution_matches_candidate(
+    execution: ToolExecution,
+    candidate: ToolExecution,
+) -> bool:
+    return (
+        execution.id == candidate.id
+        and execution.run_id == candidate.run_id
+        and execution.tool_call_id == candidate.tool_call_id
+        and execution.tool_name == candidate.tool_name
+        and execution.arguments_digest == candidate.arguments_digest
+        and execution.idempotency_key_digest
+        == candidate.idempotency_key_digest
+        and execution.side_effecting == candidate.side_effecting
+    )
+
+
+def _arguments_match_spec(
+    arguments: Mapping[str, object],
+    spec: ReviewRunSpec,
+) -> bool:
+    return (
+        set(arguments)
+        == {
+            "review_id",
+            "expected_revision",
+            "requested_decision",
+            "evidence_bundle_digest",
+        }
+        and arguments.get("review_id") == spec.review_id
+        and arguments.get("expected_revision") == spec.expected_revision
+        and arguments.get("requested_decision") == spec.requested_decision
+        and isinstance(arguments.get("evidence_bundle_digest"), str)
+        and _SHA256.fullmatch(arguments["evidence_bundle_digest"]) is not None
+    )
+
+
+def _approval_resolution_failure(*, step: int) -> RuntimeResult:
+    return RuntimeResult(
+        status=RunStatus.FAILED,
+        failure=RunFailure(
+            code="approval_resolution_invalid",
+            category="authorization",
+            public_message="Review publication approval is invalid",
+            step=step,
+        ),
+        step=step,
+    )
+
+
+def _execution_failure_result(
+    execution: ToolExecution,
+    *,
+    step: int,
+) -> RuntimeResult:
+    code = execution.error_code or "review_evidence_invalid"
+    if code in {"approval_rejected", "approval_expired", "tool_cancelled"}:
+        category = (
+            "cancellation" if code == "tool_cancelled" else "authorization"
+        )
+        public_message = execution.public_message or "Review publication stopped"
+        failure = RunFailure(
+            code=code,
+            category=category,
+            public_message=public_message,
+            step=step,
+        )
+    else:
+        try:
+            failure = stable_run_failure(code, step=step)
+        except ValueError:
+            failure = stable_run_failure("review_evidence_invalid", step=step)
+    return RuntimeResult(status=RunStatus.FAILED, failure=failure, step=step)
+
+
+async def _published_result(
+    spec: ReviewRunSpec,
+    evidence_bundle_digest: str,
+    publication: ReviewPublicationResult,
+    *,
+    emit: RuntimeEventSink,
+) -> RuntimeResult:
+    data: dict[str, object] = {
+        "schema": "review-result-v1",
+        "scenario_version": MULTISOURCE_REVIEW_VERSION,
+        "review_id": spec.review_id,
+        "outcome": "published",
+        "evidence_refs": [
+            spec.image_asset_id,
+            hashlib.sha256(spec.policy_topic.encode("utf-8")).hexdigest(),
+            spec.page_fixture_id,
+        ],
+        "evidence_bundle_digest": evidence_bundle_digest,
+        "publication": {
+            "publication_id": publication.publication_id,
+            "revision": publication.revision,
+            "status": publication.status,
+        },
+        "usage": {
+            "provider": None,
+            "total_tokens": None,
+            "estimated_cost": None,
+            "currency": None,
+            "cost_source": "unknown",
+        },
+    }
+    await emit(RuntimeEvent(type="review.result", step=4, data=data))
+    return RuntimeResult(
+        status=RunStatus.COMPLETED,
+        answer=_canonical_json_bytes(data).decode("utf-8"),
+        step=4,
+    )
 
 
 def _review_execution_context(

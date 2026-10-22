@@ -1271,6 +1271,24 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   `review.result`，也未接默认 Container/API/UI/部署；下一原子任务先补持久发布恢复链，`KI-034`
   保持 open。
 
+审批恢复与内存发布纵切（2026-10-22）：
+
+- `MultisourceReviewRuntime` 在初始 Run 中创建 side-effecting `ToolExecution(PENDING)`，审批暂停前以
+  version CAS 转为 `WAITING_APPROVAL`；resume 重新校验 owner/Run/call/tool/arguments/decision 和
+  server-derived 业务幂等摘要，批准后只有 CAS winner 可进入 `publish_review`。
+- 新增 owner-scoped `InMemoryReviewPublicationStore`，以 `expected_revision` 做 publication CAS，以
+  业务 key 返回同一 publication；Store 只保留 owner/key/binding digest 和安全 result，不持久化原始
+  owner、幂等键、证据内容或异常。
+- 拒绝、过期、审批摘要篡改和 revision conflict 均不重试；Coordinator 并发 resume 只执行一次
+  publisher。发布返回 result unknown 时只做一次权威 reconcile：匹配记录可确认完成，缺失/查询失败
+  落 `ToolExecution.UNKNOWN`，后续 resume 不再调用 publisher；副作用边界内取消同样落 UNKNOWN。
+- 成功路径在原 Run 追加安全 `review.result`，usage/cost 保持 unknown/null。新增/扩展专项 23 项，
+  publication/Runtime/ToolExecution/Tool/Security/Reliability/Vision/Browser/RAG/Coordinator 相关回归
+  共 170 项通过，见 `V-20261022-001`。
+- 本纵切使用既有 `ToolExecutionStore` 协议但 publication adapter 仍仅内存；没有 PostgreSQL migration、
+  多进程/重启 E3、默认 Container/API/UI 或部署证据。下一纵切先补 PostgreSQL publication adapter 与
+  result-unknown 重启对账，`KI-034` 保持 open。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

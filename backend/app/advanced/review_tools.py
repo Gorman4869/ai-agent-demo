@@ -324,6 +324,7 @@ class AsyncReviewToolRegistry:
         handlers: Mapping[str, AsyncReviewToolHandler],
         *,
         limits: ReviewScenarioLimits,
+        publisher: ReviewPublisher,
     ) -> None:
         if tuple(definition.name for definition in definitions) != REVIEW_TOOL_NAMES:
             raise ValueError("review registry requires the four versioned tools")
@@ -335,10 +336,15 @@ class AsyncReviewToolRegistry:
         self._policy_registry = policy_registry
         self._handlers = MappingProxyType(dict(handlers))
         self._limits = limits
+        self._publisher = publisher
 
     @property
     def limits(self) -> ReviewScenarioLimits:
         return self._limits
+
+    @property
+    def publisher(self) -> ReviewPublisher:
+        return self._publisher
 
     def definitions(
         self,
@@ -512,27 +518,7 @@ def create_multisource_review_registry(
         arguments: dict[str, object],
         context: ToolExecutionContext,
     ) -> ReviewPublicationResult:
-        if context.run_id is None:
-            raise ToolHandlerError("review_evidence_invalid")
-        review_id = _argument_string(arguments, "review_id")
-        expected_revision = _argument_integer(arguments, "expected_revision")
-        decision = _argument_string(arguments, "requested_decision")
-        evidence_digest = _argument_string(arguments, "evidence_bundle_digest")
-        command = ReviewPublicationCommand(
-            owner_id=context.principal_id,
-            run_id=context.run_id,
-            review_id=review_id,
-            expected_revision=expected_revision,
-            requested_decision=cast(ReviewDecision, decision),
-            evidence_bundle_digest=evidence_digest,
-            idempotency_key=_publication_idempotency_key(
-                owner_id=context.principal_id,
-                review_id=review_id,
-                expected_revision=expected_revision,
-                requested_decision=decision,
-                evidence_bundle_digest=evidence_digest,
-            ),
-        )
+        command = create_review_publication_command(arguments, context)
         return await publisher.publish(command)
 
     return AsyncReviewToolRegistry(
@@ -544,6 +530,34 @@ def create_multisource_review_registry(
             "publish_review": publish_review,
         },
         limits=resolved_limits,
+        publisher=publisher,
+    )
+
+
+def create_review_publication_command(
+    arguments: Mapping[str, object],
+    context: ToolExecutionContext,
+) -> ReviewPublicationCommand:
+    if context.run_id is None:
+        raise ToolHandlerError("review_evidence_invalid")
+    review_id = _argument_string(arguments, "review_id")
+    expected_revision = _argument_integer(arguments, "expected_revision")
+    decision = _argument_string(arguments, "requested_decision")
+    evidence_digest = _argument_string(arguments, "evidence_bundle_digest")
+    return ReviewPublicationCommand(
+        owner_id=context.principal_id,
+        run_id=context.run_id,
+        review_id=review_id,
+        expected_revision=expected_revision,
+        requested_decision=cast(ReviewDecision, decision),
+        evidence_bundle_digest=evidence_digest,
+        idempotency_key=_publication_idempotency_key(
+            owner_id=context.principal_id,
+            review_id=review_id,
+            expected_revision=expected_revision,
+            requested_decision=decision,
+            evidence_bundle_digest=evidence_digest,
+        ),
     )
 
 
@@ -748,4 +762,5 @@ __all__ = [
     "ReviewScenarioLimits",
     "ReviewToolSpec",
     "create_multisource_review_registry",
+    "create_review_publication_command",
 ]

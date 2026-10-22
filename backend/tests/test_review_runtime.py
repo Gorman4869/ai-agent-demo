@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from dataclasses import dataclass, field
@@ -15,26 +16,38 @@ from backend.app.advanced.review_runtime import (
     ReviewRunSpec,
     ReviewToolCallBudget,
 )
+from backend.app.advanced.review_publication import (
+    InMemoryReviewPublicationStore,
+)
 from backend.app.advanced.review_tools import (
     ReviewImageEvidence,
     ReviewPageEvidence,
     ReviewPolicyCitation,
     ReviewPolicyEvidence,
+    ReviewPublicationResult,
     ReviewScenarioLimits,
+    create_review_publication_command,
 )
 from backend.app.agent import (
     CancellationToken,
+    RuntimeApprovalDecision,
     RuntimeApprovalPause,
+    RuntimeApprovalResume,
     RuntimeContextIdentity,
     RuntimeControl,
     RuntimeEvent,
     RuntimeRequest,
 )
-from backend.app.domain.run import RunRecord, RunStatus
+from backend.app.domain.run import RunRecord, RunStatus, ToolExecutionStatus
 from backend.app.services.run_coordinator import RunCoordinator
-from backend.app.stores import InMemoryEventStore, InMemoryRunStore
+from backend.app.stores import (
+    InMemoryEventStore,
+    InMemoryRunStore,
+    InMemoryToolExecutionStore,
+)
 from backend.app.tools import (
     InMemoryApprovalStore,
+    ToolHandlerError,
     ToolExecutionContext,
     ToolResult,
 )
@@ -81,12 +94,22 @@ class ReviewEvidenceBundleTest(unittest.TestCase):
 
 
 class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
-        self.approvals = InMemoryApprovalStore(clock=lambda: NOW)
-        self.registry = _RecordingRegistry()
+    async def asyncSetUp(self) -> None:
+        self.now = NOW
+        self.approvals = InMemoryApprovalStore(clock=lambda: self.now)
+        self.run_store = InMemoryRunStore(clock=lambda: self.now)
+        await _create_running_run(self.run_store)
+        self.tool_store = InMemoryToolExecutionStore(
+            self.run_store,
+            clock=lambda: self.now,
+        )
+        self.publisher = _RecordingPublicationStore()
+        self.registry = _RecordingRegistry(publisher=self.publisher)
         self.runtime = MultisourceReviewRuntime(
             registry=self.registry,
             run_catalog=_run_catalog(),
+            tool_execution_store=self.tool_store,
+            clock=lambda: self.now,
         )
         self.events: list[RuntimeEvent] = []
         self.token = CancellationToken()
@@ -159,6 +182,15 @@ class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret policy excerpt", public_events)
         self.assertNotIn("secret page body", public_events)
         self.assertNotIn("sensitive policy topic", repr(_run_spec()))
+        executions = await self.tool_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+        self.assertEqual(1, len(executions))
+        self.assertEqual(
+            ToolExecutionStatus.WAITING_APPROVAL,
+            executions[0].status,
+        )
 
     async def test_missing_or_cross_owner_binding_fails_before_any_tool(self) -> None:
         missing = await self.runtime.run(
@@ -261,6 +293,176 @@ class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.registry.calls)
         self.assertEqual([], self.events)
 
+    async def test_approved_resume_publishes_once_and_replays_result(self) -> None:
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+
+        first = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        replay = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        executions = await self.tool_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, first.status)
+        self.assertEqual(first.answer, replay.answer)
+        self.assertEqual(1, self.publisher.publish_calls)
+        self.assertEqual(ToolExecutionStatus.COMPLETED, executions[0].status)
+        self.assertEqual("review.result", self.events[-1].type)
+        self.assertNotIn(MALICIOUS_TEXT, first.answer)
+
+    async def test_rejected_approval_never_publishes(self) -> None:
+        rejected_pause = await self._pause()
+        rejected = self._resolve(rejected_pause, decision="reject")
+        rejected_result = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=rejected,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+
+        self.assertEqual("approval_rejected", rejected_result.failure.code)
+        self.assertEqual(0, self.publisher.publish_calls)
+
+    async def test_expired_approval_never_publishes(self) -> None:
+        expired_pause = await self._pause()
+        self.now = NOW.replace(hour=13)
+        expired = self._resolve(expired_pause, decision="approve")
+        expired_result = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=expired,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+
+        self.assertEqual("approval_expired", expired_result.failure.code)
+        self.assertEqual(0, self.publisher.publish_calls)
+
+    async def test_tampered_resume_binding_fails_before_publish(self) -> None:
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+        tampered = RuntimeApprovalResume(
+            approval_id=approval.approval_id,
+            tool_call_id=approval.tool_call_id,
+            tool_name=approval.tool_name,
+            arguments_digest="f" * 64,
+            decision=approval.decision,
+        )
+
+        result = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=tampered,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+
+        self.assertEqual("approval_resolution_invalid", result.failure.code)
+        self.assertEqual(0, self.publisher.publish_calls)
+
+    async def test_result_unknown_reconciles_committed_publication(self) -> None:
+        self.publisher.failure_mode = "unknown_after_commit"
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+
+        result = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        executions = await self.tool_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(ToolExecutionStatus.COMPLETED, executions[0].status)
+        self.assertEqual(1, self.publisher.publish_calls)
+        self.assertEqual(1, self.publisher.reconcile_calls)
+
+    async def test_result_unknown_without_record_is_terminal_and_not_replayed(
+        self,
+    ) -> None:
+        self.publisher.failure_mode = "unknown_without_commit"
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+
+        first = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        replay = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        executions = await self.tool_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+
+        self.assertEqual("tool_result_unknown", first.failure.code)
+        self.assertEqual("tool_result_unknown", replay.failure.code)
+        self.assertEqual(ToolExecutionStatus.UNKNOWN, executions[0].status)
+        self.assertEqual(1, self.publisher.publish_calls)
+
+    async def test_cancellation_inside_publish_boundary_becomes_unknown(
+        self,
+    ) -> None:
+        self.publisher.failure_mode = "cancelled_after_commit"
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.runtime.resume(
+                _runtime_request(approval_store=self.approvals),
+                approval=approval,
+                emit=self.emit,
+                control=RuntimeControl(self.token),
+            )
+        executions = await self.tool_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+
+        self.assertEqual(ToolExecutionStatus.UNKNOWN, executions[0].status)
+        self.assertEqual(1, self.publisher.publish_calls)
+
+    async def test_revision_conflict_is_failed_without_retry(self) -> None:
+        self.publisher.inner = InMemoryReviewPublicationStore(
+            {(OWNER_ID, "review-1"): 4}
+        )
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+
+        result = await self.runtime.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        executions = await self.tool_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+
+        self.assertEqual("review_revision_conflict", result.failure.code)
+        self.assertEqual(ToolExecutionStatus.FAILED, executions[0].status)
+        self.assertEqual(1, self.publisher.publish_calls)
+
     async def test_coordinator_persists_evidence_and_pause_on_same_run(self) -> None:
         run_store = InMemoryRunStore(clock=lambda: NOW)
         event_store = InMemoryEventStore(run_store, clock=lambda: NOW)
@@ -274,10 +476,19 @@ class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
             created_at=NOW,
         )
         await run_store.create(run)
+        tool_store = InMemoryToolExecutionStore(run_store, clock=lambda: NOW)
+        publisher = _RecordingPublicationStore()
+        registry = _RecordingRegistry(publisher=publisher)
+        runtime = MultisourceReviewRuntime(
+            registry=registry,
+            run_catalog=_run_catalog(),
+            tool_execution_store=tool_store,
+            clock=lambda: NOW,
+        )
         coordinator = RunCoordinator(
             run_store=run_store,
             event_store=event_store,
-            runtimes={"manual": self.runtime},
+            runtimes={"manual": runtime},
             run_timeout_ms=1_000,
         )
 
@@ -313,9 +524,112 @@ class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret policy excerpt", persisted)
         self.assertNotIn("secret page body", persisted)
 
+    async def test_coordinator_concurrent_resume_publishes_once(self) -> None:
+        approvals = InMemoryApprovalStore(clock=lambda: NOW)
+        run_store = InMemoryRunStore(clock=lambda: NOW)
+        event_store = InMemoryEventStore(run_store, clock=lambda: NOW)
+        run = RunRecord.create(
+            run_id=RUN_ID,
+            session_id="session-1",
+            owner_id=OWNER_ID,
+            runtime="manual",
+            input_text=MALICIOUS_TEXT,
+            idempotency_key="review-idempotency-key",
+            created_at=NOW,
+        )
+        await run_store.create(run)
+        tool_store = InMemoryToolExecutionStore(run_store, clock=lambda: NOW)
+        publisher = _RecordingPublicationStore()
+        registry = _RecordingRegistry(publisher=publisher)
+        runtime = MultisourceReviewRuntime(
+            registry=registry,
+            run_catalog=_run_catalog(),
+            tool_execution_store=tool_store,
+            clock=lambda: NOW,
+        )
+        coordinator = RunCoordinator(
+            run_store=run_store,
+            event_store=event_store,
+            runtimes={"manual": runtime},
+            run_timeout_ms=1_000,
+        )
+        context = ToolExecutionContext(
+            principal_id=OWNER_ID,
+            roles=frozenset({"reviewer"}),
+            approval_store=approvals,
+        )
+        paused = await coordinator.execute(
+            RUN_ID,
+            owner_id=OWNER_ID,
+            execution_context=context,
+        )
+        events = await event_store.list_for_run(RUN_ID, owner_id=OWNER_ID)
+        waiting = events[-1]
+        self.assertEqual(RunStatus.WAITING_APPROVAL, paused.status)
+
+        calls = tuple(
+            coordinator.resume_approval(
+                RUN_ID,
+                owner_id=OWNER_ID,
+                approval_id=waiting.data["approval_id"],
+                tool_call_id=waiting.data["tool_call_id"],
+                tool_name=waiting.data["tool_name"],
+                arguments_digest=waiting.data["arguments_digest"],
+                decision="approve",
+                execution_context=context,
+            )
+            for _ in range(2)
+        )
+        first, second = await asyncio.gather(*calls)
+        stored_events = await event_store.list_for_run(
+            RUN_ID,
+            owner_id=OWNER_ID,
+        )
+
+        self.assertEqual(RunStatus.COMPLETED, first.status)
+        self.assertEqual(first, second)
+        self.assertEqual(1, publisher.publish_calls)
+        self.assertEqual(1, registry.calls.count("publish_review"))
+        self.assertEqual(1, sum(
+            event.type == "review.result" for event in stored_events
+        ))
+
+    async def _pause(self) -> RuntimeApprovalPause:
+        outcome = await self.runtime.run(
+            _runtime_request(approval_store=self.approvals),
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        self.assertIsInstance(outcome, RuntimeApprovalPause)
+        return outcome
+
+    def _resolve(
+        self,
+        pause: RuntimeApprovalPause,
+        *,
+        decision: str,
+    ) -> RuntimeApprovalResume:
+        resolution = self.approvals.resolve(
+            approval_id=pause.approval_id,
+            run_id=RUN_ID,
+            principal_id=OWNER_ID,
+            tool_call_id=pause.tool_call_id,
+            tool_name=pause.tool_name,
+            arguments_digest=pause.arguments_digest,
+            decision=decision,
+        )
+        return RuntimeApprovalResume(
+            approval_id=resolution.request.id,
+            tool_call_id=resolution.request.tool_call_id,
+            tool_name=resolution.request.tool_name,
+            arguments_digest=resolution.request.arguments_digest,
+            decision=RuntimeApprovalDecision(resolution.status.value),
+        )
+
 
 @dataclass
 class _RecordingRegistry:
+    publisher: "_RecordingPublicationStore"
     limits: ReviewScenarioLimits = field(default_factory=ReviewScenarioLimits)
     calls: list[str] = field(default_factory=list)
     image_status: str = "verified"
@@ -332,7 +646,6 @@ class _RecordingRegistry:
         context: ToolExecutionContext | None = None,
         call_id: str | None = None,
     ) -> ToolResult:
-        del call_id
         if context is None or context.run_id != RUN_ID:
             return ToolResult(ok=False, error_code="review_evidence_invalid")
         if "reviewer" not in context.roles:
@@ -341,15 +654,84 @@ class _RecordingRegistry:
             "inspect_image": {"image_asset_id": "image-1"},
             "search_review_policy": {"policy_topic": "sensitive policy topic"},
             "read_fixture_page": {"page_fixture_id": "page-1"},
+            "publish_review": {
+                "review_id": "review-1",
+                "expected_revision": 3,
+                "requested_decision": "approve",
+            },
         }
-        if name not in expected_arguments or arguments != expected_arguments[name]:
+        expected = expected_arguments.get(name)
+        if expected is None or any(
+            arguments.get(field_name) != value
+            for field_name, value in expected.items()
+        ):
+            return ToolResult(ok=False, error_code="review_evidence_invalid")
+        if name == "publish_review" and (
+            set(arguments)
+            != {
+                "review_id",
+                "expected_revision",
+                "requested_decision",
+                "evidence_bundle_digest",
+            }
+            or call_id is None
+            or context.approval_store is None
+        ):
             return ToolResult(ok=False, error_code="review_evidence_invalid")
         self.calls.append(name)
         if self.cancel_after == name and self.cancellation_token is not None:
             self.cancellation_token.cancel("test_cancelled")
         if self.failure_tool == name:
             return ToolResult(ok=False, error_code=self.failure_code)
+        if name == "publish_review":
+            approval = context.approval_store.consume(
+                principal_id=context.principal_id,
+                run_id=context.run_id,
+                tool_call_id=call_id,
+                tool_name=name,
+                arguments=arguments,
+            )
+            if not approval.approved:
+                return ToolResult(ok=False, error_code="approval_required")
+            try:
+                value = await self.publisher.publish(
+                    create_review_publication_command(arguments, context)
+                )
+            except ToolHandlerError as error:
+                return ToolResult(
+                    ok=False,
+                    error_code=error.code,
+                    result_unknown=error.result_unknown,
+                )
+            return ToolResult(ok=True, value=value)
         return ToolResult(ok=True, value=_tool_value(name, self.image_status))
+
+
+@dataclass
+class _RecordingPublicationStore:
+    inner: InMemoryReviewPublicationStore = field(
+        default_factory=lambda: InMemoryReviewPublicationStore(
+            {(OWNER_ID, "review-1"): 3}
+        )
+    )
+    failure_mode: str | None = None
+    publish_calls: int = 0
+    reconcile_calls: int = 0
+
+    async def publish(self, command) -> ReviewPublicationResult:
+        self.publish_calls += 1
+        if self.failure_mode == "unknown_without_commit":
+            raise ToolHandlerError("tool_result_unknown", result_unknown=True)
+        result = await self.inner.publish(command)
+        if self.failure_mode == "cancelled_after_commit":
+            raise asyncio.CancelledError()
+        if self.failure_mode == "unknown_after_commit":
+            raise ToolHandlerError("tool_result_unknown", result_unknown=True)
+        return result
+
+    async def reconcile(self, command) -> ReviewPublicationResult | None:
+        self.reconcile_calls += 1
+        return await self.inner.reconcile(command)
 
 
 def _run_spec() -> ReviewRunSpec:
@@ -372,6 +754,25 @@ def _run_catalog() -> ReviewRunCatalog:
                 spec=_run_spec(),
             )
         }
+    )
+
+
+async def _create_running_run(run_store: InMemoryRunStore) -> RunRecord:
+    run = RunRecord.create(
+        run_id=RUN_ID,
+        session_id="session-1",
+        owner_id=OWNER_ID,
+        runtime="manual",
+        input_text=MALICIOUS_TEXT,
+        idempotency_key="review-idempotency-key",
+        created_at=NOW,
+    )
+    await run_store.create(run)
+    return await run_store.transition(
+        RUN_ID,
+        owner_id=OWNER_ID,
+        expected_version=0,
+        target_status=RunStatus.RUNNING,
     )
 
 

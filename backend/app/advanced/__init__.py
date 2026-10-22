@@ -81,6 +81,11 @@ from backend.app.advanced.review_tools import (
     ReviewScenarioLimits,
     ReviewToolSpec,
     create_multisource_review_registry,
+    create_review_publication_command,
+)
+from backend.app.advanced.review_publication import (
+    InMemoryReviewPublicationStore,
+    ReviewPublicationStore,
 )
 from backend.app.advanced.review_runtime import (
     MultisourceReviewRuntime,
@@ -118,6 +123,7 @@ __all__ = [
     "CodeRunResult",
     "CommandSpec",
     "ControlledCodeAgent",
+    "InMemoryReviewPublicationStore",
     "MultimodalInspection",
     "MultimodalVisionAgent",
     "MultisourceReviewRuntime",
@@ -144,6 +150,7 @@ __all__ = [
     "ReviewPolicyEvidence",
     "ReviewPublicationCommand",
     "ReviewPublicationResult",
+    "ReviewPublicationStore",
     "ReviewPublisher",
     "ReviewResourceCatalog",
     "ReviewScenarioLimits",
@@ -174,4 +181,5 @@ __all__ = [
     "create_minimax_vision_client_factory",
     "create_multisource_review_registry",
     "create_openai_vision_client_factory",
+    "create_review_publication_command",
 ]
