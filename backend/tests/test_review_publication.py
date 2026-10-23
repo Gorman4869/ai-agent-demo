@@ -1,22 +1,31 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 
 from backend.app.advanced.review_publication import (
     InMemoryReviewPublicationStore,
+    ReviewPublicationStore,
 )
 from backend.app.advanced.review_tools import ReviewPublicationCommand
 from backend.app.tools import ToolHandlerError
 
 
-class InMemoryReviewPublicationStoreTest(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
-        self.store = InMemoryReviewPublicationStore(
-            {
-                ("owner-1", "review-1"): 3,
-                ("owner-2", "review-1"): 8,
-            }
+class ReviewPublicationStoreContract:
+    async def asyncSetUp(self) -> None:
+        self.store = await self.create_store()
+
+    async def create_store(self) -> ReviewPublicationStore:
+        raise NotImplementedError
+
+    async def test_concurrent_business_key_replay_has_one_result(self) -> None:
+        first, second = await asyncio.gather(
+            self.store.publish(_command()),
+            self.store.publish(_command()),
         )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first, await self.store.reconcile(_command()))
 
     async def test_publish_reconcile_and_business_key_replay(self) -> None:
         command = _command()
@@ -34,9 +43,7 @@ class InMemoryReviewPublicationStoreTest(unittest.IsolatedAsyncioTestCase):
         await self.store.publish(_command())
 
         with self.assertRaises(ToolHandlerError) as raised:
-            await self.store.publish(
-                _command(idempotency_key="b" * 64)
-            )
+            await self.store.publish(_command(idempotency_key="b" * 64))
 
         self.assertEqual("review_revision_conflict", raised.exception.code)
         self.assertNotIn("review-1", str(raised.exception))
@@ -59,6 +66,19 @@ class InMemoryReviewPublicationStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.store.reconcile(_command()))
         published = await self.store.publish(_command())
         self.assertEqual(4, published.revision)
+
+
+class InMemoryReviewPublicationStoreTest(
+    ReviewPublicationStoreContract,
+    unittest.IsolatedAsyncioTestCase,
+):
+    async def create_store(self) -> ReviewPublicationStore:
+        return InMemoryReviewPublicationStore(
+            {
+                ("owner-1", "review-1"): 3,
+                ("owner-2", "review-1"): 8,
+            }
+        )
 
 
 def _command(

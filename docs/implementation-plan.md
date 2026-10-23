@@ -1289,6 +1289,21 @@ npm.cmd run build --prefix mcp-servers/knowledge-server
   多进程/重启 E3、默认 Container/API/UI 或部署证据。下一纵切先补 PostgreSQL publication adapter 与
   result-unknown 重启对账，`KI-034` 保持 open。
 
+PostgreSQL publication 与重启对账纵切（2026-10-23）：
+
+- 新增 app migration 7：`review_publication_heads` 以 owner digest + review ID 持有当前 revision，
+  `review_publications` 只保存安全业务字段及 owner/idempotency/binding/evidence digest；发布行与 head CAS
+  在同一事务提交，原始 owner、业务 key、审批参数和证据正文不落库。
+- `PostgresReviewPublicationStore` 复用既有 async pool，保持与内存 Store 相同的 owner scope、业务键重放、
+  expected revision 冲突和权威 reconcile 合同；仍为显式注入的 portfolio adapter，不接默认 Container。
+- Runtime 现在识别跨进程遗留的 `ToolExecution(RUNNING)`：只查询同键 publication；已存在则用 version CAS
+  补齐 `COMPLETED` 和安全 `review.result`，不存在/查询不可确认则落 `UNKNOWN`，两者均不再调用 publisher。
+- 真实 localhost PostgreSQL 通过 migration 1–7、共享 Store 合同、并发同键、revision conflict、敏感值
+  落库检查和两个独立 Python PID 的 commit-crash/recover；完整 PostgreSQL 121 项与相关离线 173 项通过，
+  见 `V-20261023-001`。
+- 本纵切仍未接默认 Container/API/UI 或部署作品集，也没有在线模型、公网 Browser、Provider usage/cost
+  证据；下一纵切进入显式作品集 API/UI 之前先冻结其公开请求、审批恢复和 snapshot 投影合同。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

@@ -24,6 +24,7 @@ from backend.app.advanced.review_tools import (
     ReviewPageEvidence,
     ReviewPolicyCitation,
     ReviewPolicyEvidence,
+    ReviewPublicationCommand,
     ReviewPublicationResult,
     ReviewScenarioLimits,
     create_review_publication_command,
@@ -419,6 +420,69 @@ class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ToolExecutionStatus.UNKNOWN, executions[0].status)
         self.assertEqual(1, self.publisher.publish_calls)
 
+    async def test_running_execution_reconciles_after_runtime_restart(self) -> None:
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+        command = await self._claim_running_publication(
+            pause,
+            approval,
+            commit=True,
+        )
+
+        restarted = MultisourceReviewRuntime(
+            registry=self.registry,
+            run_catalog=_run_catalog(),
+            tool_execution_store=self.tool_store,
+            clock=lambda: NOW,
+        )
+        result = await restarted.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        execution = (
+            await self.tool_store.list_for_run(RUN_ID, owner_id=OWNER_ID)
+        )[0]
+
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(ToolExecutionStatus.COMPLETED, execution.status)
+        self.assertIsNotNone(await self.publisher.inner.reconcile(command))
+        self.assertEqual(0, self.publisher.publish_calls)
+        self.assertEqual(0, self.registry.calls.count("publish_review"))
+
+    async def test_running_execution_without_publication_becomes_unknown(
+        self,
+    ) -> None:
+        pause = await self._pause()
+        approval = self._resolve(pause, decision="approve")
+        await self._claim_running_publication(
+            pause,
+            approval,
+            commit=False,
+        )
+
+        restarted = MultisourceReviewRuntime(
+            registry=self.registry,
+            run_catalog=_run_catalog(),
+            tool_execution_store=self.tool_store,
+            clock=lambda: NOW,
+        )
+        result = await restarted.resume(
+            _runtime_request(approval_store=self.approvals),
+            approval=approval,
+            emit=self.emit,
+            control=RuntimeControl(self.token),
+        )
+        execution = (
+            await self.tool_store.list_for_run(RUN_ID, owner_id=OWNER_ID)
+        )[0]
+
+        self.assertEqual("tool_result_unknown", result.failure.code)
+        self.assertEqual(ToolExecutionStatus.UNKNOWN, execution.status)
+        self.assertEqual(0, self.publisher.publish_calls)
+        self.assertEqual(0, self.registry.calls.count("publish_review"))
+
     async def test_cancellation_inside_publish_boundary_becomes_unknown(
         self,
     ) -> None:
@@ -625,6 +689,44 @@ class MultisourceReviewRuntimeTest(unittest.IsolatedAsyncioTestCase):
             arguments_digest=resolution.request.arguments_digest,
             decision=RuntimeApprovalDecision(resolution.status.value),
         )
+
+    async def _claim_running_publication(
+        self,
+        pause: RuntimeApprovalPause,
+        approval: RuntimeApprovalResume,
+        *,
+        commit: bool,
+    ) -> ReviewPublicationCommand:
+        resolution = self.approvals.get_resolution(
+            approval_id=approval.approval_id,
+            run_id=RUN_ID,
+            principal_id=OWNER_ID,
+        )
+        self.assertIsNotNone(resolution)
+        arguments = self.approvals.approved_arguments(resolution)
+        decision = self.approvals.consume(
+            principal_id=OWNER_ID,
+            run_id=RUN_ID,
+            tool_call_id=pause.tool_call_id,
+            tool_name=pause.tool_name,
+            arguments=arguments,
+        )
+        self.assertTrue(decision.approved)
+        execution = (
+            await self.tool_store.list_for_run(RUN_ID, owner_id=OWNER_ID)
+        )[0]
+        await self.tool_store.transition(
+            execution.id,
+            owner_id=OWNER_ID,
+            expected_version=execution.version,
+            target_status=ToolExecutionStatus.RUNNING,
+        )
+        request = _runtime_request(approval_store=self.approvals)
+        context = request.execution_context.for_run(RUN_ID)
+        command = create_review_publication_command(arguments, context)
+        if commit:
+            await self.publisher.inner.publish(command)
+        return command
 
 
 @dataclass

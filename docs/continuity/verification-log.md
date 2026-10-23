@@ -5184,3 +5184,51 @@ Container/API/UI，不运行 Provider。
 下一原子动作是实现 PostgreSQL publication migration/adapter，并复用现有 PostgreSQL
 `ToolExecutionStore` 完成两 composition 重启、并发幂等、revision conflict 及 result-unknown 已存在/
 不存在对账；仍不接默认 API/UI，不运行 Provider。
+
+## V-20261023-001：M14-T6 PostgreSQL publication 与双进程重启对账
+
+- 任务：`M14-T6 / in_progress`
+- 时间：2026-10-23，Asia/Shanghai
+- 任务等级：A 类持久化/并发/副作用恢复 + C 类真实本地 PostgreSQL；本原子步骤不接默认
+  Container/API/UI 或部署。
+- 验证基线：`aa334e8`（`feat: add durable review publication resume`）；本轮实现提交在记录创建时尚未
+  生成，将由下一次 verification/handoff 记录新 HEAD。
+- 数据与授权边界：默认模型路径离线、无 Key、零 Provider 请求；经本次外部门禁批准，仅启动仓库既有
+  localhost-only、tmpfs integration PostgreSQL，使用缓存镜像且 `--pull never`。没有访问公网、运行
+  MiniMax/DeepSeek/OpenAI、安装依赖、修改 `docs/progress.md` 或 push。
+
+### 实际命令与结果
+
+| 命令或检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git status --short`、`git diff --stat`、`git log -3 --oneline` 与强制 continuity/plan/ADR/handoff/verification/后端规约恢复读取 | 0 | 开始时工作区干净，HEAD `aa334e8`；当前任务与下一原子动作一致 |
+| 沙箱外 `python -B -m unittest backend.tests.test_review_publication backend.tests.test_review_runtime -v`（恢复基线） | 0 | 修改前 23/23 通过，0.367s |
+| `python -B -m compileall -q`：新增 migration adapter/probe、Runtime 与三组测试 | 0 | 修改 Python 文件语法通过 |
+| 沙箱外 publication + review Runtime 专项 | 0 | 26/26 通过，0.109s；新增并发同键与遗留 RUNNING 已存在/不存在 publication 对账 |
+| `docker compose -f deploy/compose.integration.yaml ps`（沙箱内） | 1 | Docker named pipe 权限拒绝；不是容器或代码失败，随后按外部门禁在沙箱外处理 |
+| 沙箱外 `docker compose -f deploy/compose.integration.yaml ps` | 0 | 当时没有运行中的 integration 容器 |
+| 沙箱外 `docker compose -f deploy/compose.integration.yaml up -d --wait --pull never` | 0 | 使用本地缓存 `pgvector/pgvector:0.8.1-pg17` 启动成功并 healthy；只绑定 localhost，数据在 tmpfs |
+| migration、PostgreSQL publication 共享合同与双进程 probe 聚焦命令 | 0 | 12/12 通过，4.931s；migration 1–7 幂等/回滚、同键并发、owner 隔离、revision conflict、敏感摘要和两个不同 PID 的 commit-crash/recover 均通过 |
+| 完整 `backend.tests.postgres_store_integration -q`（仅子进程注入 localhost test DSN） | 0 | 121 项通过，37.488s；不可达数据库负向用例保留一条预期 connection timeout |
+| 首轮相关离线回归命令 | 1 | 写错既有模块名为不存在的 `backend.tests.test_multimodal`，共报告 161 项且仅 loader import error；修正后重跑，不将该失败隐藏为成功 |
+| 修正为 `backend.tests.test_multimodal_agent` 后的 publication/Runtime/ToolExecution/Tool/Security/Reliability/Vision/Browser/RAG/Coordinator 相关回归 | 0 | 173 项通过，1.875s；既有 lease/notifier/observer 故障注入日志和 asyncio slow-task debug 不影响结果 |
+| 加强 UNKNOWN 状态断言后的双进程 PostgreSQL probe 单项 | 0 | 1/1 通过，3.877s；publication 不存在时确实落 `ToolExecution.UNKNOWN`，不是仅凭失败结果推断 |
+| `scripts/check-continuity.ps1`（代码、规约、状态与 handoff 同步后） | 0 | 52 个稳定任务、190 个 Markdown 文件通过 |
+| `git diff --check`（收尾） | 0 | 无 whitespace error；只有既有 LF/CRLF 工作树提示 |
+
+### 实现结论与边界
+
+- migration 7 新增 review head 与 publication 两表。发布事务锁定 owner digest + review ID head，先查
+  业务键 replay，再校验 expected revision，最后原子提交安全 publication 行和新 revision。
+- PostgreSQL adapter 与内存 adapter 共享 5 项合同；相同业务键并发只得到一个结果，不同 owner 独立，
+  旧 revision 稳定返回 `review_revision_conflict`。表内不保存原始 owner、幂等键、审批参数或证据正文。
+- Runtime 对遗留 `ToolExecution(RUNNING)` 不再当作普通非法状态：只按相同 server-derived key 查询权威
+  publication。存在时 CAS 补齐 `COMPLETED` 和 `review.result`；不存在或不可确认时落 `UNKNOWN`。
+- 双进程 probe 的进程 A 使用既有 PostgreSQL Run/Event/Approval/ToolExecution Store 消费审批并在
+  publication 提交后以 17 退出；新进程 B 恢复两条执行，已提交路径完成、未提交路径 UNKNOWN，
+  registry publisher 调用次数为 0，并分别提交安全 Run 终态事件。
+- 最高证据是本机 localhost PostgreSQL 的可复现 E3，不是生产高可用、外部事务 exactly-once 或容量
+  证据。默认 Container/API/UI/部署和旧 capstone 材料仍未完成，`KI-034` 保持 open。
+
+下一原子动作是先冻结显式作品集 API/UI 请求、审批恢复、SSE/snapshot 投影合同，再复用既有 durable
+Run 链实现最小后端与 Vue 纵切；不得改 legacy 双写或调用在线 Provider。

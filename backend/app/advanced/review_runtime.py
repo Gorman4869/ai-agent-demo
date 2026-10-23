@@ -19,6 +19,7 @@ from backend.app.advanced.review_tools import (
     ReviewImageEvidence,
     ReviewPageEvidence,
     ReviewPolicyEvidence,
+    ReviewPublicationCommand,
     ReviewPublicationResult,
     ReviewPublisher,
     ReviewScenarioLimits,
@@ -543,11 +544,30 @@ class MultisourceReviewRuntime:
         if not _execution_matches_candidate(execution, candidate):
             return _failed_result("review_evidence_invalid", step=4)
         if execution.status is ToolExecutionStatus.COMPLETED:
-            try:
-                publication = await self._publication_store.reconcile(command)
-            except (ToolHandlerError, TimeoutError, OSError):
-                publication = None
+            publication = await self._reconcile_publication(command)
             if publication is None:
+                return _failed_result("tool_result_unknown", step=4)
+            return await _published_result(
+                spec,
+                command.evidence_bundle_digest,
+                publication,
+                emit=emit,
+            )
+        if execution.status is ToolExecutionStatus.RUNNING:
+            publication = await self._reconcile_publication(command)
+            if publication is None:
+                await self._settle_unknown(
+                    execution,
+                    owner_id=context.principal_id,
+                )
+                return _failed_result("tool_result_unknown", step=4)
+            completed = await self._complete_publication(
+                execution,
+                owner_id=context.principal_id,
+                command=command,
+                publication=publication,
+            )
+            if completed is None:
                 return _failed_result("tool_result_unknown", step=4)
             return await _published_result(
                 spec,
@@ -587,10 +607,7 @@ class MultisourceReviewRuntime:
                 owner_id=context.principal_id,
             )
             if winner is not None and winner.status is ToolExecutionStatus.COMPLETED:
-                try:
-                    publication = await self._publication_store.reconcile(command)
-                except (ToolHandlerError, TimeoutError, OSError):
-                    publication = None
+                publication = await self._reconcile_publication(command)
                 if publication is not None:
                     return await _published_result(
                         spec,
@@ -612,10 +629,7 @@ class MultisourceReviewRuntime:
         if result.ok and isinstance(result.value, ReviewPublicationResult):
             publication = result.value
         elif result.result_unknown:
-            try:
-                publication = await self._publication_store.reconcile(command)
-            except (ToolHandlerError, TimeoutError, OSError):
-                publication = None
+            publication = await self._reconcile_publication(command)
             if publication is None:
                 await self._settle_unknown(
                     running,
@@ -633,20 +647,13 @@ class MultisourceReviewRuntime:
                 public_message="Review publication failed",
             )
             return _execution_failure_result(failed, step=4)
-        completed = await self._tool_execution_store.transition(
-            running.id,
+        completed = await self._complete_publication(
+            running,
             owner_id=context.principal_id,
-            expected_version=running.version,
-            target_status=ToolExecutionStatus.COMPLETED,
-            result={
-                "publication_id": publication.publication_id,
-                "revision": publication.revision,
-                "status": publication.status,
-                "evidence_bundle_digest": command.evidence_bundle_digest,
-            },
-            result_summary="review publication confirmed",
+            command=command,
+            publication=publication,
         )
-        if completed.status is not ToolExecutionStatus.COMPLETED:
+        if completed is None:
             return _failed_result("tool_result_unknown", step=4)
         return await _published_result(
             spec,
@@ -654,6 +661,46 @@ class MultisourceReviewRuntime:
             publication,
             emit=emit,
         )
+
+    async def _reconcile_publication(
+        self,
+        command: ReviewPublicationCommand,
+    ) -> ReviewPublicationResult | None:
+        try:
+            return await self._publication_store.reconcile(command)
+        except (ToolHandlerError, TimeoutError, OSError):
+            return None
+
+    async def _complete_publication(
+        self,
+        execution: ToolExecution,
+        *,
+        owner_id: str,
+        command: ReviewPublicationCommand,
+        publication: ReviewPublicationResult,
+    ) -> ToolExecution | None:
+        try:
+            completed = await self._tool_execution_store.transition(
+                execution.id,
+                owner_id=owner_id,
+                expected_version=execution.version,
+                target_status=ToolExecutionStatus.COMPLETED,
+                result={
+                    "publication_id": publication.publication_id,
+                    "revision": publication.revision,
+                    "status": publication.status,
+                    "evidence_bundle_digest": command.evidence_bundle_digest,
+                },
+                result_summary="review publication confirmed",
+            )
+        except ConcurrentWriteError:
+            completed = await self._tool_execution_store.get(
+                execution.id,
+                owner_id=owner_id,
+            )
+        if completed is None or completed.status is not ToolExecutionStatus.COMPLETED:
+            return None
+        return completed
 
     async def _settle_approval_failure(
         self,
@@ -680,14 +727,23 @@ class MultisourceReviewRuntime:
         *,
         owner_id: str,
     ) -> ToolExecution:
-        return await self._tool_execution_store.transition(
-            execution.id,
-            owner_id=owner_id,
-            expected_version=execution.version,
-            target_status=ToolExecutionStatus.UNKNOWN,
-            error_code="tool_result_unknown",
-            public_message="Review publication result could not be confirmed",
-        )
+        try:
+            return await self._tool_execution_store.transition(
+                execution.id,
+                owner_id=owner_id,
+                expected_version=execution.version,
+                target_status=ToolExecutionStatus.UNKNOWN,
+                error_code="tool_result_unknown",
+                public_message="Review publication result could not be confirmed",
+            )
+        except ConcurrentWriteError:
+            winner = await self._tool_execution_store.get(
+                execution.id,
+                owner_id=owner_id,
+            )
+            if winner is None:
+                raise
+            return winner
 
 
 def _new_tool_execution(

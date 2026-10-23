@@ -17,6 +17,10 @@ from fastapi.testclient import TestClient
 from psycopg import Error as PsycopgError
 
 from backend.app.agent import RuntimeEvent, RuntimeResult
+from backend.app.advanced.postgres_review_publication import (
+    PostgresReviewPublicationStore,
+)
+from backend.app.advanced.review_publication import ReviewPublicationStore
 from backend.app.application_lifecycle import ApplicationLifecycleState
 from backend.app.container import ApplicationContainer
 from backend.app.main import create_app
@@ -83,6 +87,10 @@ from backend.tests.test_run_lease_store_contract import (
     LEASE_NOW,
     SHORT_LEASE_TTL,
     RunLeaseStoreContract,
+)
+from backend.tests.test_review_publication import (
+    ReviewPublicationStoreContract,
+    _command as review_publication_command,
 )
 from backend.tests.test_tool_execution_store_contract import (
     TOOL_STORE_NOW,
@@ -812,6 +820,45 @@ class PostgresToolExecutionStoreContractTest(
         await self.persistence.close()
 
 
+class PostgresReviewPublicationStoreContractTest(
+    ReviewPublicationStoreContract,
+    unittest.IsolatedAsyncioTestCase,
+):
+    async def create_store(self) -> ReviewPublicationStore:
+        self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+        return PostgresReviewPublicationStore(
+            self.persistence.pool,
+            {
+                ("owner-1", "review-1"): 3,
+                ("owner-2", "review-1"): 8,
+            },
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_raw_owner_and_idempotency_key_are_not_persisted(self) -> None:
+        await self.store.publish(review_publication_command())
+        async with self.persistence.pool.connection() as connection:
+            result = await connection.execute(
+                """
+                SELECT owner_scope_digest,
+                       idempotency_key_digest,
+                       binding_digest,
+                       evidence_bundle_digest
+                FROM review_publications
+                """
+            )
+            row = await result.fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertNotIn("owner-1", tuple(row.values()))
+        self.assertNotIn("a" * 64, tuple(row.values()))
+        self.assertTrue(all(len(value.strip()) == 64 for value in row.values()))
+
+
 class PostgresRunLeaseStoreContractTest(
     RunLeaseStoreContract,
     unittest.IsolatedAsyncioTestCase,
@@ -1077,10 +1124,10 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         first = await apply_postgres_migrations(self.persistence.pool)
         second = await apply_postgres_migrations(self.persistence.pool)
 
-        self.assertEqual((1, 2, 3, 4, 5, 6), first)
+        self.assertEqual((1, 2, 3, 4, 5, 6, 7), first)
         self.assertEqual((), second)
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6],
+            [1, 2, 3, 4, 5, 6, 7],
             await _applied_versions(self.persistence),
         )
 
@@ -1125,7 +1172,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
             approved=True,
         ).value_digest
 
-        self.assertEqual((6,), applied)
+        self.assertEqual((6, 7), applied)
         self.assertEqual(1, len(audit))
         self.assertEqual(0, audit[0].version)
         self.assertEqual(MemoryFactAuditAction.CREATED, audit[0].action)
@@ -1196,7 +1243,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("migration_apply_failed", raised.exception.code)
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6],
+            [1, 2, 3, 4, 5, 6, 7],
             await _applied_versions(self.persistence),
         )
         self.assertIsNone(
@@ -1656,6 +1703,44 @@ class PostgresToolExecutionProcessTest(unittest.IsolatedAsyncioTestCase):
                 "known_replayed": True,
                 "unknown_reconciled": True,
                 "terminal_immutable": True,
+            },
+            recovered,
+        )
+
+
+class PostgresReviewPublicationProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        try:
+            await persistence.setup()
+            await _reset_app_data(persistence)
+            await _reset_approval_memory_data(persistence)
+        finally:
+            await persistence.close()
+
+    async def test_committed_publication_reconciles_after_process_restart(
+        self,
+    ) -> None:
+        prepared = await _run_review_publication_probe(
+            "commit-crash",
+            expected_returncode=17,
+        )
+        recovered = await _run_review_publication_probe(
+            "recover",
+            known_approval_id=prepared["known_approval_id"],
+            missing_approval_id=prepared["missing_approval_id"],
+        )
+
+        self.assertNotEqual(prepared["process_id"], recovered["process_id"])
+        self.assertEqual("commit-crash", prepared["phase"])
+        self.assertEqual(
+            {
+                "phase": "recover",
+                "process_id": recovered["process_id"],
+                "known_completed": True,
+                "known_result_event": True,
+                "missing_unknown": True,
+                "publisher_replayed": False,
             },
             recovered,
         )
@@ -2325,7 +2410,12 @@ async def _reset_app_data(persistence: PostgresPersistence) -> None:
     async with persistence.pool.connection() as connection:
         await connection.execute(
             """
-            TRUNCATE agent_run_events, agent_run_event_sequences, agent_runs
+            TRUNCATE
+                review_publications,
+                review_publication_heads,
+                agent_run_events,
+                agent_run_event_sequences,
+                agent_runs
             CASCADE
             """
         )
@@ -2354,6 +2444,8 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
     async with persistence.pool.connection() as connection:
         await connection.execute(
             """
+            DROP TABLE IF EXISTS review_publications CASCADE;
+            DROP TABLE IF EXISTS review_publication_heads CASCADE;
             DROP TABLE IF EXISTS agent_run_leases CASCADE;
             DROP TABLE IF EXISTS tool_executions CASCADE;
             DROP TABLE IF EXISTS conversation_memory_fact_audit CASCADE;
@@ -2963,6 +3055,77 @@ def _run_tool_execution_probe_sync(
     lines = [line for line in stdout.splitlines() if line]
     if len(lines) != 1:
         raise AssertionError("tool execution probe output is not bounded JSON")
+    return json.loads(lines[0])
+
+
+async def _run_review_publication_probe(
+    phase: str,
+    *,
+    known_approval_id: object | None = None,
+    missing_approval_id: object | None = None,
+    expected_returncode: int = 0,
+) -> dict[str, object]:
+    return await asyncio.to_thread(
+        _run_review_publication_probe_sync,
+        phase,
+        known_approval_id,
+        missing_approval_id,
+        expected_returncode,
+    )
+
+
+def _run_review_publication_probe_sync(
+    phase: str,
+    known_approval_id: object | None,
+    missing_approval_id: object | None,
+    expected_returncode: int,
+) -> dict[str, object]:
+    command = [
+        sys.executable,
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "backend.app.advanced.postgres_review_publication_probe",
+        "--phase",
+        phase,
+    ]
+    if known_approval_id is not None:
+        command.extend(("--known-approval-id", str(known_approval_id)))
+    if missing_approval_id is not None:
+        command.extend(("--missing-approval-id", str(missing_approval_id)))
+    environment = os.environ.copy()
+    environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+    process = subprocess.run(
+        command,
+        cwd=os.getcwd(),
+        env=environment,
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode != expected_returncode:
+        raise AssertionError(
+            "review publication probe failed with code "
+            f"{process.returncode}: "
+            f"{process.stderr.decode('utf-8', errors='replace')}"
+        )
+    if process.stderr:
+        raise AssertionError(
+            "review publication probe wrote stderr: "
+            + process.stderr.decode("utf-8", errors="replace")
+        )
+    stdout = process.stdout.decode("utf-8")
+    for private_value in (
+        "private review publication restart input",
+        "private-review-publication-known-run-idempotency-key",
+        "private-review-publication-missing-run-idempotency-key",
+        "review-probe-owner",
+    ):
+        if private_value in stdout:
+            raise AssertionError("review publication probe exposed private data")
+    lines = [line for line in stdout.splitlines() if line]
+    if len(lines) != 1:
+        raise AssertionError("review publication probe output is not bounded JSON")
     return json.loads(lines[0])
 
 
