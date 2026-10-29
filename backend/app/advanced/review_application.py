@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-from dataclasses import asdict
-from datetime import UTC, datetime
-from uuid import uuid4
 
 from fastapi import FastAPI
 
@@ -12,6 +8,7 @@ from backend.app.advanced.review_runtime import (
     MultisourceReviewRuntime, ReviewRunBinding, ReviewRunCatalog, ReviewRunSpec,
 )
 from backend.app.advanced.review_tools import AsyncReviewToolRegistry
+from backend.app.advanced.review_requests import create_review_run_record
 from backend.app.agent import (
     RuntimeApprovalResume, RuntimeControl, RuntimeEventSink, RuntimeOutcome,
     RuntimeRequest, RuntimeResult,
@@ -38,21 +35,17 @@ class InMemoryReviewRuns:
     async def create(
         self, spec: ReviewRunSpec, *, owner_id: str, idempotency_key: str,
     ) -> CreateRunResult:
-        session_digest = hashlib.sha256(
-            f"review-session-v1:{len(owner_id)}:{owner_id}:{idempotency_key}".encode("utf-8")
-        ).hexdigest()
-        record = RunRecord.create(
-            run_id=str(uuid4()), session_id=f"review-{session_digest}",
-            owner_id=owner_id, runtime="manual", input_text="Review server-owned resources",
-            idempotency_key=idempotency_key, created_at=datetime.now(UTC),
-            request_options=asdict(spec),
-        )
+        record = create_review_run_record(spec, owner_id=owner_id, idempotency_key=idempotency_key)
         async with self._lock:
             created = await self.run_store.create(record)
             self._bindings[created.record.id] = ReviewRunBinding(
                 run_id=created.record.id, owner_id=owner_id, spec=spec,
             )
             return created
+
+    async def resolve(self, run_id: str, *, owner_id: str) -> ReviewRunSpec | None:
+        binding = self._bindings.get(run_id)
+        return binding.spec if binding is not None and binding.owner_id == owner_id else None
 
     def _runtime(self, request: RuntimeRequest) -> MultisourceReviewRuntime | None:
         binding = self._bindings.get(request.run_id)

@@ -21,6 +21,9 @@ from backend.app.advanced.postgres_review_publication import (
     PostgresReviewPublicationStore,
 )
 from backend.app.advanced.review_publication import ReviewPublicationStore
+from backend.app.advanced.postgres_review_requests import PostgresReviewRequestStore
+from backend.tests.test_review_request_store import ReviewRequestStoreContract
+from backend.tests.test_review_runtime import _run_spec as review_request_spec
 from backend.app.application_lifecycle import ApplicationLifecycleState
 from backend.app.container import ApplicationContainer
 from backend.app.main import create_app
@@ -859,6 +862,76 @@ class PostgresReviewPublicationStoreContractTest(
         self.assertTrue(all(len(value.strip()) == 64 for value in row.values()))
 
 
+class PostgresReviewRequestStoreTest(ReviewRequestStoreContract, unittest.IsolatedAsyncioTestCase):
+    async def create_store(self):
+        self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        await self.persistence.setup()
+        await _reset_app_data(self.persistence)
+        return PostgresReviewRequestStore(self.persistence.run_store)
+
+    async def asyncTearDown(self) -> None:
+        await self.persistence.close()
+
+    async def test_reopened_persistence_restores_private_spec(self) -> None:
+        created = await self.store.create(review_request_spec(), owner_id="reviewer-1", idempotency_key="review-request-key")
+        await self.persistence.close()
+        self.persistence = await PostgresPersistence.open(POSTGRES_DSN)
+        await self.persistence.setup()
+        reopened = PostgresReviewRequestStore(self.persistence.run_store)
+        self.assertEqual(review_request_spec(), await reopened.resolve(created.record.id, owner_id="reviewer-1"))
+        replay = await reopened.create(review_request_spec(), owner_id="reviewer-1", idempotency_key="review-request-key")
+        self.assertFalse(replay.created)
+        self.assertEqual(created.record.id, replay.record.id)
+
+    async def test_private_request_survives_two_distinct_processes(self) -> None:
+        def probe(phase, run_id=None):
+            command = [sys.executable, "-X", "utf8", "-B", "-m", "backend.app.advanced.postgres_review_request_probe", "--phase", phase]
+            if run_id is not None:
+                command.extend(("--run-id", run_id))
+            environment = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"}}
+            environment["AI_AGENT_POSTGRES_DSN"] = POSTGRES_DSN
+            result = subprocess.run(command, env=environment, capture_output=True, timeout=30, check=False)
+            self.assertEqual(0, result.returncode, "review request process failed")
+            self.assertEqual(b"", result.stderr)
+            self.assertNotIn(b"private review request topic", result.stdout)
+            self.assertNotIn(b"private-review-request-probe-key", result.stdout)
+            self.assertNotIn(b"request-probe-owner", result.stdout)
+            return json.loads(result.stdout)
+
+        first = await asyncio.to_thread(probe, "create")
+        second = await asyncio.to_thread(probe, "resolve", first["run_id"])
+        self.assertNotEqual(first["process_id"], second["process_id"])
+        self.assertTrue(second["spec_restored"])
+        self.assertTrue(second["same_run_replayed"])
+        self.assertTrue(second["cross_owner_hidden"])
+
+    async def test_failed_spec_insert_rolls_back_run_and_counter(self) -> None:
+        async with self.persistence.pool.connection() as connection:
+            await connection.execute("""
+                CREATE FUNCTION reject_review_request() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'injected review request failure'; END; $$;
+                CREATE TRIGGER reject_review_request BEFORE INSERT ON review_run_requests
+                FOR EACH ROW EXECUTE FUNCTION reject_review_request();
+            """, prepare=False)
+        try:
+            with self.assertRaises(StoreUnavailableError):
+                await self.store.create(review_request_spec(), owner_id="reviewer-1", idempotency_key="review-request-key")
+            async with self.persistence.pool.connection() as connection:
+                for table in ("agent_runs", "agent_run_event_sequences", "review_run_requests"):
+                    result = await connection.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                    self.assertEqual(0, (await result.fetchone())["count"])
+        finally:
+            async with self.persistence.pool.connection() as connection:
+                await connection.execute("DROP TRIGGER reject_review_request ON review_run_requests; DROP FUNCTION reject_review_request();", prepare=False)
+
+    async def test_modified_spec_is_rejected_by_request_digest(self) -> None:
+        created = await self.store.create(review_request_spec(), owner_id="reviewer-1", idempotency_key="review-request-key")
+        async with self.persistence.pool.connection() as connection:
+            await connection.execute("UPDATE review_run_requests SET requested_decision = 'reject' WHERE run_id = %s", (created.record.id,))
+        with self.assertRaises(StoreUnavailableError):
+            await self.store.resolve(created.record.id, owner_id="reviewer-1")
+
+
 class PostgresRunLeaseStoreContractTest(
     RunLeaseStoreContract,
     unittest.IsolatedAsyncioTestCase,
@@ -1124,10 +1197,10 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
         first = await apply_postgres_migrations(self.persistence.pool)
         second = await apply_postgres_migrations(self.persistence.pool)
 
-        self.assertEqual((1, 2, 3, 4, 5, 6, 7), first)
+        self.assertEqual((1, 2, 3, 4, 5, 6, 7, 8), first)
         self.assertEqual((), second)
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6, 7],
+            [1, 2, 3, 4, 5, 6, 7, 8],
             await _applied_versions(self.persistence),
         )
 
@@ -1172,7 +1245,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
             approved=True,
         ).value_digest
 
-        self.assertEqual((6, 7), applied)
+        self.assertEqual((6, 7, 8), applied)
         self.assertEqual(1, len(audit))
         self.assertEqual(0, audit[0].version)
         self.assertEqual(MemoryFactAuditAction.CREATED, audit[0].action)
@@ -1243,7 +1316,7 @@ class PostgresMigrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("migration_apply_failed", raised.exception.code)
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6, 7],
+            [1, 2, 3, 4, 5, 6, 7, 8],
             await _applied_versions(self.persistence),
         )
         self.assertIsNone(
@@ -2445,6 +2518,7 @@ async def _drop_app_schema(persistence: PostgresPersistence) -> None:
         await connection.execute(
             """
             DROP TABLE IF EXISTS review_publications CASCADE;
+            DROP TABLE IF EXISTS review_run_requests CASCADE;
             DROP TABLE IF EXISTS review_publication_heads CASCADE;
             DROP TABLE IF EXISTS agent_run_leases CASCADE;
             DROP TABLE IF EXISTS tool_executions CASCADE;

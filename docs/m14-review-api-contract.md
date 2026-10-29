@@ -50,9 +50,10 @@ trust/status 与有界 citation_refs。投影不回显图片/OCR、网页、RAG 
 同一 owner/key/六字段重放返回原 Run，任一业务字段变化 409。资源存在性由 owner-scoped 工具目录
 检查，缺资产 Run 安全失败。创建后使用返回的 id 查询、订阅 SSE、提交审批；无需另建第二条执行链。
 
-spec 仅存在进程内，只写 digest 到 durable Run，原始 spec 未写入事件或 answer。PostgreSQL 创建、
-跨进程可信 Run spec 恢复、async approval 和 Vue 接线仍待实现，不能用 publication adapter 的持久化
-证据推断该 factory 可跨进程恢复。下一步先完成这些后端接线，再接 Vue 创建/证据/审批视图。
+当前 HTTP factory 的 spec 仍在进程内。ADR-0045 和 migration 8 已另行提供私有 PostgreSQL request
+Store，将 Run、counter、六字段 spec 原子创建，并通过两个独立 PID 验证 resolve/replay。原始 spec
+不进入事件或 answer。该 Store 尚未接 HTTP factory；async approval、完整 PostgreSQL composition 和
+Vue 仍待实现。下一步先完成后端接线，再接 Vue 创建/证据/审批视图。
 
 真实业务映射：审核页面刷新后通过 snapshot 恢复证据和结论，SSE 负责增量展示。常见错误是把 completed
 等同 published，或用当前网页重新拼历史 evidence。排查时核对同 Run 事件、bundle digest 与既有错误码。

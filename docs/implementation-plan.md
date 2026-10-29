@@ -1321,6 +1321,15 @@ Snapshot HTTP 纵切（2026-10-29）：
 - factory 限内存；跨进程 spec 持久化与 async approval 接线须后续验证，不将 publication 持久化
   等同完整 PostgreSQL 创建链。下一步先补该后端缺口，再接 Vue 与部署。
 
+私有 review spec 原子存储（2026-10-29）：
+
+- ADR-0045/migration 8 将 Run、counter 和私有 spec 原子创建，复用 PostgresRunStore 同 connection
+  create 逻辑及原有 request digest；不将控制面放入 input_text 或公开事件。
+- 共享 memory/PostgreSQL request 合同、失败回滚、摘要一致性及两个独立 PID 恢复已验证；完整真实
+  PostgreSQL 129/129、相关离线 128/128 通过，见 `V-20261029-003`。
+- Store 尚未接完整应用；下一步将 async spec resolve 与 async approval 接入 opt-in PostgreSQL
+  HTTP composition，再进入 Vue。不得把单独 request/publication 持久化声称成完整应用恢复。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

@@ -289,66 +289,74 @@ class PostgresRunStore:
         try:
             async with self._pool.connection() as connection:
                 async with connection.transaction():
-                    result = await connection.execute(
-                        f"""
-                        INSERT INTO agent_runs ({_RUN_COLUMNS})
-                        VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                        )
-                        ON CONFLICT DO NOTHING
-                        RETURNING {_RUN_COLUMNS}
-                        """,
-                        _run_parameters(record),
-                    )
-                    row = await result.fetchone()
-                    if row is not None:
-                        await connection.execute(
-                            """
-                            INSERT INTO agent_run_event_sequences (
-                                run_id,
-                                next_sequence
-                            ) VALUES (%s, 1)
-                            """,
-                            (record.id,),
-                        )
-                        return CreateRunResult(
-                            record=_row_to_run(row),
-                            created=True,
-                        )
-
-                    existing_result = await connection.execute(
-                        f"""
-                        SELECT {_RUN_COLUMNS}
-                        FROM agent_runs
-                        WHERE owner_id = %s
-                          AND idempotency_key_digest = %s
-                        """,
-                        (record.owner_id, record.idempotency_key_digest),
-                    )
-                    existing = await existing_result.fetchone()
-                    if existing is not None:
-                        existing_record = _row_to_run(existing)
-                        if existing_record.request_digest != record.request_digest:
-                            raise IdempotencyConflictError()
-                        return CreateRunResult(
-                            record=existing_record,
-                            created=False,
-                        )
-
-                    id_result = await connection.execute(
-                        "SELECT 1 FROM agent_runs WHERE id = %s",
-                        (record.id,),
-                    )
-                    if await id_result.fetchone() is not None:
-                        raise RunConflictError()
-                    raise StoreUnavailableError()
+                    return await self._create_on_connection(connection, record)
         except StoreError:
             raise
         except asyncio.CancelledError:
             raise
         except PsycopgError:
             raise StoreUnavailableError() from None
+
+    async def _create_on_connection(
+        self,
+        connection: AsyncConnection[DictRow],
+        record: RunRecord,
+    ) -> CreateRunResult:
+        """Share Run creation inside a caller-owned application transaction."""
+        result = await connection.execute(
+            f"""
+            INSERT INTO agent_runs ({_RUN_COLUMNS})
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            ON CONFLICT DO NOTHING
+            RETURNING {_RUN_COLUMNS}
+            """,
+            _run_parameters(record),
+        )
+        row = await result.fetchone()
+        if row is not None:
+            await connection.execute(
+                """
+                INSERT INTO agent_run_event_sequences (
+                    run_id,
+                    next_sequence
+                ) VALUES (%s, 1)
+                """,
+                (record.id,),
+            )
+            return CreateRunResult(
+                record=_row_to_run(row),
+                created=True,
+            )
+
+        existing_result = await connection.execute(
+            f"""
+            SELECT {_RUN_COLUMNS}
+            FROM agent_runs
+            WHERE owner_id = %s
+              AND idempotency_key_digest = %s
+            """,
+            (record.owner_id, record.idempotency_key_digest),
+        )
+        existing = await existing_result.fetchone()
+        if existing is not None:
+            existing_record = _row_to_run(existing)
+            if existing_record.request_digest != record.request_digest:
+                raise IdempotencyConflictError()
+            return CreateRunResult(
+                record=existing_record,
+                created=False,
+            )
+
+        id_result = await connection.execute(
+            "SELECT 1 FROM agent_runs WHERE id = %s",
+            (record.id,),
+        )
+        if await id_result.fetchone() is not None:
+            raise RunConflictError()
+        raise StoreUnavailableError()
 
     async def get(
         self,

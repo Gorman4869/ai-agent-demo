@@ -5297,3 +5297,39 @@ HTTP 用例的 Vision/RAG/Browser 均进入真实领域适配器；Vision 为 Of
 publication 旧证据不能替代完整 PostgreSQL 应用创建链。Vue、部署、全仓发布门均未验证。
 - 补全公开类型标注并隔离默认 app 测试环境后，创建专项最终 6/6 通过，0.400s；退出 0。
 - 收尾 continuity 退出 0：52 个稳定任务、193 个 Markdown；diff 检查退出 0。
+
+## V-20261029-003：M14-T6 私有 review request 原子持久化
+
+- 日期 2026-10-29，Asia/Shanghai；计划 2.0；任务 M14-T6 / in_progress；base HEAD `aed032f`。
+- A 类事务/幂等/私有控制面 + C 类本机 PostgreSQL。开始工作树干净；本原子步骤完成 spec 存储，
+  完整 PostgreSQL async approval/composition 接线仍待后续步骤。
+- 恢复读取 status/playbook/plan/ADR-0044/最新 handoff/verification/后端规约和实际相关代码。
+- 延续 backend-code-adapter：显式 SQL、窄 Store、稳定错误和 dataclass。未使用在线 Key/Provider、
+  未安装依赖、未运行 Chromium、未改学习者进度或 push。
+
+| 命令/检查 | 退出码 | 实际结果 |
+| --- | ---: | --- |
+| `python -B -m unittest backend.tests.test_review_application backend.tests.test_review_projection backend.tests.test_review_runtime backend.tests.test_persistent_run_api -q`（沙箱外） | 0 | 恢复 43/43，1.093s |
+| `python -B -m unittest backend.tests.test_review_request_store backend.tests.test_review_application -q`（沙箱外） | 0 | 内存 request 合同和 HTTP 创建 10/10，0.397s |
+| `docker compose -f deploy/compose.integration.yaml ps`（沙箱外） | 0 | 既有 integration PostgreSQL healthy，仅 127.0.0.1:55433；未 pull/启动新容器 |
+| `python -X utf8 -B -m unittest backend.tests.postgres_store_integration.PostgresReviewRequestStoreTest backend.tests.postgres_store_integration.PostgresMigrationTest backend.tests.postgres_store_integration.PostgresRunStoreContractTest -q` | 0 | 本机 trust/tmpfs DSN，40/40，4.850s |
+| 加入双进程恢复后的 `PostgresReviewRequestStoreTest -q` | 0 | 8/8，4.822s；两个 PID 恢复相同 spec/同 Run，跨 owner 隐藏，输出无私有 topic/key/owner |
+| `python -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.postgres_store_integration -q` | 0 | migration 1–8 与完整 PostgreSQL 回归 129/129，44.670s；既有不可达数据库负向用例保留一条 connection timeout |
+| `python -B -m unittest backend.tests.test_review_request_store backend.tests.test_review_application backend.tests.test_review_tools backend.tests.test_review_projection backend.tests.test_durable_run_projection backend.tests.test_review_runtime backend.tests.test_review_publication backend.tests.test_persistent_run_api backend.tests.test_container backend.tests.test_run_store_contract -q` | 0 | 相关离线回归 128/128，1.893s |
+| `python -B -m compileall -q`（新增 requests、PostgreSQL adapter/probe、review application、postgres Store 与关联测试） | 0 | 语法通过 |
+| `git diff --check` | 0 | 无 whitespace error，既有 LF/CRLF 提示 |
+
+PostgreSQL 命令仅在子进程注入 `AI_AGENT_TEST_POSTGRES_DSN` 指向仓库既有 integration 库，经沙箱外
+执行授权。测试保留 Starlette TestClient deprecation 和 asyncio slow-task 提示；没有业务断言失败。
+
+### 结论与边界
+
+- migration 8 新增私有 `review_run_requests`。复用 PostgresRunStore 内部同 connection 的 create 逻辑，
+  Run + event counter + spec 在一个事务提交；注入 spec INSERT 失败后这三表均为零行。
+- 创建继续使用既有 owner/key request digest。共享内存/PostgreSQL 合同验证同键重放、六字段冲突、
+  owner 隔离及并发单 winner；resolve 从 owned Run 关联读取，重新计算请求摘要核对私有 spec 和 Run。
+- 两个独立 Python 进程与 pool close/reopen 均恢复相同 spec。该证据仅证明私有请求可恢复，不能描述为
+  完整 PostgreSQL HTTP 创建/审批链；未进行 backend hard-kill、生产部署、Provider 或 HA 验证。
+- ADR-0045 记录原子私有 spec 存储取舍。默认 Container/API 仍使用既有内存 factory，async approval、
+  PostgreSQL Runtime factory 与 HTTP 接线尚未完成；KI-034 保持 open，KI-035 未改。
+- 收尾 continuity 退出 0：52 个稳定任务、195 个 Markdown；最终 `git diff --check` 退出 0。
