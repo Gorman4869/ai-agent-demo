@@ -5482,3 +5482,50 @@ Starlette TestClient deprecation 继续保留，未为该 warning 安装新依�
   不把个人学习验收写入工程完成结论。KI-035等既有缺口未改。
 - 收尾continuity退出0：52个稳定任务、204个Markdown；最终diff检查退出0。针对当前架构/脚本/阶段/
   status的旧持久化、上传和重编码声明检索无命中（rg退出1表示未匹配，不是验证失败）。
+
+## V-20261029-008：M14-T6 工程演练与交付核对
+
+- 日期2026-10-29，Asia/Shanghai；计划2.0；base HEAD `9469c11`，初始Git干净。A类工程验收+C类
+  本地PG/Chromium门；延续ADR-0044–0047，不改运行代码、依赖、原演示脚本或个人progress。
+- Python3.12.10、Node22.16.0、npm10.9.2、PowerShell7.6.5、Docker Engine29.3.1；PG使用已有缓存镜像。
+- 本轮实际执行脚本中的自动工程步骤与材料核对；20分钟是讲解预算，没有模拟真人演讲或录制视频。
+
+| 命令/检查 | 退出码 | 实际结果 |
+| --- | ---: | --- |
+| `python -B -m unittest backend.tests.test_review_demo backend.tests.test_review_application backend.tests.test_review_projection backend.tests.test_deployment_contract -q` | 0 | 恢复25/25，0.680s |
+| `python -B -m unittest backend.tests.test_review_tools backend.tests.test_review_runtime backend.tests.test_review_publication backend.tests.test_review_request_store backend.tests.test_advanced_agent_eval -q` | 0 | 定向56/56，0.817s；含脚本的UNKNOWN不重放、换evidence不可复用审批、拒绝/过期/冲突/取消与并发合同 |
+| `npm.cmd run test:unit`（frontend） | 0 | 15/15，3.81s；只用既有依赖 |
+| `.\node_modules\.bin\playwright.cmd test --config playwright.review.config.ts`（frontend） | 0 | 内存审查1/1，12.2s；三源、刷新、批准、published、390px无横向溢出 |
+| `.\node_modules\.bin\playwright.cmd test --config playwright.config.ts`（frontend） | 0 | 原研究页2/2，8.6s；SSE断线/刷新与审批拒绝恢复 |
+| `python -B -m backend.app.evals.advanced_agent` | 0 | 默认offline 7/7预期、3/7 completed、4/4安全、1/7需审批fixture、9步 |
+| `python -B -m backend.app.evals.advanced_agent --browser-driver playwright-fixture` | 0 | 相同7案例/digest/指标；Browser正常案例进入真实Chromium，Vision仍离线 |
+| `.\scripts\verify-review-deployment.ps1` | 0 | project `ai-agent-demo-m14-29400-e695ffc4`；vue-tsc/Vite build通过，22 modules/525ms；组合E2E1/1，32.3s（case29.6s）；SQL全部通过 |
+| `view_image`与清理后只读Docker/端口检查 | 0 | PG发布图与390px内存图已检查；无M14容器/卷/网络遗留，7个本轮端口无监听，原两个PG容器healthy |
+
+### 实际链与九类产物核对
+
+- 批准PG Run为 `5e546f64-481c-4834-9a08-f5a368824dc1`（SSE计划断开日志/截图前缀一致）；完整ID在两次
+  后端进程重启前后由E2E比较，review投影不变。三个来源来自同Run，已发布revision2，重复审批409。
+- 第二PG Run单独执行人工拒绝分支，刷新保持needs_attention/无publication。SQL确认迁移8、私有spec2、
+  publication1、head revision2、completed publish execution1、evidence events6。两个Run不拼接为一次审查。
+- 内存演示独立Run/Store，刷新后仍三源与版本2；不拿内存链证明进程重启。PG和内存图片中的相同合成
+  publication ID来自确定性业务key，不能跨这两个独立Store计算发布次数；数据库计数是PG写入事实。
+- 两档固定评测dataset digest均为 `a5a2ef030139ded150bcf823fb991a3da0b558e72401397b7040c7b433ec47f8`；
+  usage/Token/币种/费用均null。7/7是预期匹配，不是任务全部成功；1/7不是实测人员工时。
+- 九类交付：场景/四工具、架构图、可复现本机PG部署、演示视频脚本、评测、unknown成本报告、威胁表、
+  实际故障复盘、迁移/撤回说明均有对应实现/文档/验证，见m14-portfolio-report索引；没有新增生产承诺。
+- 聚焦复审再次核对Run/spec原子创建、owner/角色、三源bundle、精确审批、ToolExecution/revision CAS、
+  UNKNOWN权威对账与legacy兼容。原研究E2E通过不等于全仓legacy RAG通过；KI-035保持open。
+- 无新增业务失败。保留既有Starlette/httpx弃用、NO_COLOR/FORCE_COLOR提示；重开后端引发的SSE
+  ECONNRESET为预期注入，后续snapshot/SSE恢复。脚本清理仅操作本次project与临时secret文件。
+
+### 结论与范围
+
+- M14-T6工程范围达到verified，KI-034关闭；工程完成不代替学习者个人部署/答辩、视频录制或accepted。
+- 本轮没有新依赖、镜像拉取、Provider/Key使用、价格/配额查询、个人progress修改或push。
+  未重跑完整PG套件/全仓门/完整M13镜像；无PG重启、进行中工具hard-kill、HA、生产身份或在线视觉质量新证据。
+- 收尾依赖预检登记KI-037：T7依赖写为“M8–M14所有任务”，与T8依赖T7形成字面循环；M11-T8尚未
+  交付、M8在线门仍code_complete。未改已发布依赖合同，也没有直接开始T7/代替全课程验收。
+- 收尾continuity本身通过，外层首次误用 `$LASTEXITCODE` 检查PowerShell脚本导致抛异常；该脚本成功
+  不设置native退出码，改用即时 `$?` 后整条检查退出0。不是业务或continuity失败，原脚本无需修改。
+- 最终continuity：52个稳定任务、205个Markdown，链接通过；diff检查退出0，只有既有LF/CRLF提示。

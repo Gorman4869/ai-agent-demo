@@ -37,9 +37,10 @@
 | KI-031 | low | closed | M14 连续性 | Git 已存在 M14-T3 实现提交 `cb6714f`，其文件范围与 `V-20260902-001`、`ADR-0042` 和 M14-T3 handoff 一致；但动态 `status.md` 的最近实现锚点仍停在 `e165646`，旧 handoff 仍按创建时事实写“提交尚未创建” | `V-20261020-001`：保留旧 handoff 不改写，在 M14-T4 动态 status 和新 handoff 中补记 `cb6714f`，并以连续性检查确认恢复锚点一致 |
 | KI-032 | medium | closed | M14 | M14-T4 首次单次授权尝试在 SDK client 构造阶段被 SOCKS5 `ALL_PROXY` 与缺失 `socksio` 阻断；部分初始化的 httpx wrapper 清理时把内部 `AttributeError` 写到 stderr，违反 CLI 只输出稳定错误的目标 | `V-20261020-002`：离线 dummy Key 构造复现 `ImportError`；CLI 新增 SOCKS scheme/依赖预检，在 SDK 构造前以内容无关配置错误 65 拒绝。37 项相关回归通过；未安装依赖、未改全局代理、未重试在线请求 |
 | KI-033 | medium | closed | M14 | MiniMax 国内 Chat Completions 文档未声明 `response_format/json_schema`；adapter 通过固定 JSON prompt 与本地 Pydantic 严格解析 fail closed。用户已确认 Key 为 M Plan，独立 billing mode 拒绝普通按量现金费率/上限，只记录响应 Token usage且不额外查询套餐余量 | `V-20261020-003/004/005`、`ADR-0043`：离线 119 项通过；唯一授权的真实 `MiniMax-M3` 请求返回严格结构化观察、视觉文字、`479/43/522` usage 与安全边界。单次 E4 已满足；格式长期稳定性、生产容量和通用硬成本门不由本问题关闭 |
-| KI-034 | high | open | M14 | 四工具、同Run审批/持久化、API/UI、本机PG/Chromium组合部署及作品集架构/脚本/报告已整合；旧架构/M6脚本、上传/PNG重编码与M7链接漂移已修正。剩余T6工程演练和最终交付核对；完整Linux镜像/生产身份不在现有证据内 | `ADR-0044–0047`、`V-20261029-006/007`；T6材料与演练验收后方可关闭，个人学习不由工程状态代填 |
+| KI-034 | high | closed | M14 | 同Run真实四工具、持久审批/幂等发布、API/UI、本机PG/Chromium组合与九类作品集材料均经工程演练；旧架构/脚本/PNG与阶段链接漂移已修正。完整Linux镜像、生产身份与个人答辩仍按明确边界保留 | `ADR-0044–0047`、`V-20261029-006/007/008`：81项后端、15项前端、4项UI E2E、两档固定评测、九类材料及清理通过；关闭的是T6工程缺口，不代填个人学习 |
 | KI-035 | medium | open | legacy RAG | 扩大回归时 `test_api.ApiTest.test_index_document_and_research_with_citation` 的 approved 断言失败；以 HEAD `10bec14` 的 schemas/main 在进程内复跑仍相同失败，与新增 review snapshot 无关 | `V-20261029-001`：保留既有失败，后续独立核对 learner research_workflow 阈值与 API 夹具；本任务未修改学习者代码 |
 | KI-036 | low | closed | M14连续性 | 已有8条app migration，旧M13脚本仍按6条检查；API合同亦残留Vue待实现的过期陈述。本轮先登记漂移，再同步期望值与说明 | `V-20261029-006`：真实组合数据库8条migration、现有UI链通过；旧脚本语法/部署合同检查通过，但未重跑完整M13容器门 |
+| KI-037 | medium | open | M14计划依赖 | T7依赖文字为“M8–M14所有任务达到门槛”，与T8依赖T7形成字面循环；另有M11-T8未交付、M8在线门code_complete。T6通过不能代替这些前置条件 | `V-20261029-008`：按实施计划T7/T8与当前status登记；下一步只读核对前置范围及未完成项，不静默改合同或直接启动终审 |
 
 ## 状态值
 

@@ -32,13 +32,17 @@
 | --- | --- | --- |
 | 场景与四工具 | 本报告、[ADR-0044](continuity/decisions/ADR-0044-multisource-review-portfolio-contract.md) | V-20261021-005/006、V-20261022-001：同Run证据、精确审批与发布仲裁 |
 | 架构与所有权 | [架构图](capstone-architecture.md)、[私有request ADR](continuity/decisions/ADR-0045-private-review-request-storage.md) | V-20261029-003/004：Run/spec原子创建与PG应用重开恢复 |
-| 可复现部署 | [部署命令](m14-review-deployment.md)、[ADR-0047](continuity/decisions/ADR-0047-loopback-postgres-review-deployment.md) | V-20261029-006：Vue dist+本机后端/Chromium+PG容器；两次后端进程重启 |
+| 可复现部署 | [部署命令](m14-review-deployment.md)、[ADR-0047](continuity/decisions/ADR-0047-loopback-postgres-review-deployment.md) | V-20261029-006/008：Vue dist+本机后端/Chromium+PG容器；两次后端进程重启 |
 | 演示视频脚本 | [20分钟流程](capstone-demo-script.md) | 提供录制步骤和预期，不冒充已有视频、真人答辩或本轮重新执行的录屏 |
 | 固定评测 | [M14-T5报告](m14-advanced-agent-evaluation.md) | V-20261021-001/002：同dataset的offline/Playwright fixture对照 |
 | 成本 | 下节的范围/公式/已知覆盖率 | V-20261020-005：独立单次M Plan usage；当前review usage仍unknown |
 | 威胁模型 | 下节的输入、控制面和副作用表 | test_review_tools/runtime/projection与ADR-0040–0047；不扩大为公网审计 |
 | 故障复盘 | 下节的Windows启动与重启恢复 | V-20261029-006：失败尝试、根因、最小修正和复验均保留 |
 | 迁移说明 | 下节的研究助手→审查助手清单 | [M12迁移合同](m12-api-migration.md)、六字段create与可空review投影 |
+
+工程演练记录为V-20261029-008：重新执行了审查合同、Vue单元/浏览器、PG组合与两档固定评测，
+对应同Run发布、重复审批拒绝、人工拒绝及UNKNOWN合同。具体命令、通过数、Run归属、清理与未运行
+范围只记录在verification log，不把本报告或脚本当成真人演讲、已有视频或个人通关证据。
 
 关键可复现门如下，均从仓库根目录运行；只需现有依赖：
 

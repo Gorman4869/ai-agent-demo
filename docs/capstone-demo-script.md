@@ -12,7 +12,7 @@
 4. 先预测正常与拒绝/unknown的结果，再执行。准备一张空白记录表：本段Run ID、来源数、审批结果、
    publication ID/revision、对应V编号；不记录原始capability、幂等键或私有topic。
 5. 恢复最小门可运行25项审查/投影/部署合同测试，命令见[最近交接](continuity/handoffs/2026-10-29-m14-t6-postgres-review-deployment.md)。
-   不把本轮纯文档检查说成新一轮PG/Browser实证，也不为录制重复运行全仓。
+   不把准备材料时的纯文档检查说成新一轮PG/Browser实证，也不为录制重复运行全仓。
 
 交互段使用内存入口，在仓库根目录的两个PowerShell终端运行：
 
