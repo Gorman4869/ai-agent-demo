@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, parseFrame, streamDurableRun } from '../../src/services/agentApi'
+import { ApiError, createReviewRun, parseFrame, streamDurableRun } from '../../src/services/agentApi'
 
 const runId = 'run-unit-1'
 
@@ -9,6 +9,24 @@ afterEach(() => {
 })
 
 describe('durable SSE parser', () => {
+  it('submits only review fields and an idempotency header without a bearer secret', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetch)
+    const request = { review_id: 'demo-review', expected_revision: 1, image_asset_id: 'demo-image', policy_topic: 'review disclosure', page_fixture_id: 'demo-page', requested_decision: 'approve' as const }
+    await createReviewRun(request, 'review-key')
+    expect(fetch).toHaveBeenCalledWith('/api/durable/reviews', expect.objectContaining({
+      method: 'POST', body: JSON.stringify(request),
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'review-key' },
+    }))
+  })
+
+  it('parses reviewed evidence and rejects an invalid source kind', () => {
+    const evidence = { schema: 'review-evidence-v1', review_id: 'demo-review', source_kind: 'image', source_ref: 'demo-image', content_sha256: 'a'.repeat(64), content_bytes: 100, trust: 'untrusted_visual_data', status: 'verified' }
+    expect(parseFrame(frame('review.evidence.recorded', 1, evidence))).toMatchObject({
+      type: 'review.evidence.recorded', data: { data: { source_kind: 'image', citation_refs: [] } },
+    })
+    expect(() => parseFrame(frame('review.evidence.recorded', 1, { ...evidence, source_kind: 'system' }))).toThrow()
+  })
   it('parses one typed event and ignores comment-only frames', () => {
     expect(parseFrame(': keep-alive')).toBeNull()
 

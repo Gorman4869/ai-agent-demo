@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AgentEvent } from '../types/agent'
 
-defineProps<{ events: AgentEvent[] }>()
+defineProps<{ events: AgentEvent[]; lastSequence?: number }>()
 
 const eventLabels: Record<string, string> = {
   'run.started': '运行已启动',
@@ -9,6 +9,8 @@ const eventLabels: Record<string, string> = {
   'run.waiting_approval': '等待工具审批',
   'context.failed': '上下文准备失败',
   'rag.citations': '检索引用已固定',
+  'review.evidence.recorded': '审查证据已记录',
+  'review.result': '审查结果已确认',
   'model.output.delta': '模型输出片段',
   'model.usage': '模型用量已报告',
   'tool.started': '工具开始执行',
@@ -26,7 +28,7 @@ function eventName(event: AgentEvent): string {
 
 <template>
   <ol class="timeline" aria-label="Agent 运行事件" aria-live="polite">
-    <li v-if="events.length === 0" class="timeline__empty">事件流将在这里留下可审计足迹。</li>
+    <li v-if="events.length === 0" class="timeline__empty">{{ lastSequence ? `已从快照恢复至事件 #${lastSequence}；后续事件将在这里显示。` : '事件流将在这里留下可审计足迹。' }}</li>
     <li v-for="event in events" :key="`${event.data.run_id}-${event.data.sequence}`" class="timeline__item">
       <span class="timeline__marker" aria-hidden="true"></span>
       <div>

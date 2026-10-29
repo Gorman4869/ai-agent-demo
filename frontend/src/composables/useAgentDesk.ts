@@ -5,6 +5,7 @@ import {
   ApiError,
   cancelDurableRun,
   createDurableRun,
+  createReviewRun,
   createIdempotencyKey,
   getDurableRun,
   resolveDurableApproval,
@@ -19,6 +20,8 @@ import {
   type ModelUsage,
   type PendingApproval,
   type RunStatus,
+  type ReviewRunRequest,
+  type ReviewSnapshot,
 } from '../types/agent'
 
 const recoveryStorageKey = 'ai-agent-demo:durable-run:v1'
@@ -32,6 +35,7 @@ interface RecoveryState {
   sequence: number
   status: DurableRunStatus
   approval: PendingApproval | null
+  mode?: 'research' | 'review'
 }
 
 export function useAgentDesk() {
@@ -47,6 +51,8 @@ export function useAgentDesk() {
   const events = shallowRef<AgentEvent[]>([])
   const evidence = shallowRef<Evidence[]>([])
   const usage = shallowRef<ModelUsage | null>(null)
+  const review = shallowRef<ReviewSnapshot | null>(null)
+  const mode = ref<'research' | 'review'>('research')
   const approval = shallowRef<PendingApproval | null>(null)
   const isKnowledgeReady = ref(false)
   const isPreparingKnowledge = ref(false)
@@ -55,10 +61,8 @@ export function useAgentDesk() {
   let streamController: AbortController | null = null
   let outputSegment: number | null = null
 
-  const canRun = computed(
-    () => question.value.trim().length > 0
-      && !['connecting', 'queued', 'running', 'waiting_approval'].includes(status.value),
-  )
+  const isBusy = computed(() => ['connecting', 'queued', 'running', 'waiting_approval'].includes(status.value))
+  const canRun = computed(() => (mode.value === 'review' || question.value.trim().length > 0) && !isBusy.value)
   const canCancel = computed(
     () => ['queued', 'running', 'waiting_approval'].includes(status.value) && !isCancelling.value,
   )
@@ -104,6 +108,16 @@ export function useAgentDesk() {
   }
 
   async function run(): Promise<void> {
+    mode.value = 'research'
+    await startRun()
+  }
+
+  async function runReview(request: ReviewRunRequest): Promise<void> {
+    mode.value = 'review'
+    await startRun(request)
+  }
+
+  async function startRun(reviewRequest?: ReviewRunRequest): Promise<void> {
     if (!canRun.value) return
     disconnectStream()
     resetPresentation()
@@ -115,7 +129,7 @@ export function useAgentDesk() {
     sequence.value = 0
 
     try {
-      const snapshot = await createDurableRun(
+      const snapshot = reviewRequest ? await createReviewRun(reviewRequest, idempotencyKey) : await createDurableRun(
         activeQuestion,
         sessionId.value,
         capability.value,
@@ -235,6 +249,7 @@ export function useAgentDesk() {
       critique.value = '正在执行同一持久 Run'
     } else if (event.type === 'run.waiting_approval') {
       status.value = 'waiting_approval'
+      if (review.value) review.value = { ...review.value, outcome: 'waiting_approval' }
       approval.value = {
         approvalId: event.data.data.approval_id,
         toolName: event.data.data.tool_name,
@@ -245,6 +260,14 @@ export function useAgentDesk() {
       applyOutputDelta(event.data.data.delta, event.data.data.segment)
     } else if (event.type === 'rag.citations') {
       evidence.value = event.data.data.citations
+    } else if (event.type === 'review.evidence.recorded') {
+      const { review_id, ...record } = event.data.data
+      review.value = {
+        scenario_version: 'multisource-review-v1', review_id, outcome: 'in_progress',
+        evidence: [...(review.value?.evidence ?? []), record], evidence_bundle_digest: null,
+        publication: null,
+        usage: { provider: null, total_tokens: null, estimated_cost: null, currency: null, cost_source: 'unknown' },
+      }
     } else if (event.type === 'model.usage') {
       usage.value = event.data.data
     } else if (event.type === 'run.completed') {
@@ -271,6 +294,8 @@ export function useAgentDesk() {
     answer.value = snapshot.answer ?? answer.value
     evidence.value = snapshot.citations
     usage.value = snapshot.usage
+    review.value = snapshot.review ?? null
+    if (review.value) mode.value = 'review'
     error.value = snapshot.error?.code ?? ''
     if (snapshot.status !== 'waiting_approval') approval.value = null
     if (snapshot.status === 'queued') critique.value = 'Run 已创建，等待执行'
@@ -302,6 +327,7 @@ export function useAgentDesk() {
     events.value = []
     evidence.value = []
     usage.value = null
+    review.value = null
     approval.value = null
     outputSegment = null
   }
@@ -324,6 +350,7 @@ export function useAgentDesk() {
     sequence.value = recovered.sequence
     approval.value = recovered.approval
     status.value = recovered.status
+    mode.value = recovered.mode ?? 'research'
   }
 
   function saveRecovery(): void {
@@ -342,6 +369,7 @@ export function useAgentDesk() {
       sequence: sequence.value,
       status: status.value,
       approval: approval.value,
+      mode: mode.value,
     }
     try {
       window.sessionStorage.setItem(recoveryStorageKey, JSON.stringify(recovery))
@@ -407,6 +435,10 @@ export function useAgentDesk() {
     sessionId,
     status,
     usage,
+    isBusy,
+    review,
+    mode,
+    runReview,
   }
 }
 
@@ -425,6 +457,7 @@ function isRecoveryState(value: unknown): value is RecoveryState {
     && record.sequence >= 0
     && isDurableStatus(record.status)
     && isPendingApproval(record.approval)
+    && (record.mode === undefined || record.mode === 'research' || record.mode === 'review')
 }
 
 function isDurableStatus(value: unknown): value is DurableRunStatus {

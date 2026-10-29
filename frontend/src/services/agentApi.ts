@@ -4,6 +4,7 @@ import type {
   DurableRun,
   Evidence,
   ModelUsage,
+  ReviewRunRequest,
 } from '../types/agent'
 
 export class ApiError extends Error {
@@ -37,6 +38,14 @@ export async function createDurableRun(
 export async function getDurableRun(runId: string, capability: string): Promise<DurableRun> {
   return requestJson<DurableRun>(`/api/durable/runs/${encodeURIComponent(runId)}`, {
     headers: durableHeaders(capability),
+  })
+}
+
+export async function createReviewRun(request: ReviewRunRequest, idempotencyKey: string): Promise<DurableRun> {
+  return requestJson<DurableRun>('/api/durable/reviews', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(request),
   })
 }
 
@@ -270,6 +279,21 @@ function createAgentEvent(
       return { type, data: withData({ code: requiredString(data.code) }), receivedAt }
     case 'rag.citations':
       return { type, data: withData({ citations: parseEvidence(data.citations) }), receivedAt }
+    case 'review.evidence.recorded': {
+      const kind = data.source_kind
+      const status = data.status
+      if (data.schema !== 'review-evidence-v1'
+        || (kind !== 'image' && kind !== 'policy' && kind !== 'page')
+        || (status !== 'verified' && status !== 'degraded')) throw invalidEvent()
+      const refs = data.citation_refs ?? []
+      if (!Array.isArray(refs) || refs.length > 3) throw invalidEvent()
+      return { type, data: withData({
+        review_id: requiredString(data.review_id), source_kind: kind,
+        source_ref: requiredString(data.source_ref), content_sha256: requiredString(data.content_sha256),
+        content_bytes: requiredNonNegativeInteger(data.content_bytes), trust: requiredString(data.trust),
+        status, citation_refs: refs.map(requiredString),
+      }), receivedAt }
+    }
     case 'model.output.delta': {
       const segment = data.segment
       if (segment !== undefined && (!Number.isInteger(segment) || typeof segment !== 'number')) {

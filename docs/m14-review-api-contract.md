@@ -74,4 +74,5 @@ Coordinator 注入 async approval façade。请求 spec 每次从 owned Run 的�
 等同 published，或用当前网页重新拼历史 evidence。排查时核对同 Run 事件、bundle digest 与既有错误码。
 
 验证入口：`python -B -m unittest backend.tests.test_review_application backend.tests.test_review_projection -v`；
-fixture HTTP 证据见 `V-20261029-001/002`，PostgreSQL 接线见 `V-20261029-004`。Vue 页面与实际部署验收尚未完成。
+fixture HTTP 证据见 `V-20261029-001/002`，PostgreSQL 接线见 `V-20261029-004`。Vue 审查页面与独立
+loopback 演示入口见 `docs/m14-review-demo.md` 和 `V-20261029-005`；实际组合部署验收尚未完成。

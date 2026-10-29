@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   addCourseDocument: vi.fn(),
   cancelDurableRun: vi.fn(),
   createDurableRun: vi.fn(),
+  createReviewRun: vi.fn(),
   createIdempotencyKey: vi.fn(),
   getDurableRun: vi.fn(),
   resolveDurableApproval: vi.fn(),
@@ -37,6 +38,34 @@ afterEach(() => {
 })
 
 describe('durable Run state machine', () => {
+  it('creates a review through the six-field API and restores the same projection', async () => {
+    const review = {
+      scenario_version: 'multisource-review-v1' as const, review_id: 'demo-review',
+      outcome: 'published' as const, evidence: [], evidence_bundle_digest: 'a'.repeat(64),
+      publication: { publication_id: 'publication-1', revision: 2, status: 'published' as const },
+      usage: { provider: null, total_tokens: null, estimated_cost: null, currency: null, cost_source: 'unknown' as const },
+    }
+    api.createReviewRun.mockResolvedValue(snapshot('queued'))
+    api.getDurableRun.mockResolvedValue(snapshot('completed', { review }))
+    api.streamDurableRun.mockImplementation(async (_run, _capability, _after, onEvent) => {
+      onEvent(startedEvent(1))
+      onEvent(completedEvent(2))
+      return 2
+    })
+    const desk = mountDesk()
+    const request = {
+      review_id: 'demo-review', expected_revision: 1, image_asset_id: 'demo-image',
+      policy_topic: 'review disclosure', page_fixture_id: 'demo-page', requested_decision: 'approve' as const,
+    }
+    await desk.runReview(request)
+    expect(api.createReviewRun).toHaveBeenCalledWith(request, capability)
+    expect(desk.review.value).toEqual(review)
+    expect(desk.mode.value).toBe('review')
+    const restored = mountDesk()
+    await restored.initialize()
+    expect(restored.review.value).toEqual(review)
+    expect(restored.mode.value).toBe('review')
+  })
   it('ignores duplicate events while applying the strict next sequence', async () => {
     api.createDurableRun.mockResolvedValue(snapshot('queued'))
     api.getDurableRun.mockResolvedValue(snapshot('completed', { answer: 'done' }))

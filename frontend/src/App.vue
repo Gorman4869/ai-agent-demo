@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 
 import RunTimeline from './components/RunTimeline.vue'
+import ReviewWorkspace from './components/ReviewWorkspace.vue'
 import { useAgentDesk } from './composables/useAgentDesk'
 
 const desk = useAgentDesk()
@@ -14,7 +15,7 @@ onMounted(desk.initialize)
     <header class="masthead">
       <div>
         <p class="eyebrow">FIELD NOTE / 04</p>
-        <h1>Agent Research Desk</h1>
+        <h1>{{ desk.mode.value === 'review' ? 'Agent Review Desk' : 'Agent Research Desk' }}</h1>
       </div>
       <div class="connection" :data-status="desk.status.value" role="status" aria-live="polite">
         <span></span>
@@ -35,10 +36,11 @@ onMounted(desk.initialize)
           <div><dt>RUN</dt><dd>{{ desk.runId.value.slice(0, 8) || 'not started' }}</dd></div>
           <div><dt>SEQUENCE</dt><dd>{{ desk.sequence.value }}</dd></div>
           <div><dt>EVENTS</dt><dd>{{ desk.events.value.length }}</dd></div>
-          <div><dt>SOURCES</dt><dd>{{ desk.evidence.value.length }}</dd></div>
+          <div><dt>SOURCES</dt><dd>{{ desk.mode.value === 'review' ? desk.review.value?.evidence.length ?? 0 : desk.evidence.value.length }}</dd></div>
         </dl>
 
         <button
+          v-if="desk.mode.value === 'research'"
           class="knowledge-button"
           :disabled="desk.isKnowledgeReady.value || desk.isPreparingKnowledge.value"
           :aria-busy="desk.isPreparingKnowledge.value"
@@ -46,10 +48,16 @@ onMounted(desk.initialize)
         >
           {{ desk.isPreparingKnowledge.value ? '正在装载…' : desk.isKnowledgeReady.value ? '课程资料已装载' : '装载课程资料' }}
         </button>
-        <p class="microcopy">Mock 模式 · 不调用真实模型 · 不产生 API 费用</p>
+        <p class="microcopy">{{ desk.mode.value === 'review' ? '本地合成资料 · 需审查后端入口 · 模型用量未知' : 'Mock 模式 · 不调用真实模型 · 不产生 API 费用' }}</p>
       </aside>
 
       <section class="paper-panel">
+        <nav class="workspace-switch" aria-label="工作模式">
+          <button class="button button--ghost" :aria-pressed="desk.mode.value === 'research'" :disabled="desk.isBusy.value" @click="desk.mode.value = 'research'">研究</button>
+          <button class="button button--ghost" :aria-pressed="desk.mode.value === 'review'" :disabled="desk.isBusy.value" @click="desk.mode.value = 'review'">审查</button>
+        </nav>
+        <ReviewWorkspace v-if="desk.mode.value === 'review'" :disabled="!desk.canRun.value" :review="desk.review.value" @create="desk.runReview" />
+        <template v-else>
         <div class="panel-index">RESEARCH QUERY / 02</div>
         <label for="question">你想核验什么？</label>
         <textarea
@@ -59,8 +67,9 @@ onMounted(desk.initialize)
           maxlength="4000"
           :disabled="!desk.canRun.value"
         ></textarea>
+        </template>
         <div class="prompt-actions">
-          <span>{{ desk.question.value.length }} / 4000</span>
+          <span>{{ desk.mode.value === 'review' ? '同一 Run · 精确审批' : `${desk.question.value.length} / 4000` }}</span>
           <button
             v-if="desk.canCancel.value"
             class="button button--ghost"
@@ -69,7 +78,7 @@ onMounted(desk.initialize)
           >
             {{ desk.isCancelling.value ? '正在停止…' : '停止' }}
           </button>
-          <button v-else class="button" :disabled="!desk.canRun.value" @click="desk.run">
+          <button v-else-if="desk.mode.value === 'research'" class="button" :disabled="!desk.canRun.value" @click="desk.run">
             启动研究 <span>↗</span>
           </button>
         </div>
@@ -95,6 +104,7 @@ onMounted(desk.initialize)
           </div>
         </section>
 
+        <template v-if="desk.mode.value === 'research'">
         <article class="answer-block" aria-live="polite">
           <div class="answer-meta">
             <span>AGENT OUTPUT</span>
@@ -129,11 +139,12 @@ onMounted(desk.initialize)
           </dl>
           <p v-else class="empty-evidence">当前 Run 尚未报告模型用量；未知不代表 0。</p>
         </section>
+        </template>
       </section>
 
       <aside class="trace-panel">
         <div class="rail-heading"><span>LIVE TRACE</span><span>03</span></div>
-        <RunTimeline :events="desk.events.value" />
+        <RunTimeline :events="desk.events.value" :last-sequence="desk.sequence.value" />
       </aside>
     </section>
   </main>

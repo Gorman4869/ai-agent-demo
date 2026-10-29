@@ -8,6 +8,7 @@ const pythonExecutable = fileURLToPath(new URL('../.venv/Scripts/python.exe', im
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testMatch: 'durable-run.spec.ts',
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,

@@ -5373,3 +5373,36 @@ Starlette TestClient deprecation 继续保留，未为该 warning 安装新依�
 - 默认内存 factory 和普通 durable API 保持原入口，PostgreSQL review 为显式启用；Vue、实际部署和
   capstone 材料仍待完成，KI-034 保持 open，KI-035 未修改。
 - 收尾 continuity 退出 0：52 个稳定任务、196 个 Markdown；最终 diff 检查退出 0。
+
+## V-20261029-005：M14-T6 Vue 审查页面与本地离线演示
+
+- 日期 2026-10-29，Asia/Shanghai；计划 2.0；M14-T6 / in_progress；base HEAD `fd04c70`，开始工作区干净。
+- A 类前后端合同/审批恢复 + C 类 loopback HTTP/真实 Chromium；沿用 frontend-project-adapter、vue
+  的既有 Vue3/TS/Fetch/CSS/composable 风格，无新库或 router。后端仍遵循既有独立 factory。
+- 默认模型离线、无 Key/Provider/公网请求。演示只含合成资料和内存 publication，不接真实账户或发布目标。
+
+| 命令/检查 | 退出码 | 实际结果 |
+| --- | ---: | --- |
+| `python -B -m unittest backend.tests.test_review_application backend.tests.test_review_runtime backend.tests.test_review_tools backend.tests.test_postgres_execution backend.tests.test_container -q`（沙箱外） | 0 | 恢复 82/82，0.946s |
+| `npm.cmd run build`（frontend） | 0 | 首次 Vue 类型检查和构建通过；最终再次通过，22 modules，348ms Vite build |
+| `npm.cmd run test:unit`（沙箱内） | 1 | 两个 suite 在临时文件 rename 遇 EPERM，0 项实际执行；未计为业务失败 |
+| 同一 unit 命令沙箱外执行 | 0 | 既有12/12；新增三项协议/恢复验证后最终15/15，0.871s |
+| `python -B -m unittest backend.tests.test_review_demo backend.tests.test_review_application backend.tests.test_review_projection -q` | 0 | 17/17，0.818s；检查 loopback/Host 边界与 review API |
+| `.\node_modules\.bin\playwright.cmd test --config playwright.review.config.ts`（frontend，沙箱外） | 0 | 首次1/1，11.8s；修正来源计数/快照提示并加入390px检查后最终1/1，11.7s |
+| `.\node_modules\.bin\playwright.cmd test --config playwright.config.ts`（frontend，沙箱外） | 0 | 既有研究断线恢复与审批刷新2/2，9.0s |
+| `python -B -m compileall -q backend/app/review_demo.py backend/tests/test_review_demo.py`、`git diff --check` | 0 | 语法/whitespace 通过，既有 LF/CRLF 提示 |
+
+### 结论与边界
+
+- Vue 新增六字段审查模式、三源证据与安全摘要、发布结果/unknown usage；API请求复用 requestJson，
+  审批只提交 decision。复用同一 SSE sequence、重连、快照和 sessionStorage 恢复，保留普通研究入口。
+- Browser E2E 实际启动独立 loopback demo 与 Vite，用真实 Chromium UI 提交，后端 Browser 又通过
+  PlaywrightBrowserDriver 读取 route-fulfilled server-owned fixture；Vision 为 OfflineVisionModel，
+  RAG 查询真实 KnowledgeBase，publication 为内存 CAS。不是公网或在线模型质量证据。
+- E2E 经过创建→三源evidence→等待审批→页面刷新→批准→published→再次刷新；Run 未变化，版本2。
+  desktop/mobile PNG 已用 view_image 检查，390px无横向溢出。截图位于忽略的 frontend/test-results/review。
+- demo 身份为服务端固定合成 reviewer，仅独立 review_demo factory 启用，并限制 loopback client/Host。
+  默认鉴权保持原合同，前端不保存静态 Bearer/API Key。此入口不是生产登录或真实业务发布服务。
+- 没有新依赖、真实账号、个人数据、远程写入或学习者进度修改。未重跑完整PostgreSQL/全仓门，
+  没有证明 Vue→PostgreSQL→真实 Chromium 的组合部署；下一步处理该集成与作品集材料。KI-034仍open。
+- 收尾 continuity 退出0：52个稳定任务、199个Markdown；最终 `git diff --check` 退出0。

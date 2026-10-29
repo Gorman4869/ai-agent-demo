@@ -1339,6 +1339,15 @@ PostgreSQL HTTP composition 与异步审批（2026-10-29）：
 - 该证据不包含 full-stack OS hard-kill、HA、真实 Chromium 或 Provider；下一步接 Vue 审查页面，
   补 server-owned 演示入口，再进入部署和作品集材料。
 
+Vue 审查页面与离线演示（2026-10-29）：
+
+- 复用现有 useAgentDesk/Fetch/SSE/snapshot，新增六字段审查、三源证据、审批与published结果；
+  保留研究模式，刷新恢复同一Run/模式，未知用量不写0，不把原始JSON答案展示成审查结论。
+- 独立 review_demo CLI 装载合成PNG、policy、真实受控Chromium网页和内存publication；固定身份只对
+  loopback demo启用，默认鉴权不变，ADR-0046记录边界；启动见 `docs/m14-review-demo.md`。
+- 前端15项、后端相关17项、真实审查Chromium1项、原研究E2E2项和Vue类型/构建通过；390px无横向
+  溢出，见 `V-20261029-005`。尚未证明Vue+PostgreSQL+Chromium的组合部署或生产登录。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。
