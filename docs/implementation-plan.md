@@ -1330,6 +1330,15 @@ Snapshot HTTP 纵切（2026-10-29）：
 - Store 尚未接完整应用；下一步将 async spec resolve 与 async approval 接入 opt-in PostgreSQL
   HTTP composition，再进入 Vue。不得把单独 request/publication 持久化声称成完整应用恢复。
 
+PostgreSQL HTTP composition 与异步审批（2026-10-29）：
+
+- 新增 create_postgres_review_app，复用 Container runtime_factory/lifespan、原子 request Store 和
+  Postgres publication；每次 run/resume await 恢复 spec，审批 I/O 经既有 async façade/有界 bridge。
+- 三次应用 lifespan 实测 create→pause→重开批准/拒绝/unknown→重开 snapshot/SSE/同键 replay；
+  同步审批线程隔离断言通过。完整 PostgreSQL 132/132、相关离线 157/157，见 `V-20261029-004`。
+- 该证据不包含 full-stack OS hard-kill、HA、真实 Chromium 或 Provider；下一步接 Vue 审查页面，
+  补 server-owned 演示入口，再进入部署和作品集材料。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

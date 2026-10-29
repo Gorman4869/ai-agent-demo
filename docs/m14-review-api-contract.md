@@ -50,13 +50,28 @@ trust/status 与有界 citation_refs。投影不回显图片/OCR、网页、RAG 
 同一 owner/key/六字段重放返回原 Run，任一业务字段变化 409。资源存在性由 owner-scoped 工具目录
 检查，缺资产 Run 安全失败。创建后使用返回的 id 查询、订阅 SSE、提交审批；无需另建第二条执行链。
 
-当前 HTTP factory 的 spec 仍在进程内。ADR-0045 和 migration 8 已另行提供私有 PostgreSQL request
-Store，将 Run、counter、六字段 spec 原子创建，并通过两个独立 PID 验证 resolve/replay。原始 spec
-不进入事件或 answer。该 Store 尚未接 HTTP factory；async approval、完整 PostgreSQL composition 和
-Vue 仍待实现。下一步先完成后端接线，再接 Vue 创建/证据/审批视图。
+内存 HTTP factory 的 spec 仍在进程内。PostgreSQL factory 则使用 ADR-0045/migration 8 的私有 request
+Store，将 Run、counter、六字段 spec 原子创建，并在每次 run/resume 恢复绑定。原始 spec 不进入事件
+或 answer。Vue 创建/证据/审批视图与实际部署仍待实现。
+
+## PostgreSQL 应用接线
+
+`backend.app.advanced.postgres_review_application.create_postgres_review_app` 已接入相同 HTTP 端点。
+传入显式 PostgreSQL `Settings`、`authenticator` 和服务端 `registry_factory(persistence)`；后者在
+migration/setup 后构造四工具 registry，publisher 应使用该 persistence.pool 的
+`PostgresReviewPublicationStore`。资源目录、规则库、视觉模型与 Browser driver 继续由服务端装配。
+
+factory 自动用相同 persistence 的 bounded bridge 包装 registry 授权门，并向 Review Runtime 和
+Coordinator 注入 async approval façade。请求 spec 每次从 owned Run 的私有 Store 读取，不依赖
+旧 application 的 map。生命周期继续由已有 Container/ExecutionComposition 负责。
+
+验证入口：设置仓库本地 integration DSN 后，运行
+`python -X utf8 -B -m unittest backend.tests.postgres_store_integration.PostgresReviewApplicationTest -v`。
+这三项实测覆盖三次 app lifespan 的批准、拒绝、unknown 重开读取、同键重放、冲突、SSE 与 owner 404，
+并断言同步审批不阻塞 event loop。该结论不是 OS hard-kill、HA、真实 Chromium 或在线模型证据。
 
 真实业务映射：审核页面刷新后通过 snapshot 恢复证据和结论，SSE 负责增量展示。常见错误是把 completed
 等同 published，或用当前网页重新拼历史 evidence。排查时核对同 Run 事件、bundle digest 与既有错误码。
 
 验证入口：`python -B -m unittest backend.tests.test_review_application backend.tests.test_review_projection -v`；
-fixture HTTP 证据见 `V-20261029-001/002`。本材料不声称 PostgreSQL 创建、Vue 页面或部署验收已完成。
+fixture HTTP 证据见 `V-20261029-001/002`，PostgreSQL 接线见 `V-20261029-004`。Vue 页面与实际部署验收尚未完成。

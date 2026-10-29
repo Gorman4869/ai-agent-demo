@@ -35,6 +35,8 @@ from backend.app.domain.run import (
 from backend.app.stores import (
     AppendEventResult,
     AsyncMemoryStore,
+    AsyncApprovalStore,
+    AsyncLocalApprovalStore,
     ConcurrentWriteError,
     EventStore,
     InvalidRunTransitionError,
@@ -336,6 +338,7 @@ class RunCoordinator:
         event_store: EventStore,
         runtimes: Mapping[RuntimeName | str, AgentRuntime],
         memory_store: AsyncMemoryStore | None = None,
+        async_approval_store: AsyncApprovalStore | None = None,
         notifier: EventNotifier | None = None,
         event_observer: RunEventObserver | None = None,
         run_timeout_ms: int = 30_000,
@@ -354,6 +357,7 @@ class RunCoordinator:
         self._event_store = event_store
         self._runtimes = dict(runtimes)
         self._memory_store = memory_store
+        self._async_approval_store = async_approval_store
         self._notifier = notifier or NullEventNotifier()
         self._event_observer = event_observer or NullRunEventObserver()
         self._run_timeout_ms = run_timeout_ms
@@ -792,7 +796,8 @@ class RunCoordinator:
             raise
 
         try:
-            resolution = execution_context.approval_store.resolve(
+            approval_store = self._async_approval_store or AsyncLocalApprovalStore(execution_context.approval_store)
+            resolution = await approval_store.resolve(
                 approval_id=approval_id,
                 run_id=run_id,
                 principal_id=owner_id,

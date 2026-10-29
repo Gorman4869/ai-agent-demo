@@ -337,6 +337,15 @@ class AsyncReviewToolRegistry:
         self._handlers = MappingProxyType(dict(handlers))
         self._limits = limits
         self._publisher = publisher
+        self._policy_runner: Callable[..., Awaitable[ToolResult]] | None = None
+
+    def with_policy_runner(
+        self, runner: Callable[..., Awaitable[ToolResult]],
+    ) -> AsyncReviewToolRegistry:
+        """Use the composition-owned bridge for synchronous approval policy I/O."""
+        registry = copy.copy(self)
+        registry._policy_runner = runner
+        return registry
 
     @property
     def limits(self) -> ReviewScenarioLimits:
@@ -377,12 +386,15 @@ class AsyncReviewToolRegistry:
         execution_context = context or ToolExecutionContext()
         if name == "publish_review" and execution_context.run_id is None:
             return _failed_result(name, "review_evidence_invalid")
-        gate = self._policy_registry.execute(
-            name,
-            arguments,
-            context=execution_context,
-            call_id=call_id,
-        )
+        if self._policy_runner is None:
+            gate = self._policy_registry.execute(
+                name, arguments, context=execution_context, call_id=call_id,
+            )
+        else:
+            gate = await self._policy_runner(
+                self._policy_registry.execute, name, copy.deepcopy(arguments),
+                context=execution_context, call_id=call_id,
+            )
         if not gate.ok:
             return gate
         if gate.value is not _POLICY_ALLOWED:

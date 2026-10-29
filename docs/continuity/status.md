@@ -3,7 +3,7 @@
 - 更新时间：2026-10-29，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`aed032f`
+- 最近已确认实现提交：`10a7c70`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -85,9 +85,9 @@
 | 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
 | 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
 | 执行协议 | 已完成缺口审计与 `ADR-0044` 合同冻结；后续按离线同 Run 真实工具、API/UI/部署、材料与演练三个纵切推进，默认保持离线 |
-| 当前修改 | migration 8 和 PostgresReviewRequestStore 原子创建 Run/counter/spec，支持 owner-scoped resolve 与摘要一致性校验；共享 request 合同、回滚与双进程恢复通过；尚未接 PostgreSQL HTTP factory |
-| 验证 | `V-20261029-003`，base `aed032f`：恢复 43/43，PostgreSQL request 专项 8/8，完整 PostgreSQL 129/129，相关离线 128/128；compileall 通过；KI-035 未改 |
-| 下一动作 | 复用 ADR-0045 request Store 接 async spec resolver、Review Runtime/registry/Coordinator 的 async approval，再构建 opt-in PostgreSQL HTTP composition 并验证暂停后重启审批；随后接 Vue |
+| 当前修改 | 显式 PostgreSQL review HTTP factory 接原子 request Store、async spec resolver 和有界异步审批；三次 app lifespan 完成创建、暂停、重开批准/拒绝/unknown、再重开 snapshot/SSE 与同键 replay |
+| 验证 | `V-20261029-004`，base `10a7c70`：恢复 10/10；离线首轮旧 persistence 夹具缺属性导致 10 error，补齐后 82/82；真实 PostgreSQL专项 3/3，完整 132/132，相关离线 157/157；KI-035 未改 |
+| 下一动作 | 接 Vue 审查创建/三源证据/精确审批/结果视图，复用 durable SSE/snapshot；补 server-owned 离线演示入口，随后做实际部署与作品集材料 |
 
 ## 里程碑状态
 
@@ -115,7 +115,7 @@
   `V-20261023-001`：
   独立 registry 已让三个只读工具真实进入既有 Vision、RAG、Browser；Runtime 已在同一 durable Run
   生成 evidence、执行预算、完成精确审批 resume、ToolExecution 仲裁、PostgreSQL publication CAS、
-  双进程 result-unknown 对账和安全结果。`V-20261029-001/002/003` 又实现 review snapshot、显式内存 HTTP 创建链和私有 spec 原子 Store；完整 PostgreSQL composition、Vue 与部署尚未实现，旧 capstone 材料仍需重写。
+  双进程 result-unknown 对账和安全结果。`V-20261029-001/002/003/004` 又实现 review snapshot、私有 spec 和显式 memory/PostgreSQL HTTP composition；Vue 与实际部署尚未实现，旧 capstone 材料仍需重写。
 - M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
   `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
   fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
@@ -289,8 +289,8 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-29-m14-t6-review-request-storage.md`，再核对 `V-20261029-003`、
-`ADR-0044/0045`、`backend/app/advanced/postgres_review_requests.py`、`docs/m14-review-api-contract.md`、
-`KI-034/KI-035` 和 M14-T6 实施计划。下一动作接 async spec resolve/approval 的 PostgreSQL composition；
-随后接 Vue。没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
+`docs/continuity/handoffs/2026-10-29-m14-t6-postgres-review-app.md`，再核对 `V-20261029-004`、
+`ADR-0044/0045`、`backend/app/advanced/postgres_review_application.py`、`docs/m14-review-api-contract.md`、
+`KI-034/KI-035` 和 M14-T6 实施计划。下一动作接 Vue 并补 server-owned 离线演示入口。
+没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
 查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。

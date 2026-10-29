@@ -5333,3 +5333,43 @@ PostgreSQL 命令仅在子进程注入 `AI_AGENT_TEST_POSTGRES_DSN` 指向仓库
 - ADR-0045 记录原子私有 spec 存储取舍。默认 Container/API 仍使用既有内存 factory，async approval、
   PostgreSQL Runtime factory 与 HTTP 接线尚未完成；KI-034 保持 open，KI-035 未改。
 - 收尾 continuity 退出 0：52 个稳定任务、195 个 Markdown；最终 `git diff --check` 退出 0。
+
+## V-20261029-004：M14-T6 PostgreSQL HTTP composition 与异步审批
+
+- 日期 2026-10-29，Asia/Shanghai；计划 2.0；M14-T6 / in_progress；base HEAD `10a7c70`，开始工作区干净。
+- A 类公共 composition/审批/生命周期 + C 类本机 PostgreSQL；实现 ADR-0044/0045 规划的应用接线。
+- 读取最新 status/handoff/verification、ADR-0045、后端规约及 Container/Coordinator/Runtime/registry
+  代码；沿用 backend-code-adapter 的显式注入、dataclass、Protocol 和既有生命周期。
+- 无在线 Key/Provider、新依赖、真实 Chromium、前端或部署操作；仅使用既有 localhost integration 库。
+
+| 命令或检查 | 退出码 | 实际结果 |
+| --- | ---: | --- |
+| `python -B -m unittest backend.tests.test_review_request_store backend.tests.test_review_application -q` | 0 | 恢复 10/10，0.392s |
+| 首轮 review application/runtime/tools + postgres_execution + container 单测 | 1 | 82 项中 10 个装配 error；旧 `_FakePersistence` 未提供新增使用的 async_approval_store；补齐夹具后重跑 |
+| 同一离线命令重跑 | 0 | 82/82，1.008s |
+| 本地 DSN 下 `python -X utf8 -B -m unittest backend.tests.postgres_store_integration.PostgresReviewApplicationTest -v` | 0 | 初次正常路径 1/1，0.564s；补拒绝/unknown 后最终 3/3，1.714s |
+| `python -X utf8 -B -W always::ResourceWarning -m unittest backend.tests.postgres_store_integration -q` | 0 | 完整真实 PostgreSQL 132/132，47.920s；既有不可用数据库负向用例保留 connection timeout |
+| `python -B -m unittest backend.tests.test_review_request_store backend.tests.test_review_application backend.tests.test_review_tools backend.tests.test_review_projection backend.tests.test_review_runtime backend.tests.test_review_publication backend.tests.test_persistent_run_api backend.tests.test_durable_run_projection backend.tests.test_run_coordinator backend.tests.test_postgres_execution backend.tests.test_postgres_async_stores backend.tests.test_container -q` | 0 | 离线相关回归 157/157，2.399s；既有 lease/notifier 故障注入日志保留 |
+| `python -B -m compileall -q`：PostgreSQL review application、review tools/runtime、Container/main/composition/Coordinator | 0 | 语法通过 |
+| `git diff --check` | 0 | 无 whitespace error，既有 LF/CRLF 提示 |
+
+异步/数据库测试经沙箱外批准执行，本机 trust/tmpfs DSN 仅注入测试子进程；无远程数据库或 Provider。
+Starlette TestClient deprecation 继续保留，未为该 warning 安装新依赖。
+
+### 实现与证据范围
+
+- `create_postgres_review_app` 将 registry factory 传入既有 Container/ExecutionComposition lifespan，
+  在 migration/setup 后共享 persistence 创建 PostgresReviewRuns。每次 run/resume 从私有 Store await
+  resolve，再创建 immutable catalog，重启不依赖旧进程的绑定 map。
+- Review Runtime 用 async_approval_store 进行 request/get_resolution/approved_arguments；registry
+  同步 policy gate 用同一 persistence 的 bounded sync_store_bridge；Coordinator.resolve 同样 await
+  async façade。真实集成检查五类同步审批方法均不在事件循环线程执行。
+- 三个 FastAPI 实例顺序创建/关闭：第一次 HTTP create 并 pause；第二次恢复并批准/拒绝/unknown；
+  第三次重放相同 create、读取 snapshot/SSE 和冲突请求。批准仅一次 publication，拒绝零 publication，
+  unknown 一次调用后不重放，跨 owner 404。
+- Vision/RAG/Browser 进入真实领域模块，模型为 offline、Browser 为确定性 driver fixture；没有真实
+  Chromium/公网/在线视觉证据。应用重开在同一测试进程，不声称 full-stack OS hard-kill 或多实例 HA；
+  独立 PID 的 Store/publication 证据仍引用前序验证。
+- 默认内存 factory 和普通 durable API 保持原入口，PostgreSQL review 为显式启用；Vue、实际部署和
+  capstone 材料仍待完成，KI-034 保持 open，KI-035 未修改。
+- 收尾 continuity 退出 0：52 个稳定任务、196 个 Markdown；最终 diff 检查退出 0。

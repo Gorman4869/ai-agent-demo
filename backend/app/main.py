@@ -10,7 +10,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.app.advanced.postgres_review_application import ReviewRegistryFactory, PostgresReviewRuns
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import (
@@ -141,8 +144,11 @@ def create_app(
     *,
     settings: Settings | None = None,
     container: ApplicationContainer | None = None,
-    review_runs: InMemoryReviewRuns | None = None,
+    review_runs: InMemoryReviewRuns | PostgresReviewRuns | None = None,
+    review_registry_factory: ReviewRegistryFactory | None = None,
 ) -> FastAPI:
+    if review_registry_factory is not None and (container is not None or review_runs is not None):
+        raise ValueError("PostgreSQL review factory cannot override an existing composition")
     if review_runs is not None and (
         container is None or container.run_store is not review_runs.run_store
     ):
@@ -160,6 +166,8 @@ def create_app(
             settings if settings is not None else Settings.from_environment()
         )
     )
+    if review_registry_factory is not None and resolved_settings.persistence.backend != "postgres":
+        raise ValueError("PostgreSQL review factory requires postgres persistence")
     if container is not None:
         if settings is not None or any(
             dependency is not None for dependency in legacy_dependencies
@@ -185,14 +193,23 @@ def create_app(
             )
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        nonlocal resolved_container
+        nonlocal resolved_container, review_runs
         if resolved_container is None:
             assert container is None
+            runtime_factory = None
+            if review_registry_factory is not None:
+                from backend.app.advanced.postgres_review_application import PostgresReviewRuns
+
+                def runtime_factory(persistence):
+                    nonlocal review_runs
+                    review_runs = PostgresReviewRuns(persistence, review_registry_factory(persistence))
+                    return {"manual": review_runs}
             resolved_container = await ApplicationContainer.open(
                 settings=resolved_settings,
                 run_service=run_service,
                 knowledge_base=knowledge_base,
                 authenticator=authenticator,
+                runtime_factory=runtime_factory,
             )
             _app.state.container = resolved_container
         try:
@@ -447,7 +464,7 @@ def create_app(
             ),
         )
 
-    if review_runs is not None:
+    if review_runs is not None or review_registry_factory is not None:
         @app.post(
             "/api/durable/reviews", response_model=DurableRunResponse,
             status_code=status.HTTP_202_ACCEPTED,
@@ -464,6 +481,7 @@ def create_app(
             if idempotency_key is None or not _is_valid_durable_idempotency_key(idempotency_key):
                 raise HTTPException(status_code=400, detail="Valid Idempotency-Key is required")
             try:
+                assert review_runs is not None
                 created = await review_runs.create(
                     request.spec, owner_id=principal.principal_id,
                     idempotency_key=idempotency_key,

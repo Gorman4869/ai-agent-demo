@@ -117,6 +117,7 @@ class PostgresExecutionComposition:
                 event_store=persistence.event_store,
                 runtimes=resolved_runtimes,
                 memory_store=persistence.async_memory_store,
+                async_approval_store=persistence.async_approval_store,
                 notifier=notifier,
                 event_observer=RunTelemetryExporter(
                     run_observability,

@@ -44,7 +44,7 @@ from backend.app.domain.run import (
     ToolExecutionStatus,
 )
 from backend.app.reliability import stable_run_failure
-from backend.app.stores import ConcurrentWriteError, ToolExecutionStore
+from backend.app.stores import AsyncApprovalStore, AsyncLocalApprovalStore, ConcurrentWriteError, ToolExecutionStore
 from backend.app.tools import ToolExecutionContext, ToolHandlerError, ToolResult
 
 
@@ -318,6 +318,7 @@ class MultisourceReviewRuntime:
         registry: ReviewRuntimeRegistry,
         run_catalog: ReviewRunCatalog,
         tool_execution_store: ToolExecutionStore,
+        async_approval_store: AsyncApprovalStore | None = None,
         approval_ttl: timedelta = timedelta(minutes=15),
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -342,6 +343,7 @@ class MultisourceReviewRuntime:
         self._registry = registry
         self._run_catalog = run_catalog
         self._tool_execution_store = tool_execution_store
+        self._async_approval_store = async_approval_store
         self._publication_store = cast(ReviewPublicationStore, registry.publisher)
         self._approval_ttl = approval_ttl
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -356,9 +358,9 @@ class MultisourceReviewRuntime:
         context = _review_execution_context(request)
         if context is None:
             return _failed_result("review_evidence_invalid", step=0)
-        approval_store = context.approval_store
-        if approval_store is None:
+        if context.approval_store is None:
             return _authorization_failure("approval_context_required", step=0)
+        approval_store = self._async_approval_store or AsyncLocalApprovalStore(context.approval_store)
         spec = self._run_catalog.resolve(
             request.run_id,
             owner_id=context.principal_id,
@@ -441,7 +443,7 @@ class MultisourceReviewRuntime:
         except (TypeError, ValueError):
             return _failed_result("review_evidence_invalid", step=4)
         try:
-            approval = approval_store.request(
+            approval = await approval_store.request(
                 run_id=request.run_id,
                 principal_id=context.principal_id,
                 tool_call_id=call_id,
@@ -496,7 +498,8 @@ class MultisourceReviewRuntime:
         )
         if spec is None:
             return _failed_result("review_asset_not_found", step=4)
-        resolution = context.approval_store.get_resolution(
+        approval_store = self._async_approval_store or AsyncLocalApprovalStore(context.approval_store)
+        resolution = await approval_store.get_resolution(
             approval_id=approval.approval_id,
             run_id=request.run_id,
             principal_id=context.principal_id,
@@ -528,7 +531,7 @@ class MultisourceReviewRuntime:
                 public_message="Review publication approval expired",
             )
         try:
-            arguments = context.approval_store.approved_arguments(resolution)
+            arguments = await approval_store.approved_arguments(resolution)
             if not _arguments_match_spec(arguments, spec):
                 return _failed_result("review_evidence_invalid", step=4)
             command = create_review_publication_command(arguments, context)

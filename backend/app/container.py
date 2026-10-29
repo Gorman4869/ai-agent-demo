@@ -5,7 +5,10 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.app.postgres_execution import PostgresRuntimeFactory
 
 from backend.app.agent import AgentRuntime, ManualRuntime
 from backend.app.agent.graph_runtime import LangGraphRuntime
@@ -261,6 +264,7 @@ class ApplicationContainer:
         settings: Settings | None = None,
         run_service: InMemoryRunService | None = None,
         runtimes: Mapping[RuntimeName | str, AgentRuntime] | None = None,
+        runtime_factory: PostgresRuntimeFactory | None = None,
         mcp_clients: McpClientManager | None = None,
         mcp_server_configs: Mapping[str, McpServerConfig] | None = None,
         knowledge_base: KnowledgeBase | None = None,
@@ -307,7 +311,15 @@ class ApplicationContainer:
 
         from backend.app.postgres_execution import PostgresExecutionComposition
 
-        if runtimes is None:
+        if runtime_factory is not None:
+            if runtimes is not None:
+                raise ValueError("provide runtimes or runtime_factory, not both")
+            composition = await PostgresExecutionComposition.open(
+                postgres_dsn.get_secret_value(), runtime_factory=runtime_factory,
+                run_timeout_ms=resolved_settings.budget.run_timeout_ms,
+                notifier=resolved_event_notifier, trace_sink=trace_sink, metrics_sink=metrics_sink,
+            )
+        elif runtimes is None:
             composition = await PostgresExecutionComposition.open(
                 postgres_dsn.get_secret_value(),
                 runtime_factory=lambda persistence: (

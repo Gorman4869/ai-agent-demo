@@ -226,6 +226,125 @@ class PostgresMemoryStoreContractTest(
         await self.persistence.close()
 
 
+class PostgresReviewApplicationTest(unittest.TestCase):
+    def test_create_pause_restart_approve_and_read_same_run(self) -> None:
+        self._exercise("approve")
+
+    def test_rejected_review_survives_application_restart(self) -> None:
+        self._exercise("reject")
+
+    def test_unknown_publication_is_not_replayed_after_application_restart(self) -> None:
+        self._exercise("approve", unknown=True)
+
+    def _exercise(self, decision: str, *, unknown: bool = False) -> None:
+        import time
+        from backend.app.advanced.postgres_review_application import create_postgres_review_app
+        from backend.app.advanced.postgres_review_publication import PostgresReviewPublicationStore
+        from backend.app.advanced.browser_agent import BrowserAgent
+        from backend.app.advanced.multimodal import MultimodalVisionAgent, OfflineVisionModel
+        from backend.app.advanced.review_tools import (
+            BrowserReviewPageReader, ReviewImageAsset, ReviewPageFixture,
+            ReviewResourceCatalog, create_multisource_review_registry,
+        )
+        from backend.app.security import Principal
+        from backend.tests.test_review_tools import _png, _RecordingBrowserDriver, _ORIGIN, _PAGE_URL
+
+        owner = f"reviewer-{uuid4()}"
+        review_id = f"review-{uuid4()}"
+        headers = {"Authorization": "Bearer review-token", "Idempotency-Key": f"review-key-{uuid4()}"}
+        settings = Settings.from_environment({"AI_AGENT_PERSISTENCE": "postgres", "AI_AGENT_POSTGRES_DSN": POSTGRES_DSN})
+        authenticator = StaticTokenAuthenticator({
+            "review-token": Principal(owner, roles=frozenset({"reviewer"})),
+            "other-token": Principal("other-owner"),
+        })
+        knowledge = InMemoryKnowledgeBase()
+        knowledge.add(Document(id="policy-1", title="Review rule", content="review disclosure evidence", source="policy://review"))
+        publication_calls = []
+        approval_threads = []
+
+        def registry_factory(persistence):
+            loop_thread = threading.get_ident()
+            for name in ("request", "resolve", "get_resolution", "approved_arguments", "consume"):
+                original = getattr(persistence.approval_store, name)
+                def checked(*args, _method=original, _name=name, **kwargs):
+                    self.assertNotEqual(loop_thread, threading.get_ident(), f"sync approval {_name} blocked the event loop")
+                    approval_threads.append(_name)
+                    return _method(*args, **kwargs)
+                setattr(persistence.approval_store, name, checked)
+
+            class Publisher(PostgresReviewPublicationStore):
+                async def publish(self, command):
+                    publication_calls.append(command.review_id)
+                    if unknown:
+                        from backend.app.tools import ToolHandlerError
+                        raise ToolHandlerError("tool_result_unknown", result_unknown=True)
+                    return await super().publish(command)
+
+            return create_multisource_review_registry(
+                catalog=ReviewResourceCatalog(
+                    images={"hero-image": ReviewImageAsset("hero-image", owner, _png())},
+                    pages={"policy-page": ReviewPageFixture("policy-page", owner, _PAGE_URL)},
+                ),
+                vision_agent=MultimodalVisionAgent(OfflineVisionModel(), timeout_ms=500),
+                knowledge_base=knowledge,
+                page_reader=BrowserReviewPageReader(BrowserAgent(allowed_origins=[_ORIGIN]), _RecordingBrowserDriver()),
+                publisher=Publisher(persistence.pool, {(owner, review_id): 3}),
+            )
+
+        def new_app():
+            return create_postgres_review_app(settings=settings, registry_factory=registry_factory, authenticator=authenticator)
+
+        body = {"review_id": review_id, "expected_revision": 3, "image_asset_id": "hero-image", "policy_topic": "review disclosure", "page_fixture_id": "policy-page", "requested_decision": "approve"}
+        with TestClient(new_app()) as first:
+            created = first.post("/api/durable/reviews", json=body, headers=headers)
+            self.assertEqual(202, created.status_code, created.text)
+            run_id = created.json()["id"]
+            path = f"/api/durable/runs/{run_id}"
+            for _ in range(200):
+                waiting = first.get(path, headers=headers).json()
+                if waiting["status"] not in {"queued", "running"}:
+                    break
+                time.sleep(0.01)
+            self.assertEqual("waiting_approval", waiting["status"], waiting)
+            self.assertEqual(3, len(waiting["review"]["evidence"]))
+            # Query the owned async façade through TestClient's application loop.
+            async def approval_id():
+                events = await first.app.state.container.event_store.list_for_run(run_id, owner_id=owner)
+                return events[-1].data["approval_id"]
+            stored_approval_id = first.portal.call(approval_id)
+
+        with TestClient(new_app()) as second:
+            self.assertEqual("waiting_approval", second.get(path, headers=headers).json()["status"])
+            self.assertEqual(404, second.get(path, headers={"Authorization": "Bearer other-token"}).status_code)
+            approved = second.post(f"{path}/approvals/{stored_approval_id}", json={"decision": decision}, headers=headers)
+            self.assertEqual(200, approved.status_code, approved.text)
+            published = decision == "approve" and not unknown
+            self.assertEqual("published" if published else "needs_attention", approved.json()["review"]["outcome"])
+            if published:
+                self.assertEqual(4, approved.json()["review"]["publication"]["revision"])
+            else:
+                self.assertIsNone(approved.json()["review"]["publication"])
+                self.assertEqual("tool_result_unknown" if unknown else "approval_rejected", approved.json()["error"]["code"])
+
+        with TestClient(new_app()) as third:
+            replay = third.post("/api/durable/reviews", json=body, headers=headers)
+            self.assertEqual(run_id, replay.json()["id"])
+            self.assertEqual(approved.json()["review"], third.get(path, headers=headers).json()["review"])
+            stream = third.get(f"{path}/events", headers=headers)
+            if published:
+                self.assertIn("review.result", stream.text)
+                self.assertIn("run.completed", stream.text)
+            else:
+                self.assertIn("run.failed", stream.text)
+            conflict = third.post("/api/durable/reviews", json={**body, "expected_revision": 4}, headers=headers)
+            self.assertEqual(409, conflict.status_code)
+        self.assertEqual([review_id] if decision == "approve" else [], publication_calls)
+        expected_methods = {"request", "resolve", "get_resolution"}
+        if decision == "approve":
+            expected_methods.update({"approved_arguments", "consume"})
+        self.assertTrue(expected_methods.issubset(approval_threads))
+
+
 class PostgresFastApiApplicationTest(unittest.TestCase):
     def test_durable_snapshot_projects_rag_citations_across_application_restart(self) -> None:
         token = f"postgres-citation-token-{uuid4()}"
