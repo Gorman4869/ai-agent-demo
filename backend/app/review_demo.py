@@ -1,6 +1,7 @@
 """Explicit loopback-only synthetic review demo; no credentials or Provider calls."""
 from __future__ import annotations
 
+import os
 import struct
 import zlib
 
@@ -14,12 +15,15 @@ from backend.app.advanced.browser_network import BrowserNetworkPolicy, StaticBro
 from backend.app.advanced.multimodal import MultimodalVisionAgent, OfflineVisionModel
 from backend.app.advanced.review_application import create_review_app
 from backend.app.advanced.review_publication import InMemoryReviewPublicationStore
+from backend.app.advanced.postgres_review_application import create_postgres_review_app
+from backend.app.advanced.postgres_review_publication import PostgresReviewPublicationStore
 from backend.app.advanced.review_tools import (
-    BrowserReviewPageReader, ReviewImageAsset, ReviewPageFixture, ReviewResourceCatalog,
+    AsyncReviewToolRegistry, BrowserReviewPageReader, ReviewImageAsset, ReviewPageFixture, ReviewPublisher, ReviewResourceCatalog,
     create_multisource_review_registry,
 )
 from backend.app.knowledge import Document, InMemoryKnowledgeBase
 from backend.app.security import Principal, StaticTokenAuthenticator
+from backend.app.settings import Settings
 
 
 _OWNER = "local-review-demo"
@@ -33,6 +37,27 @@ class _LocalDemoIdentity(StaticTokenAuthenticator):
 
 def create_demo_review_app() -> FastAPI:
     """Synthetic local identity only; never mount this factory in production."""
+    registry = _demo_registry(InMemoryReviewPublicationStore({(_OWNER, "demo-review"): 1}))
+    return _loopback_only(create_review_app(registry=registry, authenticator=_LocalDemoIdentity()))
+
+
+def create_postgres_demo_review_app() -> FastAPI:
+    """Explicit local PostgreSQL demo; read only its operator-supplied DSN file."""
+    settings = Settings.from_environment({
+        "AI_AGENT_PERSISTENCE": "postgres",
+        "AI_AGENT_POSTGRES_DSN_FILE": os.environ.get("AI_AGENT_REVIEW_DEMO_DSN_FILE", ""),
+    })
+    app = create_postgres_review_app(
+        settings=settings,
+        registry_factory=lambda persistence: _demo_registry(
+            PostgresReviewPublicationStore(persistence.pool, {(_OWNER, "demo-review"): 1}),
+        ),
+        authenticator=_LocalDemoIdentity(),
+    )
+    return _loopback_only(app)
+
+
+def _demo_registry(publisher: ReviewPublisher) -> AsyncReviewToolRegistry:
     knowledge = InMemoryKnowledgeBase()
     knowledge.add(Document(
         id="review-disclosure", title="合成资料审查规则",
@@ -49,7 +74,7 @@ def create_demo_review_app() -> FastAPI:
             StaticBrowserAddressResolver({"review.demo.test": ("93.184.216.34",)})
         ),
     )
-    registry = create_multisource_review_registry(
+    return create_multisource_review_registry(
         catalog=ReviewResourceCatalog(
             images={"demo-image": ReviewImageAsset("demo-image", _OWNER, _demo_png())},
             pages={"demo-page": ReviewPageFixture("demo-page", _OWNER, _ORIGIN + "/facts")},
@@ -57,9 +82,11 @@ def create_demo_review_app() -> FastAPI:
         vision_agent=MultimodalVisionAgent(OfflineVisionModel(), timeout_ms=1_000),
         knowledge_base=knowledge,
         page_reader=BrowserReviewPageReader(BrowserAgent(allowed_origins=[_ORIGIN]), driver),
-        publisher=InMemoryReviewPublicationStore({(_OWNER, "demo-review"): 1}),
+        publisher=publisher,
     )
-    app = create_review_app(registry=registry, authenticator=_LocalDemoIdentity())
+
+
+def _loopback_only(app: FastAPI) -> FastAPI:
     app.title = "Loopback synthetic review demo (no login)"
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
 

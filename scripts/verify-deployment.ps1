@@ -319,7 +319,7 @@ try {
         throw 'deployment health verification failed'
     }
 
-    if ((Read-DatabaseScalar -Query 'SELECT count(*) FROM app_schema_migrations') -ne '6') {
+    if ((Read-DatabaseScalar -Query 'SELECT count(*) FROM app_schema_migrations') -ne '8') {
         throw 'application migrations are incomplete'
     }
     if ((Read-DatabaseScalar -Query 'SELECT count(*) FROM knowledge_schema_migrations') -ne '1') {
@@ -559,7 +559,7 @@ try {
 
     Write-Host '[deployment] PASSED'
     Write-Host "[deployment] project=$ProjectName"
-    Write-Host '[deployment] migrations=6 knowledge_migrations=1 seed=1'
+    Write-Host '[deployment] migrations=8 knowledge_migrations=1 seed=1'
     if ($SkipDatabaseRegression) {
         Write-Host (
             '[deployment] database_integration=skipped_reused_m13_t4 ' +

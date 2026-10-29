@@ -6,7 +6,7 @@
 
 | 接口 | 合同 |
 | --- | --- |
-| `POST /api/durable/reviews` | 仅 create_review_app 显式注册；已认证 reviewer + Idempotency-Key，六字段请求，202 返回同一 durable Run |
+| `POST /api/durable/reviews` | 仅显式审查factory注册；已认证 reviewer + Idempotency-Key，六字段请求，202 返回同一 durable Run |
 | `GET /api/durable/runs/{run_id}` | 既有 snapshot 新增可空 `review`，身份和 owner 校验沿用现有实现 |
 | `POST /api/durable/runs/{run_id}/approvals/{approval_id}` | body 仍仅为 `decision: approve/reject`；服务端从既有等待事件恢复完整绑定；响应包含同一 review 投影 |
 | `GET /api/durable/runs/{run_id}/events` | 仍为同一 Run 的 SSE history；review.evidence.recorded 与 review.result 沿用 ADR-0044 事件 |
@@ -52,7 +52,7 @@ trust/status 与有界 citation_refs。投影不回显图片/OCR、网页、RAG 
 
 内存 HTTP factory 的 spec 仍在进程内。PostgreSQL factory 则使用 ADR-0045/migration 8 的私有 request
 Store，将 Run、counter、六字段 spec 原子创建，并在每次 run/resume 恢复绑定。原始 spec 不进入事件
-或 answer。Vue 创建/证据/审批视图与实际部署仍待实现。
+或 answer。Vue 创建/证据/审批视图复用同一 durable API，见下文演示入口。
 
 ## PostgreSQL 应用接线
 
@@ -75,4 +75,6 @@ Coordinator 注入 async approval façade。请求 spec 每次从 owned Run 的�
 
 验证入口：`python -B -m unittest backend.tests.test_review_application backend.tests.test_review_projection -v`；
 fixture HTTP 证据见 `V-20261029-001/002`，PostgreSQL 接线见 `V-20261029-004`。Vue 审查页面与独立
-loopback 演示入口见 `docs/m14-review-demo.md` 和 `V-20261029-005`；实际组合部署验收尚未完成。
+loopback内存演示见 `docs/m14-review-demo.md` 和 `V-20261029-005`；PG组合部署见
+`docs/m14-review-deployment.md`、`ADR-0047` 和 `V-20261029-006`。它使用本机后端/Chromium、Vue构建
+产物和持久PG容器，不是完整Docker backend/Nginx或生产登录证据。

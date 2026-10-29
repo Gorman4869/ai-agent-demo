@@ -1348,6 +1348,16 @@ Vue 审查页面与离线演示（2026-10-29）：
 - 前端15项、后端相关17项、真实审查Chromium1项、原研究E2E2项和Vue类型/构建通过；390px无横向
   溢出，见 `V-20261029-005`。尚未证明Vue+PostgreSQL+Chromium的组合部署或生产登录。
 
+本机PostgreSQL组合部署（2026-10-29）：
+
+- 新增显式PG demo factory与 `scripts/verify-review-deployment.ps1`；保留loopback身份限制和默认内存入口。
+  使用已安装本机后端/Chromium、Vue dist preview、缓存PG镜像/命名卷，不下载浏览器或改原M13容器入口。
+- 已通过同Run创建→等待→重开后端→刷新→批准→重开后端→刷新、SSE重放与重复审批409；第二Run拒绝
+  不发布。SQL确认8条迁移、2个spec、1次publication、revision2、1个completed publish及6条evidence。
+- 见 `V-20261029-006`、`ADR-0047` 和 `docs/m14-review-deployment.md`；已验证可复现本机组合部署，
+  未验证完整Linux backend/Nginx/Chromium镜像、生产身份、PG重启或进行中工具hard-kill。
+- 下一步汇总现有架构、演示、评测/成本、威胁、故障、迁移与证据索引；尚不推进T7/T8或宣称T6完成。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

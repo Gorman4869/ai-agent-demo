@@ -5406,3 +5406,44 @@ Starlette TestClient deprecation 继续保留，未为该 warning 安装新依�
 - 没有新依赖、真实账号、个人数据、远程写入或学习者进度修改。未重跑完整PostgreSQL/全仓门，
   没有证明 Vue→PostgreSQL→真实 Chromium 的组合部署；下一步处理该集成与作品集材料。KI-034仍open。
 - 收尾 continuity 退出0：52个稳定任务、199个Markdown；最终 `git diff --check` 退出0。
+
+## V-20261029-006：M14-T6 本机 PostgreSQL 组合部署与进程重启
+
+- 日期2026-10-29，Asia/Shanghai；计划2.0；M14-T6 / in_progress；base HEAD `2129d0d`，开始工作区干净。
+- A类部署/持久化/身份边界，C类本地Docker与Chromium；本轮按2–4小时时间盒，不扩展到完整Linux镜像。
+- Python3.12.10、Node22.16.0、npm10.9.2、PowerShell7.6.5、Docker Engine29.3.1；沿用现有依赖。
+- 本机缓存没有Linux Chromium组合镜像。本轮选择已安装的本机后端/Chromium、Vue生产构建的preview、
+  既有deployment Compose的PostgreSQL服务及命名卷；不是完整Docker backend/Nginx部署或生产登录。
+
+| 命令/检查 | 退出码 | 实际结果 |
+| --- | ---: | --- |
+| `npm.cmd run test:unit; npm.cmd run build`（frontend，恢复） | 0 | 15/15；vue-tsc/Vite通过，22 modules，1.05s build |
+| `python -B -m unittest backend.tests.test_review_demo backend.tests.test_review_application backend.tests.test_review_projection backend.tests.test_deployment_contract -q` | 0 | 25/25，0.827s；既有Starlette/httpx弃用提示，未安装替代库 |
+| `.\node_modules\.bin\playwright.cmd test --config playwright.review.config.ts`（frontend） | 0 | 原内存审查链1/1，10.8s |
+| `.\scripts\verify-review-deployment.ps1`，前两次 | 1 | 后端启动前失败；安全诊断为StoreUnavailableError。核对本地Uvicorn/Psycopg源码，Windows默认Proactor不兼容异步PG |
+| 同一脚本，显式 `--loop asyncio:SelectorEventLoop` 后第三次 | 1 | 实际创建/三源/重启/恢复审批已运行；测试误把UI的8字符Run缩写当完整UUID，修正断言，不改UI |
+| 同一脚本，第四次 | 0 | 唯一project `ai-agent-demo-m14-39716-344bcd93`；build通过，组合Chromium1/1，25.7s（case23.0s）；SQL全部通过 |
+| 已有project资源拒绝/环境恢复故障检查 | 1→0 | 首次确认资源保留，但PowerShell将缺失变量恢复为空字符串；改为对缺失变量移除Env项，复验资源保留与环境恢复均通过 |
+| PowerShell Parser、`git diff --check` | 0 | 两个验证脚本语法和whitespace通过；既有LF/CRLF提示 |
+
+### 组合证据与范围
+
+- 真实链：Vue `dist` →本机Vite preview同源代理→显式PG review factory→同Run Vision/RAG/真实
+  Playwright fixture Browser→精确审批→PostgreSQL publication。视觉Offline，规则为本地合成corpus。
+- 等待审批后终止并重新启动本测试拥有的后端进程，刷新恢复同一完整Run ID、相同三条evidence和
+  waiting状态；批准后再次重启并刷新，publication和版本2不变。不是进行中工具hard-kill恢复证据。
+- 相同审批第二次提交409；同Run SSE从1连续重放，三条evidence、review.result、run.completed齐全。
+  第二个Run拒绝人工审批，刷新仍needs_attention、publication为空。
+- SQL确认app migrations=8、私有spec=2、publication=1、head revision=2、completed publish execution=1、
+  evidence events=6。没有把两次Run拼成一次审查；第二个Run专门验证拒绝分支。
+- 两次重启测试期间的SSE ECONNRESET为主动停止后端导致，重开后snapshot/SSE均恢复；非未解释异常。
+- 组合截图 `frontend/test-results/review-postgres/published-after-restart.png` 已用view_image检查。
+  Playwright trace关闭，未保存会话恢复或连接文件内容；生成物保持Git忽略。
+- 每次组合尝试均清理本次唯一project的容器、命名卷、网络与临时secret文件。资源故障检查另建唯一
+  guard标签网络，确认脚本拒绝接管且未删除它，再由检查者删除该自建网络；还原原进程环境。
+- 复审重点：loopback/client/Host不放宽、DSN只从专用文件显式启用、settings固定offline/manual、
+  publisher使用同PG pool、重启不重放副作用、只清理拥有的资源。没有新依赖/镜像拉取/模型请求/push。
+- `KI-036`：旧M13脚本仍按6条migration检查、API合同仍有Vue待实现陈述，已同步到当前8条/现有UI。
+  没有重新声称完整M13容器门通过。未重跑全仓/完整PG套件；KI-034作品集材料仍待整理，KI-035未改。
+- 收尾continuity退出0：52个稳定任务、202个Markdown；两个PowerShell脚本Parser与最终diff检查退出0。
+  Docker按M14前缀检查无遗留容器/卷/网络，15174/18082/55435无监听；原有两个PG容器保持healthy。

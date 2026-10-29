@@ -42,7 +42,7 @@ npm.cmd run build
 - 缺 Node/已安装的 Chromium：按项目已有安装流程处理，不会静默下载或自动改依赖。
 - `review_revision_conflict`：核对当前发布revision，重新确认业务字段和审批；不要循环重放发布。
 - `tool_result_unknown`：停止自动发布，查同一 Run 的 ToolExecution/publication；前端不把它显示成已发布。
-- 跨进程数据库恢复使用 create_postgres_review_app，见 m14-review-api-contract；本教程仅内存演示。
+- 跨进程数据库组合演示见 [本机PostgreSQL部署](m14-review-deployment.md)；本教程的默认命令仅使用内存。
 
 真实工作映射：后台内容审核可通过相同创建、证据、审批、快照/SSE流程恢复页面。常见错误是把拟定结论
 当审批、把completed当published，或刷新后重新创建一个Run。实践时核对Run ID、三源摘要和发布revision。
