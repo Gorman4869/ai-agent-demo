@@ -3,7 +3,7 @@
 - 更新时间：2026-10-29，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`2129d0d`
+- 最近已确认实现提交：`d847c77`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -85,9 +85,9 @@
 | 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
 | 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
 | 执行协议 | 已完成缺口审计与 `ADR-0044` 合同冻结；后续按离线同 Run 真实工具、API/UI/部署、材料与演练三个纵切推进，默认保持离线 |
-| 当前修改 | 显式loopback PG演示与隔离部署脚本已接通：Vue构建产物、本机后端/受控Chromium、持久PG容器；已验证两次后端进程重启、审批/发布恢复、重复审批409及拒绝不发布 |
-| 验证 | `V-20261029-006`，base `2129d0d`：恢复前端15/15与build，后端相关25/25，原内存审查E2E1/1，组合E2E1/1；SQL确认单次publication与8条migration，资源归属/环境恢复通过；保留启动循环与测试断言失败事实 |
-| 下一动作 | 汇总M14-T6作品集架构、演示脚本、评测/成本、威胁、故障、迁移和证据索引，并以本机PG组合部署命令做故障定位/答辩材料；不将其写成完整Linux镜像或生产登录证据 |
+| 当前修改 | 架构与20分钟演示按真实四工具/PG恢复链改写；新增九类产物报告，补成本/威胁/实际故障/迁移与证据索引，修正阶段页上传/PNG与M7/M14档位漂移；运行代码未改 |
+| 验证 | `V-20261029-007`，base `d847c77`：恢复25/25、精确演示故障2/2、默认离线评测7/7；文档11个V引用/11个Python目标和链接检查通过。本轮未重新执行PG/Chromium，相关实证仍引用006 |
+| 下一动作 | 按20分钟脚本完成M14-T6工程演练与最终交付核对：同Run发布/拒绝、PG进程重开、故障定位与材料口径；只有证据齐全才推进T6，不提前进入T7/T8，不代填个人学习或声称已有视频 |
 
 ## 里程碑状态
 
@@ -101,7 +101,7 @@
 | M11 上下文、记忆与真实 RAG | `in_progress` | M11-T1–T7 已 `verified`；M11-T7 OpenAI 首次授权被 Provider `quota_or_rate_limited` 阻断后，DashScope 已完成隔离 64 维真实写入/查询 E4，费用来源 unknown；M11-T8 学习交付未启动 |
 | M12 统一 Run 与实时 UI | `verified` | M12-T1–T6 `verified`；durable HTTP/SSE、同 Run citation/usage、Vue 状态机、真实 Chromium 恢复、legacy 兼容 ADR、迁移记录和完整课程验收均有证据；旧端点按 ADR-0033 隔离保留 |
 | M13 生产工程闭环 | `verified` | M13-T1–M13-T7 `verified`；Run 可观测、稳定错误/重试、七层 CI、单实例部署、代码进程安全、负载故障演练、故障手册和课程验收均有证据；保留的 HA/硬取消/硬成本门边界不被伪装完成 |
-| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 已完成四工具/持久审批、API/UI、本机PG/Chromium组合部署与后端重启；下一步汇总作品集材料与演练；`KI-034` 继续跟踪，T7–T8 未开始 |
+| M14 高级 Agent 作品集 | `in_progress` | M14-T1–T5 已 `verified`；T6 四工具/持久审批、API/UI、本机PG组合与作品集材料已形成，下一步工程演练/交付核对；`KI-034` 继续跟踪，T7–T8 未开始 |
 
 ## 当前阻塞
 
@@ -115,7 +115,7 @@
   `V-20261023-001`：
   独立 registry 已让三个只读工具真实进入既有 Vision、RAG、Browser；Runtime 已在同一 durable Run
   生成 evidence、执行预算、完成精确审批 resume、ToolExecution 仲裁、PostgreSQL publication CAS、
-  双进程 result-unknown 对账和安全结果。`V-20261029-001/002/003/004/005/006` 又实现 snapshot、私有spec、memory/PostgreSQL HTTP、Vue和本机PG组合部署。后者为构建后的Vue preview、本机Python/Chromium和PG命名卷容器；未构建完整Linux backend/Nginx/Chromium镜像或生产身份。旧capstone材料仍需重写；本轮只在等待/发布稳定点重开后端，没有PG重启或进行中工具hard-kill证据。
+  双进程 result-unknown 对账和安全结果。`V-20261029-001/002/003/004/005/006` 又实现 snapshot、私有spec、memory/PostgreSQL HTTP、Vue和本机PG组合部署。后者为构建后的Vue preview、本机Python/Chromium和PG命名卷容器；未构建完整Linux backend/Nginx/Chromium镜像或生产身份。`V-20261029-007`已整合capstone材料，但20分钟完整工程演练、视频录制与真人答辩未在本轮执行。此前仅在等待/发布稳定点重开后端，没有PG重启或进行中工具hard-kill证据。
 - M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
   `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
   fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
@@ -289,8 +289,9 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-29-m14-t6-postgres-review-deployment.md`，再核对 `V-20261029-006`、
-`ADR-0044/0045/0046/0047`、`backend/app/review_demo.py`、`docs/m14-review-deployment.md`、
-`KI-034/KI-035/KI-036` 和 M14-T6 实施计划。下一动作汇总capstone作品集材料与演练。
+`docs/continuity/handoffs/2026-10-29-m14-t6-portfolio-materials.md`，再核对 `V-20261029-007`、
+`ADR-0044–0047`、`docs/capstone-architecture.md`、`docs/capstone-demo-script.md`、
+`docs/m14-portfolio-report.md`、`docs/m14-review-deployment.md`、`KI-034` 和 M14-T6计划。
+下一动作进行T6工程演练/交付核对；PG/Chromium实证引用006，若重跑则追加新V记录。
 没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
 查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。

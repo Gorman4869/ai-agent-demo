@@ -5447,3 +5447,38 @@ Starlette TestClient deprecation 继续保留，未为该 warning 安装新依�
   没有重新声称完整M13容器门通过。未重跑全仓/完整PG套件；KI-034作品集材料仍待整理，KI-035未改。
 - 收尾continuity退出0：52个稳定任务、202个Markdown；两个PowerShell脚本Parser与最终diff检查退出0。
   Docker按M14前缀检查无遗留容器/卷/网络，15174/18082/55435无监听；原有两个PG容器保持healthy。
+
+## V-20261029-007：M14-T6 作品集材料与证据口径整合
+
+- 日期2026-10-29，Asia/Shanghai；计划2.0；M14-T6 / in_progress；base HEAD `d847c77`，开始Git干净。
+- B类纯材料整合，30–90分钟；未改后端/前端运行代码、依赖、部署脚本或学习者progress；无新架构决策，
+  继续引用ADR-0044–0047。按最新handoff先跑最小恢复门，不重复构建/PG/Browser链。
+- 先核对实际review_demo/Runtime/工具/投影与历史verification，发现旧capstone架构/演示、阶段页的上传/
+  重编码陈述及M7链接存在档位漂移，先记入KI-034，再更新材料；历史交接与旧验证保持不改。
+
+| 命令/检查 | 退出码 | 实际结果 |
+| --- | ---: | --- |
+| `python -B -m unittest backend.tests.test_review_demo backend.tests.test_review_application backend.tests.test_review_projection backend.tests.test_deployment_contract -q` | 0 | 恢复25/25，0.763s；既有Starlette/httpx弃用提示，无安装行为 |
+| `python -B -m unittest backend.tests.test_review_runtime.MultisourceReviewRuntimeTest.test_result_unknown_without_record_is_terminal_and_not_replayed backend.tests.test_review_tools.ReviewToolContractTest.test_changed_evidence_digest_cannot_reuse_publish_approval -v` | 0 | 演示精确故障命令2/2，0.141s；离线UNKNOWN不重放、换证据不能复用审批 |
+| `python -B -m backend.app.evals.advanced_agent` | 0 | 默认offline 7/7预期、3/7 completed、4/4安全、1/7需审批fixture、9步；dataset digest未变，usage/cost null |
+| Python标准库单次文档引用检查（stdin脚本） | 0 | 6个教学/报告文件、11个verification引用及11个Python目标全部存在；AST核对模块/类/方法，代码围栏成对 |
+| `scripts/check-continuity.ps1`、`git diff --check`（材料初稿） | 0 | 52个稳定任务、203个Markdown；链接和whitespace通过；只有既有LF/CRLF提示 |
+
+### 材料交付与复审
+
+- 重写capstone-architecture为实际四工具/私有spec/持久审批/EventStore/publication拓扑和时序，区分
+  默认研究、内存审查、本机PG组合、历史M13容器与独立在线视觉；没有画成已部署队列/生产登录。
+- 重写20分钟capstone-demo-script，提供本机交互、PG自动化、安全失败、固定评测和答辩步骤；内存与PG
+  演示分别登记Run，不拼接证据，不把脚本存在说成已有视频或真人演练。
+- 新增m14-portfolio-report：九类产物索引、三源/四工具业务、7案例口径、unknown成本/覆盖率/容量公式、
+  威胁表、真实Windows启动/测试/环境清理复盘及研究助手迁移/撤回清单。
+- M14阶段页改为server-owned资料ID，PNG guard与完整decoder/重编码待增强项分开；M7保留12–15分钟
+  基础训练，同时明确最终M14脚本20分钟。缺口审计标为2026-10-21历史基线，不再冒充当前状态。
+- 聚焦复审：追踪同Run与四工具、审批与拟定结论区别、UNKNOWN不重试、私有topic明文存储、M Plan
+  usage归属、生产身份/完整Linux镜像/进行中工具hard-kill边界；历史数字均附对应V编号。
+- 本轮没有PG/Chromium/在线模型/镜像下载/视频录制/全仓门；PG重启链仍引用V-20261029-006。
+  文档Mermaid拓扑/时序已人工核对，未另安装或执行图形渲染器。没有Provider使用、Key使用或push。
+- KI-034材料漂移已修正，工程演练/最终材料验收仍待下一原子步骤，因此T6保持in_progress；不推进T7/T8，
+  不把个人学习验收写入工程完成结论。KI-035等既有缺口未改。
+- 收尾continuity退出0：52个稳定任务、204个Markdown；最终diff检查退出0。针对当前架构/脚本/阶段/
+  status的旧持久化、上传和重编码声明检索无命中（rg退出1表示未匹配，不是验证失败）。
