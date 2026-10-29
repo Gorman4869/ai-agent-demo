@@ -26,6 +26,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from backend.app.api.review_projection import project_review_snapshot
 from backend.app.api.schemas import (
     DocumentRequest,
     DocumentResponse,
@@ -1036,6 +1037,7 @@ async def _to_durable_run_response(
         answer=record.answer,
         citations=_durable_citations(events),
         usage=_durable_usage(observability.cost_summary),
+        review=project_review_snapshot(record, events),
         error=(
             DurableRunErrorResponse(
                 code=record.failure.code,

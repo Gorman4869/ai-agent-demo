@@ -5232,3 +5232,36 @@ Container/API/UI，不运行 Provider。
 
 下一原子动作是先冻结显式作品集 API/UI 请求、审批恢复、SSE/snapshot 投影合同，再复用既有 durable
 Run 链实现最小后端与 Vue 纵切；不得改 legacy 双写或调用在线 Provider。
+
+## V-20261029-001：M14-T6 durable review snapshot 投影
+
+- 日期：2026-10-29，Asia/Shanghai；计划 2.0；任务 M14-T6 / in_progress。
+- 等级：A，公共 HTTP 合同与同 Run 证据，2–4 小时时间盒内的 snapshot 原子步骤。
+- 基线：`10bec14`；开始时工作树干净。全程离线、无 Key、无 Provider 请求，无新增依赖。
+- 恢复：读取 continuity/plan/ADR-0044/handoff/verification/后端规约；恢复单测 26/26 通过。
+
+### 命令与实际结果
+
+所有 unittest 使用项目 `.venv/Scripts/python.exe -B -m unittest`，经批准在沙箱外执行。
+
+| 命令/检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `backend.tests.test_review_projection backend.tests.test_durable_run_projection -q` 首轮 | 1 | 13 项中 1 失败；旧 Runtime fixture 的 policy 摘要为占位值，投影正确拒绝与实际主题摘要不一致的结果；本次 API fixture 改用真实主题 SHA-256 |
+| 投影、durable projection、review runtime、publication 首轮修正回归 | 0 | 39/39 通过 |
+| 再加入 persistent API 与 legacy `test_api` 的扩大回归 | 1 | 74 项中 73 通过；legacy `test_index_document_and_research_with_citation` 的 approved 断言失败 |
+| 在进程内用 `git show HEAD:backend/app/api/schemas.py`、`git show HEAD:backend/app/main.py` 的源码覆盖同名 module namespace，再单跑上述 legacy 用例 | 1 | 修改前 HEAD 同样失败，1/1 失败；未改工作区；登记 KI-035，未修改学习者 RAG |
+| `backend.tests.test_review_projection backend.tests.test_durable_run_projection backend.tests.test_review_runtime backend.tests.test_review_publication backend.tests.test_persistent_run_api -q` 最终 | 0 | 47/47 通过，0.981s；含新增投影 10 项，覆盖 HTTP 批准/拒绝/unknown、跨 owner 404、共享 Store 的新 app 查询 |
+| `python -B -m compileall -q backend/app/api/review_projection.py backend/app/api/schemas.py backend/app/main.py backend/tests/test_review_projection.py` | 0 | 语法通过 |
+| `git diff --check` | 0 | 无 whitespace error，既有 LF/CRLF 提示 |
+
+### 结论与范围
+
+- durable snapshot 新增可空 `review`：按已有事件重建三源 evidence、canonical bundle 和 publication，
+  保留未知 usage；完整匹配 digest/ref 且 Run completed 才显示 published。
+- 复用现有 HTTP approval 端点，真实进入 Coordinator/Review Runtime/ToolExecution 链；工具边界为
+  确定性测试 fixture。不同 owner 查询仍为 404，不重新检索图片、网页或知识库。
+- 新 app 测试复用相同内存 Store，仅证明重新投影，不代表操作系统重启或 PostgreSQL E4。
+- 按 backend-code-adapter 保持 Pydantic DTO 和独立纯投影函数；新增字段遵循 ADR-0044，无架构替换。
+- 未实现 review create、opt-in composition、Vue 页面或部署；本轮未运行 PostgreSQL/Chromium/
+  前端构建/全仓发布门。KI-034 保持 open，legacy RAG 既有失败由 KI-035 跟踪。
+- 收尾 `scripts/check-continuity.ps1` 退出 0：52 个稳定任务、192 个 Markdown；最终 diff 检查通过。

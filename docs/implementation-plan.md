@@ -1304,6 +1304,14 @@ PostgreSQL publication 与重启对账纵切（2026-10-23）：
 - 本纵切仍未接默认 Container/API/UI 或部署作品集，也没有在线模型、公网 Browser、Provider usage/cost
   证据；下一纵切进入显式作品集 API/UI 之前先冻结其公开请求、审批恢复和 snapshot 投影合同。
 
+Snapshot HTTP 纵切（2026-10-29）：
+
+- durable response 增加可空 review 投影，复用同 Run 持久 evidence 和 result；完整 digest/ref 匹配且
+  Run completed 才显示 published，拒绝/过期/unknown 等显示 needs_attention，usage 保持 unknown/null。
+- 复用既有 approval HTTP 验证批准、拒绝、结果未知、跨 owner 404 和共享 Store 的新应用读取；
+  相关 47 项通过，见 `V-20261029-001`。扩大 legacy 回归发现既有 RAG 失败并以旧 HEAD 复现，KI-035 跟踪。
+- 读取合同见 `docs/m14-review-api-contract.md`；创建、opt-in composition、Vue 和部署仍待实现。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

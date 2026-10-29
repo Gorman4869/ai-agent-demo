@@ -1,9 +1,9 @@
 # 当前实施状态
 
-- 更新时间：2026-10-23，Asia/Shanghai
+- 更新时间：2026-10-29，Asia/Shanghai
 - 计划版本：2.0
 - 当前分支：`main`
-- 最近已确认实现提交：`aa334e8`
+- 最近已确认实现提交：`10bec14`
 - 最近 M8-T4 文档闭环提交：`176d182`
 - 本轮协议修改基线提交：`ed5ad9c`
 - M8-T5 验证基线提交：`f83cbbc`
@@ -85,9 +85,9 @@
 | 目标 | 汇总高级 Agent 生产级作品集：真实业务场景、架构、可复现部署、演示脚本、评测、成本、威胁模型、故障复盘和迁移说明 |
 | 设计依据 | 实施计划 M14-T6；M14-T1–T5 已验证 Browser、Vision、在线 smoke 和固定评测证据 |
 | 执行协议 | 已完成缺口审计与 `ADR-0044` 合同冻结；后续按离线同 Run 真实工具、API/UI/部署、材料与演练三个纵切推进，默认保持离线 |
-| 当前修改 | 新增 migration 7 与显式 `PostgresReviewPublicationStore`；复用 PostgreSQL Run/Event/Approval/ToolExecution 完成双进程 commit-crash/recover；遗留 RUNNING 只做权威对账，存在则完成、不存在则 UNKNOWN，均不重放 publisher；未接默认 Container/API/UI |
-| 验证 | `V-20261023-001`：恢复基线 23/23，新增专项 26/26，真实 PostgreSQL 聚焦 12/12、完整 121/121，相关离线回归 173/173；compileall 通过。未运行在线 Provider、公网 Browser、真实 Chromium 或完整仓库发布门 |
-| 下一动作 | 冻结并实现显式作品集 API/UI 纵切：复用 durable Run/approval/SSE/snapshot，不接 legacy 双写；先做后端请求/投影合同与最小 Vue 展示，再进入部署复验 |
+| 当前修改 | durable snapshot 新增 review 投影与公开读取合同，复用既有 approval HTTP；证据完整且 result digest/ref 匹配并 completed 才显示 published；创建、opt-in composition 和 Vue 尚未接线 |
+| 验证 | `V-20261029-001`，base `10bec14`：恢复 26/26，最终定向 47/47；扩大回归 74 项中 1 项 legacy RAG 失败，在旧 HEAD 同样复现，KI-035 跟踪；compileall 通过 |
+| 下一动作 | 实现显式 review create 与 opt-in composition：持久绑定六个业务字段、复用 create 幂等与 async approval，先验证创建到审批再接 Vue；读取合同见 docs/m14-review-api-contract.md |
 
 ## 里程碑状态
 
@@ -115,7 +115,7 @@
   `V-20261023-001`：
   独立 registry 已让三个只读工具真实进入既有 Vision、RAG、Browser；Runtime 已在同一 durable Run
   生成 evidence、执行预算、完成精确审批 resume、ToolExecution 仲裁、PostgreSQL publication CAS、
-  双进程 result-unknown 对账和安全结果。默认 Container、API/UI 与部署尚未实现；旧 capstone 材料仍需重写。
+  双进程 result-unknown 对账和安全结果。`V-20261029-001` 又实现 durable review snapshot 和既有审批 HTTP 投影；创建、默认 Container、Vue 与部署尚未实现，旧 capstone 材料仍需重写。
 - M14-T5 见 `V-20261021-001/002`：同一固定数据集现在同时支持默认 `offline` 与显式
   `playwright_fixture`，后者让 Browser 正常案例进入真实 Chromium；两者仍只使用 server-owned
   fixture，不开放公网或个人 profile。Vision 使用确定性模型，human-intervention rate 只是需要精确
@@ -289,8 +289,8 @@
 ## 恢复入口
 
 若本轮中断，先阅读 `docs/continuity/course-delivery-playbook.md` 与最新
-`docs/continuity/handoffs/2026-10-23-m14-t6-postgres-publication-restart.md`，再核对 `V-20261023-001`、
-`ADR-0044`、`backend/app/advanced/review_runtime.py`、`backend/app/advanced/postgres_review_publication.py`、
-`KI-034` 和 M14-T6 实施计划。下一动作先冻结显式作品集 API/UI 合同，再做最小后端与 Vue 纵切；
-不得改 legacy 双写或提前扩张部署。没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
+`docs/continuity/handoffs/2026-10-29-m14-t6-review-snapshot.md`，再核对 `V-20261029-001`、
+`ADR-0044`、`backend/app/api/review_projection.py`、`docs/m14-review-api-contract.md`、
+`KI-034/KI-035` 和 M14-T6 实施计划。下一动作实现显式 review create/持久 Run spec 与 opt-in composition；
+随后接 Vue。没有新的 Provider 授权：不得读取 Key、访问 MiniMax、
 查询套餐余量、尝试 DeepSeek、升级依赖、修改学习者 `docs/progress.md` 或 push。

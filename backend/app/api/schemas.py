@@ -62,6 +62,42 @@ class DurableRunErrorResponse(BaseModel):
     retryable: bool
 
 
+class ReviewEvidenceResponse(BaseModel):
+    source_kind: Literal["image", "policy", "page"]
+    source_ref: str
+    content_sha256: str
+    content_bytes: int
+    trust: str
+    status: Literal["verified", "degraded"]
+    citation_refs: list[str] = Field(default_factory=list)
+
+
+class ReviewPublicationResponse(BaseModel):
+    publication_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+    revision: int = Field(strict=True, ge=1)
+    status: Literal["published"]
+
+
+class ReviewUsageResponse(BaseModel):
+    provider: None = None
+    total_tokens: None = None
+    estimated_cost: None = None
+    currency: None = None
+    cost_source: Literal["unknown"] = "unknown"
+
+
+class ReviewSnapshotResponse(BaseModel):
+    scenario_version: Literal["multisource-review-v1"] = "multisource-review-v1"
+    review_id: str
+    outcome: Literal[
+        "in_progress", "waiting_approval", "published", "needs_attention", "failed"
+    ]
+    evidence: list[ReviewEvidenceResponse]
+    evidence_bundle_digest: str | None = None
+    publication: ReviewPublicationResponse | None = None
+    usage: ReviewUsageResponse = Field(default_factory=ReviewUsageResponse)
+
+
 class DurableRunResponse(BaseModel):
     id: str
     run_id: str
@@ -77,6 +113,7 @@ class DurableRunResponse(BaseModel):
     answer: str | None = None
     citations: list[EvidenceResponse] = Field(default_factory=list)
     usage: ModelUsageResponse | None = None
+    review: ReviewSnapshotResponse | None = None
     error: DurableRunErrorResponse | None = None
     created_at: datetime
     updated_at: datetime
