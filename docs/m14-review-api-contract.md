@@ -6,6 +6,7 @@
 
 | 接口 | 合同 |
 | --- | --- |
+| `POST /api/durable/reviews` | 仅 create_review_app 显式注册；已认证 reviewer + Idempotency-Key，六字段请求，202 返回同一 durable Run |
 | `GET /api/durable/runs/{run_id}` | 既有 snapshot 新增可空 `review`，身份和 owner 校验沿用现有实现 |
 | `POST /api/durable/runs/{run_id}/approvals/{approval_id}` | body 仍仅为 `decision: approve/reject`；服务端从既有等待事件恢复完整绑定；响应包含同一 review 投影 |
 | `GET /api/durable/runs/{run_id}/events` | 仍为同一 Run 的 SSE history；review.evidence.recorded 与 review.result 沿用 ADR-0044 事件 |
@@ -27,14 +28,34 @@ trust/status 与有界 citation_refs。投影不回显图片/OCR、网页、RAG 
 当前场景仅支持离线 unknown usage：provider/total_tokens/estimated_cost/currency 为 null，cost_source
 为 unknown。后续在线 usage 必须另有本 Run 的已验证合同，不能混入历史 smoke。
 
-## 后续创建与页面接线
+## 显式内存创建
 
-review create 和 opt-in composition 尚未实现。下一步从已认证 reviewer 与 server-owned 目录构造
-ADR-0044 的六个业务字段，绑定到同一 durable Run 的 request digest 和持久配置；不能由通用 message
-解析控制字段。须先解决跨进程可信 Run spec 恢复和 async approval 接线，再接 Vue 创建/证据/审批视图。
+`backend.app.advanced.review_application.create_review_app(registry=..., authenticator=...)` 接受服务端已装配
+的四工具 registry，创建独立内存 composition。默认 create_app 不开启该入口。
+
+请求示例：
+
+```json
+{
+  "review_id": "review-1",
+  "expected_revision": 3,
+  "image_asset_id": "hero-image",
+  "policy_topic": "review disclosure",
+  "page_fixture_id": "policy-page",
+  "requested_decision": "approve"
+}
+```
+
+缺认证 401，缺 reviewer 403，缺/非法 Idempotency-Key 400；额外控制字段或非法业务字段 422。
+同一 owner/key/六字段重放返回原 Run，任一业务字段变化 409。资源存在性由 owner-scoped 工具目录
+检查，缺资产 Run 安全失败。创建后使用返回的 id 查询、订阅 SSE、提交审批；无需另建第二条执行链。
+
+spec 仅存在进程内，只写 digest 到 durable Run，原始 spec 未写入事件或 answer。PostgreSQL 创建、
+跨进程可信 Run spec 恢复、async approval 和 Vue 接线仍待实现，不能用 publication adapter 的持久化
+证据推断该 factory 可跨进程恢复。下一步先完成这些后端接线，再接 Vue 创建/证据/审批视图。
 
 真实业务映射：审核页面刷新后通过 snapshot 恢复证据和结论，SSE 负责增量展示。常见错误是把 completed
 等同 published，或用当前网页重新拼历史 evidence。排查时核对同 Run 事件、bundle digest 与既有错误码。
 
-验证入口：`python -B -m unittest backend.tests.test_review_projection -v`；fixture HTTP 证据见
-`V-20261029-001`。本材料不声称创建接口、Vue 页面或部署验收已完成。
+验证入口：`python -B -m unittest backend.tests.test_review_application backend.tests.test_review_projection -v`；
+fixture HTTP 证据见 `V-20261029-001/002`。本材料不声称 PostgreSQL 创建、Vue 页面或部署验收已完成。

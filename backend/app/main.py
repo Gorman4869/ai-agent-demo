@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.app.api.review_projection import project_review_snapshot
+from backend.app.advanced.review_application import InMemoryReviewRuns
 from backend.app.api.schemas import (
     DocumentRequest,
     DocumentResponse,
@@ -45,6 +46,7 @@ from backend.app.api.schemas import (
     ModelUsageResponse,
     ResearchRequest,
     ResearchResponse,
+    ReviewRunRequest,
     RunErrorResponse,
     RunObservationResponse,
     RunRequest,
@@ -139,7 +141,12 @@ def create_app(
     *,
     settings: Settings | None = None,
     container: ApplicationContainer | None = None,
+    review_runs: InMemoryReviewRuns | None = None,
 ) -> FastAPI:
+    if review_runs is not None and (
+        container is None or container.run_store is not review_runs.run_store
+    ):
+        raise ValueError("review composition must share the application Run Store")
     legacy_dependencies = (
         run_service,
         knowledge_base,
@@ -439,6 +446,43 @@ def create_app(
                 access.created_capability if created.created else None
             ),
         )
+
+    if review_runs is not None:
+        @app.post(
+            "/api/durable/reviews", response_model=DurableRunResponse,
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+        async def create_review_run(
+            request: ReviewRunRequest,
+            principal: Principal = Depends(current_principal),
+            idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        ) -> DurableRunResponse:
+            if not principal.authenticated:
+                raise HTTPException(status_code=401, detail="Authentication required")
+            if "reviewer" not in principal.roles:
+                raise HTTPException(status_code=403, detail="Reviewer role required")
+            if idempotency_key is None or not _is_valid_durable_idempotency_key(idempotency_key):
+                raise HTTPException(status_code=400, detail="Valid Idempotency-Key is required")
+            try:
+                created = await review_runs.create(
+                    request.spec, owner_id=principal.principal_id,
+                    idempotency_key=idempotency_key,
+                )
+            except IdempotencyConflictError as error:
+                raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with an existing Run") from error
+            if created.created:
+                task = asyncio.create_task(
+                    current_container().run_commands.execute(
+                        created.record.id, owner_id=principal.principal_id,
+                        execution_context=ToolExecutionContext(
+                            principal_id=principal.principal_id, roles=principal.roles,
+                            approval_store=current_container().approval_store,
+                        ),
+                    ),
+                    name=f"review-run:{created.record.id}",
+                )
+                task.add_done_callback(_consume_durable_task_result)
+            return await _to_durable_run_response(current_container(), created.record)
 
     @app.get("/api/durable/runs/{run_id}", response_model=DurableRunResponse)
     async def get_durable_run(

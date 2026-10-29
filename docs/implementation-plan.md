@@ -1312,6 +1312,15 @@ Snapshot HTTP 纵切（2026-10-29）：
   相关 47 项通过，见 `V-20261029-001`。扩大 legacy 回归发现既有 RAG 失败并以旧 HEAD 复现，KI-035 跟踪。
 - 读取合同见 `docs/m14-review-api-contract.md`；创建、opt-in composition、Vue 和部署仍待实现。
 
+显式内存创建纵切（2026-10-29）：
+
+- `create_review_app` 显式启用 POST /api/durable/reviews，strict 六字段请求构造可信 spec，owner/role
+  来自 Principal。六字段进入既有 Run request digest，幂等重放/冲突复用既有 RunStore。
+- HTTP 创建后实际经过离线 Vision/RAG/Browser、精确审批、publication CAS、snapshot/SSE，相关 92 项
+  通过；见 `V-20261029-002`。默认 create_app 不注册此端点。
+- factory 限内存；跨进程 spec 持久化与 async approval 接线须后续验证，不将 publication 持久化
+  等同完整 PostgreSQL 创建链。下一步先补该后端缺口，再接 Vue 与部署。
+
 ### M14-T7：30 项大纲最终审计
 
 - 依赖：M8–M14 所有任务达到各自验收门槛。

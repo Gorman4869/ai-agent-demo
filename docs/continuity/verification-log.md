@@ -5265,3 +5265,35 @@ Run 链实现最小后端与 Vue 纵切；不得改 legacy 双写或调用在线
 - 未实现 review create、opt-in composition、Vue 页面或部署；本轮未运行 PostgreSQL/Chromium/
   前端构建/全仓发布门。KI-034 保持 open，legacy RAG 既有失败由 KI-035 跟踪。
 - 收尾 `scripts/check-continuity.ps1` 退出 0：52 个稳定任务、192 个 Markdown；最终 diff 检查通过。
+
+## V-20261029-002：M14-T6 显式内存 review create
+
+- 日期：2026-10-29，Asia/Shanghai；计划 2.0；任务 M14-T6 / in_progress。
+- 等级 A，创建幂等与身份绑定；本原子步骤限内存 opt-in composition。base HEAD `34a5823`，开始工作树干净。
+- 读取最新 handoff、status、plan、ADR-0044、后端规约及实际 create/Container/Runtime/approval 代码。
+  延续 backend-code-adapter 的 dataclass、Pydantic 和窄依赖风格。
+- 没有在线模型、Key、Docker、数据库、Chromium、新依赖、远程写入或学习者进度修改。
+
+| 命令/检查 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `python -B -m unittest backend.tests.test_review_projection backend.tests.test_durable_run_projection backend.tests.test_review_runtime backend.tests.test_review_publication backend.tests.test_persistent_run_api -q`（沙箱外） | 0 | 恢复 47/47，0.801s |
+| `python -B -m unittest backend.tests.test_review_application -v`（沙箱外） | 0 | 首轮 5/5，0.316s |
+| `python -B -m unittest backend.tests.test_review_application backend.tests.test_review_tools backend.tests.test_review_projection backend.tests.test_durable_run_projection backend.tests.test_review_runtime backend.tests.test_review_publication backend.tests.test_persistent_run_api backend.tests.test_container -q`（沙箱外） | 0 | 最终 92/92，2.554s，含新增 6 项 create HTTP 专项 |
+| `python -B -m compileall -q backend/app/advanced/review_application.py backend/app/api/schemas.py backend/app/main.py backend/tests/test_review_application.py` | 0 | 语法通过 |
+| `git diff --check` | 0 | 无 whitespace error，既有 LF/CRLF 提示 |
+
+创建请求严格限定六个业务字段，边界构造一次 ReviewRunSpec。owner/role 只来自 Principal；六字段和
+scenario version 进入既有 Run request digest。同 key 同请求返回同一 Run；任一字段变化为 409。
+`create_review_app` 显式装配共享 Run/Event/ToolExecution Store 和 registry；普通 create_app 不注册
+review create。Runtime 按 owner + run binding 执行，不读取 message 来构造业务参数。
+
+HTTP 用例的 Vision/RAG/Browser 均进入真实领域适配器；Vision 为 OfflineVisionModel，Browser driver
+为确定性 fixture，publication 为内存 CAS。创建→三源 evidence→精确审批→发布→snapshot/SSE 已验证，
+同时验证拒绝、越权、缺 Key header、控制字段注入、缺资产和幂等冲突。这里的 Key header 是请求幂等键，
+不是 Provider 密钥。已有 Starlette TestClient deprecation 和 asyncio slow-task 提示保留。
+
+本次没有失败命令。没有重跑已由旧 HEAD 证明的 KI-035 legacy RAG 用例，也未声称它已修复。
+跨进程 spec 持久化和 async approval 接线尚未完成，因此本 factory 明确只支持内存；PostgreSQL
+publication 旧证据不能替代完整 PostgreSQL 应用创建链。Vue、部署、全仓发布门均未验证。
+- 补全公开类型标注并隔离默认 app 测试环境后，创建专项最终 6/6 通过，0.400s；退出 0。
+- 收尾 continuity 退出 0：52 个稳定任务、193 个 Markdown；diff 检查退出 0。

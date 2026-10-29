@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+
+from backend.app.advanced.review_runtime import ReviewRunSpec
 
 
 class HealthResponse(BaseModel):
@@ -54,6 +56,27 @@ class DurableRunRequest(BaseModel):
         ):
             raise ValueError("session_id has an invalid format")
         return value
+
+
+class ReviewRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    review_id: str
+    expected_revision: int
+    image_asset_id: str
+    policy_topic: str = Field(repr=False)
+    page_fixture_id: str
+    requested_decision: Literal["approve", "reject", "needs_review"]
+    _spec: ReviewRunSpec = PrivateAttr()
+
+    @model_validator(mode="after")
+    def validate_spec(self) -> ReviewRunRequest:
+        self._spec = ReviewRunSpec(**self.model_dump())
+        return self
+
+    @property
+    def spec(self) -> ReviewRunSpec:
+        return self._spec
 
 
 class DurableRunErrorResponse(BaseModel):
