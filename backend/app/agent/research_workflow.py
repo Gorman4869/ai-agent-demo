@@ -34,9 +34,13 @@ def create_research_workflow(knowledge_base: KnowledgeBase):
         return {"evidence": evidence}
 
     def draft(state: ResearchWorkflowState) -> dict[str, str]:
-        if not state["evidence"]:
+        # 创建局部 selected_evidence，保留 score >= threshold 的条目。
+        # 用它判断证据是否充足，并拼接 excerpts。
+        # 保留原始 state["evidence"]；`retrieve()`、`review()` 和图结构保持原样。
+        selected_evidence = [item for item in state["evidence"] if item["score"] >= threshold]
+        if not selected_evidence:
             return {"draft": "没有检索到足够证据，暂不回答。"}
-        excerpts = "；".join(str(item["excerpt"]) for item in state["evidence"])
+        excerpts = "；".join(str(item["excerpt"]) for item in selected_evidence)
         return {"draft": f"根据课程资料：{excerpts}"}
 
     def review(state: ResearchWorkflowState) -> dict[str, object]:

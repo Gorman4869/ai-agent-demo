@@ -71,3 +71,11 @@
 - 实际分数与测试证据：对查询 `Agent 如何连接工具` 的 UTF-8 只读探针得到 `mcp=0.353553`、`tool-security=0.246183`。新测试初次按预期失败于 `approved=True`；修正后定向测试 1 项通过，`./.venv/Scripts/python.exe -B -m unittest backend.tests.test_research_workflow -v` 共 3 项通过。
 - 我能解释：evidence 非空不代表资料足以回答问题，模糊/词面匹配会产生误召回；审核应检查 `max_score >= threshold`，而不是要求所有 Top-K 都达标，否则弱候选会否决充分证据。当前 `0.3` 只适用于这组确定性离线样本，真实业务必须结合检索实现、资料分布和误放行/误拒绝成本重新评估。
 - 当前边界：本次只完成离线 RAG 的最低相关性审核门；没有进入长期记忆、数据库、pgvector、在线模型或生产级阈值评测。
+
+## 2026-11-06：Stage 3 / 第 6 周 RAG · K051 证据选择、生成与拒答完成
+
+- 实现证据：在 `backend/app/agent/research_workflow.py` 的 `draft()` 中，用局部 `selected_evidence` 保留 `score >= threshold` 的候选。只有入选片段进入草稿，筛选后为空则返回无足够证据的草稿提示。原始 `state["evidence"]` 保留用于追溯；`retrieve()`、`review()` 和图结构未改。
+- 测试证据：学习者用 `test_writer_excludes_low_relevance_evidence_from_answer` 复现了低分片段“校验权限”混入答案。修复后用同一用例确认：两条原始候选仍保留，回答获准，答案包含 MCP 内容且不包含低分片段。学习者运行定向测试 1 项通过，`./.venv/Scripts/python.exe -B -m unittest backend.tests.test_research_workflow -v` 回归 4 项通过。
+- 复述证据：writer 决定草稿用哪些证据，reviewer 决定草稿能否放行。以阈值 `0.3` 为例，`0.8` 进入草稿，`0.1` 不进入；其他审核条件满足时由 `finalize()` 输出获准草稿。保留两条原始候选，便于解释哪些内容被召回、哪些被排除。
+- 反例与边界：KI-035 中正确 MCP 片段的离线分数复算约为 `0.288675`，仍低于 `0.3`。召回正确资料不等于能放行；阈值依赖打分尺度，校准时应同时考虑误拒答和误召回。KI-035 仍开放，本次未重跑 legacy API 测试，不把工作流回归当作 API 回归通过。
+- 下次学习：同一阶段从手册第 13 章 K052「引用、重排与失败定位」继续，一次只推进一个概念；本次未进入 K052。

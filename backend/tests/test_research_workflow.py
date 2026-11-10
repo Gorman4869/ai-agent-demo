@@ -94,7 +94,7 @@ class ResearchWorkflowTest(unittest.TestCase):
                 "answer": "",
             }
         )
-        print(result)
+        # print(result)
         # 原始 result["evidence"] 仍有两条，证明误召回信息没有被覆盖或隐藏。
         self.assertEqual(2, len(result["evidence"]))
         # 最高分 >= 0.3，最低分 < 0.3，证明这是“一强一弱”的混合候选。
